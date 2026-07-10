@@ -35,6 +35,7 @@ import {
   Signature,
   Sparkles,
   User,
+  UserCheck,
   Users,
 } from "lucide-react"
 
@@ -212,6 +213,7 @@ export async function ClientProfileContent({ clientId }: Props) {
 
         <AiAssistantSidebar
           fullName={fullName}
+          clientId={client.id}
           activePacket={activePacket}
           complianceScore={complianceScore}
           auditReadiness={auditReadiness}
@@ -706,8 +708,9 @@ function ClientSearch({ fullName }: { fullName: string }) {
   )
 }
 
-function AiAssistantSidebar({ fullName, activePacket, complianceScore, auditReadiness, aiRiskScore, validationIssues, pendingSignatures, upcomingReviews }: {
+function AiAssistantSidebar({ fullName, clientId, activePacket, complianceScore, auditReadiness, aiRiskScore, validationIssues, pendingSignatures, upcomingReviews }: {
   fullName: string
+  clientId: string
   activePacket?: { id: string } | null
   complianceScore: number
   auditReadiness: number
@@ -787,6 +790,7 @@ function AiAssistantSidebar({ fullName, activePacket, complianceScore, auditRead
           <Link href="/validation"><QuickAction icon={<ClipboardCheck className="h-4 w-4" />} label="Run Validation" /></Link>
           <Link href="/reports"><QuickAction icon={<BarChart3 className="h-4 w-4" />} label="Generate Report" /></Link>
           <Link href="/audit"><QuickAction icon={<History className="h-4 w-4" />} label="View Audit" /></Link>
+          <Link href={`/clients/${clientId}/portal-access`}><QuickAction icon={<UserCheck className="h-4 w-4" />} label="Portal Access" /></Link>
         </CardContent>
       </Card>
 

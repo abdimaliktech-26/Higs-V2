@@ -191,6 +191,30 @@ export const notificationQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
 })
 
+// ── Portal Invitations (Stage 2) ──
+export const createPortalInvitationSchema = z.object({
+  clientId: cuid,
+  clientContactId: z.string().max(50).optional().or(z.literal("")),
+  invitedEmail: z.string().email().max(255),
+  relationship: z.string().min(1, "Relationship is required").max(200),
+  accessRole: z.enum(["CLIENT_SELF", "GUARDIAN", "PARENT", "RESPONSIBLE_PARTY", "AUTHORIZED_REPRESENTATIVE"]),
+  canViewDocuments: z.boolean().default(false),
+  canViewAppointments: z.boolean().default(false),
+  canMessageCareTeam: z.boolean().default(false),
+})
+
+export const portalInvitationQuerySchema = z.object({
+  clientId: z.string().max(50).optional(),
+  status: z.string().max(20).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+})
+
+export const activatePortalAccountSchema = z.object({
+  token: z.string().min(32).max(200),
+  password: z.string().min(10, "Password must be at least 10 characters").max(200),
+})
+
 // ── Helper: Wrapped parse that returns error string ──
 export function validate<T>(schema: z.ZodType<T>, input: unknown): { success: true; data: T } | { success: false; error: string } {
   const result = schema.safeParse(input)

@@ -1049,6 +1049,7 @@ model PortalInvitation {
   clientId               String                 @map("client_id")
   clientContactId        String?                @map("client_contact_id")
   invitedEmail           String                 @map("invited_email")
+  relationship           String?
   invitedByUserId        String                 @map("invited_by_user_id")
   accessRole             PortalAccessRole       @map("access_role")
   requestedPermissions   Json                   @default("{}") @map("requested_permissions")

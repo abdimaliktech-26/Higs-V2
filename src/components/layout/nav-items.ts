@@ -37,6 +37,7 @@ import {
   LineChart,
   PieChart,
   Scale,
+  UserCheck,
 } from "lucide-react"
 
 export const mainNavItems: NavItem[] = [
@@ -66,6 +67,7 @@ export const secondaryNavItems: NavItem[] = [
   { title: "User Management", href: "/settings/users", icon: Users, roles: ["SUPER_ADMIN", "ORG_ADMIN"] },
   { title: "Billing & Subscription", href: "/billing", icon: CreditCard, roles: ["SUPER_ADMIN", "ORG_ADMIN", "BILLING_ADMIN"] },
   { title: "Compliance Rules Engine", href: "/compliance-rules-engine", icon: Scale, roles: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"] },
+  { title: "Portal Access", href: "/settings/portal-access", icon: UserCheck, roles: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"] },
 ]
 
 export const stubNavItems: NavItem[] = [
