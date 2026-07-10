@@ -94,6 +94,73 @@ enum AuditAction {
   ACCESS_DENIED
 }
 
+enum PortalUserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  DEACTIVATED
+}
+
+enum PortalAccessRole {
+  CLIENT_SELF
+  GUARDIAN
+  PARENT
+  RESPONSIBLE_PARTY
+  AUTHORIZED_REPRESENTATIVE
+}
+
+enum PortalAccessStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REVOKED
+}
+
+enum PortalInvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum PortalAuthorityType {
+  LEGAL_GUARDIAN
+  PARENT_OF_MINOR
+  POWER_OF_ATTORNEY
+  CONSERVATOR
+  SELF
+  ORG_DESIGNATED
+}
+
+enum PortalDocumentAccessLevel {
+  VIEW
+  VIEW_AND_DOWNLOAD
+}
+
+enum PortalAuditAction {
+  PORTAL_LOGIN_SUCCESS
+  PORTAL_LOGIN_FAILED
+  PORTAL_INVITATION_SENT
+  PORTAL_INVITATION_ACCEPTED
+  PORTAL_INVITATION_REVOKED
+  PORTAL_ACCESS_GRANTED
+  PORTAL_ACCESS_REVOKED
+  PORTAL_DOCUMENT_VIEWED
+  PORTAL_DOCUMENT_DOWNLOADED
+  PORTAL_DOCUMENT_UPLOADED
+  PORTAL_SIGNATURE_VIEWED
+  PORTAL_SIGNATURE_SIGNED
+  PORTAL_SIGNATURE_DECLINED
+  PORTAL_PERMISSION_CHANGED
+  PORTAL_CONSENT_ACCEPTED
+  PORTAL_CONSENT_REVOKED
+  PORTAL_SESSION_REVOKED
+  PORTAL_EMAIL_VERIFIED
+  PORTAL_PASSWORD_RESET
+  PORTAL_EMAIL_CHANGED
+}
+
 model Organization {
   id        String             @id @default(cuid())
   name      String
@@ -104,56 +171,68 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  members  OrganizationMember[]
-  clients  Client[]
-  packets  Packet[]
-  programs Program[]
-  packetTemplates  PacketTemplate[]
-  documentTemplates DocumentTemplate[]
-  validationRules ValidationRule[]
-  validationResults ValidationResult[]
-  signatureRequests SignatureRequest[]
-  approvalRequests ApprovalRequest[]
+  members             OrganizationMember[]
+  clients             Client[]
+  packets             Packet[]
+  programs            Program[]
+  packetTemplates     PacketTemplate[]
+  documentTemplates   DocumentTemplate[]
+  validationRules     ValidationRule[]
+  validationResults   ValidationResult[]
+  signatureRequests   SignatureRequest[]
+  approvalRequests    ApprovalRequest[]
   supportingDocuments SupportingDocument[]
-  aiExtractions AiExtraction[]
-  aiRecommendations AiRecommendation[]
-  notifications Notification[]
-  auditEvents AuditEvent[]
+  aiExtractions       AiExtraction[]
+  aiRecommendations   AiRecommendation[]
+  notifications       Notification[]
+  auditEvents         AuditEvent[]
+  portalClientAccess  PortalClientAccess[]
+  portalInvitations   PortalInvitation[]
+  portalNotifications PortalNotification[]
+  portalAuditEvents   PortalAuditEvent[]
 
   @@map("organizations")
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
+  id            String    @id @default(cuid())
+  email         String    @unique
   name          String?
   image         String?
   passwordHash  String?
   emailVerified DateTime?
-  isSuperAdmin  Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isSuperAdmin  Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  accounts     Account[]
-  sessions     Session[]
-  memberships  OrganizationMember[]
-  staffAssignments StaffAssignment[]
-  uploadedTemplates DocumentTemplate[] @relation("TemplateUploads")
-  assignedPackets Packet[] @relation("AssignedPackets")
-  pdfVersionsCreated PdfVersion[]
-  documentCommentsCreated DocumentComment[]
-  validationRuns ValidationResult[] @relation("ValidationRuns")
-  resolvedValidationIssues ValidationIssue[] @relation("IssueResolver")
-  requestedSignatures SignatureRequest[] @relation("SignatureRequestor")
-  signatureEventsCreated SignatureEvent[]
-  submittedApprovals ApprovalRequest[] @relation("ApprovalSubmitter")
-  approvalsDecided ApprovalRequest[] @relation("Approver")
-  approvalEventsCreated ApprovalEvent[]
-  uploadedSupportingDocuments SupportingDocument[]
-  aiExtractionRuns AiExtraction[] @relation("AiExtractionRuns")
-  appliedAiRecommendations AiRecommendation[] @relation("AppliedAiRecommendations")
-  notifications Notification[]
-  createdAuditEvents AuditEvent[] @relation("AuditEventActor")
+  accounts                        Account[]
+  sessions                        Session[]
+  memberships                     OrganizationMember[]
+  staffAssignments                StaffAssignment[]
+  uploadedTemplates               DocumentTemplate[]          @relation("TemplateUploads")
+  assignedPackets                 Packet[]                    @relation("AssignedPackets")
+  pdfVersionsCreated              PdfVersion[]
+  documentCommentsCreated         DocumentComment[]
+  validationRuns                  ValidationResult[]          @relation("ValidationRuns")
+  resolvedValidationIssues        ValidationIssue[]           @relation("IssueResolver")
+  requestedSignatures             SignatureRequest[]          @relation("SignatureRequestor")
+  signatureEventsCreated          SignatureEvent[]
+  submittedApprovals              ApprovalRequest[]           @relation("ApprovalSubmitter")
+  approvalsDecided                ApprovalRequest[]           @relation("Approver")
+  approvalEventsCreated           ApprovalEvent[]
+  uploadedSupportingDocuments     SupportingDocument[]
+  aiExtractionRuns                AiExtraction[]              @relation("AiExtractionRuns")
+  appliedAiRecommendations        AiRecommendation[]          @relation("AppliedAiRecommendations")
+  notifications                   Notification[]
+  createdAuditEvents              AuditEvent[]                @relation("AuditEventActor")
+  portalAccessGranted             PortalClientAccess[]        @relation("PortalAccessGrantedBy")
+  portalAccessRevoked             PortalClientAccess[]        @relation("PortalAccessRevokedBy")
+  portalInvitationsSent           PortalInvitation[]          @relation("PortalInvitationSentBy")
+  portalInvitationsRevoked        PortalInvitation[]          @relation("PortalInvitationRevokedBy")
+  portalAuthorizationsVerified    PortalAccessAuthorization[] @relation("PortalAuthorizationVerifiedBy")
+  portalAuthorizationsRevoked     PortalAccessAuthorization[] @relation("PortalAuthorizationRevokedBy")
+  portalSupportingDocumentsShared SupportingDocument[]        @relation("PortalDocumentSharedBy")
+  portalPacketDocumentsShared     PacketDocument[]            @relation("PortalPacketDocumentSharedBy")
 
   @@map("users")
 }
@@ -179,11 +258,11 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  organizationId String? @map("organization_id")
+  id             String   @id @default(cuid())
+  sessionToken   String   @unique
+  userId         String
+  expires        DateTime
+  organizationId String?  @map("organization_id")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -252,24 +331,24 @@ model Program {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  enrollments   ClientProgram[]
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments     ClientProgram[]
   packetTemplates PacketTemplate[]
-  packets Packet[]
+  packets         Packet[]
 
   @@unique([organizationId, code])
   @@map("programs")
 }
 
 model ClientProgram {
-  id        String   @id @default(cuid())
-  clientId  String   @map("client_id")
-  programId String   @map("program_id")
-  status    String   @default("active")
+  id        String    @id @default(cuid())
+  clientId  String    @map("client_id")
+  programId String    @map("program_id")
+  status    String    @default("active")
   startDate DateTime? @map("start_date")
   endDate   DateTime? @map("end_date")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
   program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
@@ -279,35 +358,38 @@ model ClientProgram {
 }
 
 model ClientContact {
-  id             String   @id @default(cuid())
-  clientId       String   @map("client_id")
-  firstName      String   @map("first_name")
-  lastName       String   @map("last_name")
-  relationship   String
-  email          String?
-  phone          String?
-  address        String?
-  isEmergency    Boolean  @default(false) @map("is_emergency")
-  isGuardian     Boolean  @default(false) @map("is_guardian")
-  notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           String   @id @default(cuid())
+  clientId     String   @map("client_id")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  relationship String
+  email        String?
+  phone        String?
+  address      String?
+  isEmergency  Boolean  @default(false) @map("is_emergency")
+  isGuardian   Boolean  @default(false) @map("is_guardian")
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client                  Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  portalClientAccess      PortalClientAccess[]
+  portalInvitations       PortalInvitation[]
+  portalSignatureRequests SignatureRequest[]
 
   @@map("client_contacts")
 }
 
 model StaffAssignment {
-  id             String   @id @default(cuid())
-  clientId       String   @map("client_id")
-  staffUserId    String   @map("staff_user_id")
-  role           String   @default("case_manager")
-  isPrimary      Boolean  @default(false) @map("is_primary")
-  startDate      DateTime? @map("start_date")
-  endDate        DateTime? @map("end_date")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id          String    @id @default(cuid())
+  clientId    String    @map("client_id")
+  staffUserId String    @map("staff_user_id")
+  role        String    @default("case_manager")
+  isPrimary   Boolean   @default(false) @map("is_primary")
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
   staff  User   @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
@@ -317,16 +399,16 @@ model StaffAssignment {
 }
 
 model Diagnosis {
-  id         String   @id @default(cuid())
-  clientId   String   @map("client_id")
-  code       String
+  id          String    @id @default(cuid())
+  clientId    String    @map("client_id")
+  code        String
   description String?
-  type       String   @default("primary")
-  isActive   Boolean  @default(true)
-  onsetDate  DateTime? @map("onset_date")
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  type        String    @default("primary")
+  isActive    Boolean   @default(true)
+  onsetDate   DateTime? @map("onset_date")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
@@ -334,37 +416,42 @@ model Diagnosis {
 }
 
 model Client {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  firstName       String   @map("first_name")
-  lastName        String   @map("last_name")
-  dateOfBirth     DateTime? @map("date_of_birth")
-  email           String?
-  phone           String?
-  address         String?
-  city            String?
-  state           String?
-  zipCode         String?  @map("zip_code")
-  mcadId          String?  @map("mcad_id")
-  ssn             String?  @map("ssn")
-  gender          String?
-  preferredLanguage String? @map("preferred_language")
-  status          String   @default("active")
-  program         String?
-  fundingSource   String?  @map("funding_source")
-  notes           String?
-  archivedAt      DateTime? @map("archived_at")
-  archivedReason  String?  @map("archived_reason")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String    @id @default(cuid())
+  organizationId    String    @map("organization_id")
+  firstName         String    @map("first_name")
+  lastName          String    @map("last_name")
+  dateOfBirth       DateTime? @map("date_of_birth")
+  email             String?
+  phone             String?
+  address           String?
+  city              String?
+  state             String?
+  zipCode           String?   @map("zip_code")
+  mcadId            String?   @map("mcad_id")
+  ssn               String?   @map("ssn")
+  gender            String?
+  preferredLanguage String?   @map("preferred_language")
+  status            String    @default("active")
+  program           String?
+  fundingSource     String?   @map("funding_source")
+  notes             String?
+  archivedAt        DateTime? @map("archived_at")
+  archivedReason    String?   @map("archived_reason")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packets      Packet[]
-  enrollments  ClientProgram[]
-  contacts     ClientContact[]
-  assignments  StaffAssignment[]
-  diagnoses    Diagnosis[]
-  supportingDocuments SupportingDocument[]
+  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packets              Packet[]
+  enrollments          ClientProgram[]
+  contacts             ClientContact[]
+  assignments          StaffAssignment[]
+  diagnoses            Diagnosis[]
+  supportingDocuments  SupportingDocument[]
+  portalAccess         PortalClientAccess[]
+  portalInvitations    PortalInvitation[]
+  portalAuthorizations PortalAccessAuthorization[]
+  portalNotifications  PortalNotification[]
+  portalAuditEvents    PortalAuditEvent[]
 
   @@index([organizationId, status])
   @@index([organizationId, firstName, lastName])
@@ -374,60 +461,60 @@ model Client {
 }
 
 model DocumentTemplate {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  name            String
-  description     String?
-  formType        String   @map("form_type") @default("dhs")
-  packetTypes     Json     @default("[]")
-  program         String?
-  status          String   @default("draft")
-  version         Int      @default(1)
-  fileUrl         String   @map("file_url")
-  fileKey         String   @map("file_key")
-  fileSize        Int?     @map("file_size")
-  mimeType        String   @map("mime_type") @default("application/pdf")
-  uploadedById    String   @map("uploaded_by_id")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  description    String?
+  formType       String   @default("dhs") @map("form_type")
+  packetTypes    Json     @default("[]")
+  program        String?
+  status         String   @default("draft")
+  version        Int      @default(1)
+  fileUrl        String   @map("file_url")
+  fileKey        String   @map("file_key")
+  fileSize       Int?     @map("file_size")
+  mimeType       String   @default("application/pdf") @map("mime_type")
+  uploadedById   String   @map("uploaded_by_id")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  uploadedBy User         @relation("TemplateUploads", fields: [uploadedById], references: [id])
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packetDocuments PacketDocument[]
+  uploadedBy         User                     @relation("TemplateUploads", fields: [uploadedById], references: [id])
+  organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packetDocuments    PacketDocument[]
   packetTemplateDocs PacketTemplateDocument[]
 
   @@map("document_templates")
 }
 
 model PacketTemplate {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  name            String
-  description     String?
-  packetType      String   @map("packet_type")
-  programId       String?  @map("program_id")
-  status          String   @default("active")
-  isDefault       Boolean  @default(false) @map("is_default")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  description    String?
+  packetType     String   @map("packet_type")
+  programId      String?  @map("program_id")
+  status         String   @default("active")
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  program          Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
-  requiredDocs     PacketTemplateDocument[]
-  packetInstances  Packet[]
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  program         Program?                 @relation(fields: [programId], references: [id], onDelete: SetNull)
+  requiredDocs    PacketTemplateDocument[]
+  packetInstances Packet[]
 
   @@map("packet_templates")
 }
 
 model PacketTemplateDocument {
-  id               String   @id @default(cuid())
-  packetTemplateId String   @map("packet_template_id")
-  documentTemplateId String @map("document_template_id")
-  required         Boolean  @default(true)
-  sortOrder        Int      @default(0) @map("sort_order")
-  createdAt        DateTime @default(now())
+  id                 String   @id @default(cuid())
+  packetTemplateId   String   @map("packet_template_id")
+  documentTemplateId String   @map("document_template_id")
+  required           Boolean  @default(true)
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now())
 
-  packetTemplate  PacketTemplate   @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
+  packetTemplate   PacketTemplate   @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
   documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
 
   @@unique([packetTemplateId, documentTemplateId])
@@ -435,31 +522,31 @@ model PacketTemplateDocument {
 }
 
 model Packet {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  clientId        String   @map("client_id")
-  packetTemplateId String? @map("packet_template_id")
-  programId       String?  @map("program_id")
-  packetType      String   @map("packet_type")
-  status          String   @default("draft")
-  assignedToId    String?  @map("assigned_to_id")
-  dueDate         DateTime? @map("due_date")
-  completedAt     DateTime? @map("completed_at")
-  metadata        Json     @default("{}")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  clientId         String    @map("client_id")
+  packetTemplateId String?   @map("packet_template_id")
+  programId        String?   @map("program_id")
+  packetType       String    @map("packet_type")
+  status           String    @default("draft")
+  assignedToId     String?   @map("assigned_to_id")
+  dueDate          DateTime? @map("due_date")
+  completedAt      DateTime? @map("completed_at")
+  metadata         Json      @default("{}")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client         Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  packetTemplate PacketTemplate?     @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
-  program        Program?            @relation(fields: [programId], references: [id], onDelete: SetNull)
-  assignedTo     User?               @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
-  documents      PacketDocument[]
-  validationResults ValidationResult[]
-  signatureRequests SignatureRequest[]
-  approvalRequests ApprovalRequest[]
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client              Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  packetTemplate      PacketTemplate?      @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
+  program             Program?             @relation(fields: [programId], references: [id], onDelete: SetNull)
+  assignedTo          User?                @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  documents           PacketDocument[]
+  validationResults   ValidationResult[]
+  signatureRequests   SignatureRequest[]
+  approvalRequests    ApprovalRequest[]
   supportingDocuments SupportingDocument[]
-  aiRecommendations AiRecommendation[]
+  aiRecommendations   AiRecommendation[]
 
   @@index([organizationId, status])
   @@index([organizationId, clientId])
@@ -469,51 +556,56 @@ model Packet {
 }
 
 model PacketDocument {
-  id                 String   @id @default(cuid())
-  packetId           String   @map("packet_id")
-  documentTemplateId String   @map("document_template_id")
-  status             String   @default("pending")
-  isRequired         Boolean  @default(true) @map("is_required")
-  sortOrder          Int      @default(0) @map("sort_order")
-  currentVersion     Int      @default(0) @map("current_version")
-  completedAt        DateTime? @map("completed_at")
+  id                 String                     @id @default(cuid())
+  packetId           String                     @map("packet_id")
+  documentTemplateId String                     @map("document_template_id")
+  status             String                     @default("pending")
+  isRequired         Boolean                    @default(true) @map("is_required")
+  sortOrder          Int                        @default(0) @map("sort_order")
+  currentVersion     Int                        @default(0) @map("current_version")
+  completedAt        DateTime?                  @map("completed_at")
   notes              String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  portalVisible      Boolean                    @default(false) @map("portal_visible")
+  portalVisibleAt    DateTime?                  @map("portal_visible_at")
+  sharedByUserId     String?                    @map("shared_by_user_id")
+  portalAccessLevel  PortalDocumentAccessLevel? @map("portal_access_level")
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
 
-  packet           Packet           @relation(fields: [packetId], references: [id], onDelete: Cascade)
-  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
-  fields           PdfField[]
-  versions         PdfVersion[]
-  comments         DocumentComment[]
-  aiExtractions AiExtraction[]
+  packet            Packet             @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  documentTemplate  DocumentTemplate   @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  fields            PdfField[]
+  versions          PdfVersion[]
+  comments          DocumentComment[]
+  aiExtractions     AiExtraction[]
   aiRecommendations AiRecommendation[]
   validationResults ValidationResult[]
   signatureRequests SignatureRequest[]
+  sharedBy          User?              @relation("PortalPacketDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([packetId, documentTemplateId])
   @@map("packet_documents")
 }
 
 model PdfField {
-  id             String   @id @default(cuid())
-  packetDocumentId String @map("packet_document_id")
-  name           String
-  fieldType      String   @default("text") @map("field_type")
-  value          String?
-  pageNumber     Int      @default(1) @map("page_number")
-  posX           Float?   @map("pos_x")
-  posY           Float?   @map("pos_y")
-  width          Float?
-  height         Float?
-  confidence     Float?   @default(1.0)
-  source         String   @default("manual")
-  isRequired     Boolean  @default(false) @map("is_required")
-  sortOrder      Int      @default(0) @map("sort_order")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(cuid())
+  packetDocumentId String   @map("packet_document_id")
+  name             String
+  fieldType        String   @default("text") @map("field_type")
+  value            String?
+  pageNumber       Int      @default(1) @map("page_number")
+  posX             Float?   @map("pos_x")
+  posY             Float?   @map("pos_y")
+  width            Float?
+  height           Float?
+  confidence       Float?   @default(1.0)
+  source           String   @default("manual")
+  isRequired       Boolean  @default(false) @map("is_required")
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  packetDocument    PacketDocument     @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
   signatureRequests SignatureRequest[]
 
   @@map("pdf_fields")
@@ -551,19 +643,19 @@ model DocumentComment {
 }
 
 model ValidationRule {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  name            String
-  description     String?
-  category        String   @default("required_field")
-  severity        String   @default("critical")
-  program         String?
-  packetType      String?
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  description    String?
+  category       String   @default("required_field")
+  severity       String   @default("critical")
+  program        String?
+  packetType     String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   issues       ValidationIssue[]
 
   @@unique([organizationId, name])
@@ -571,41 +663,41 @@ model ValidationRule {
 }
 
 model ValidationResult {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  packetId        String?  @map("packet_id")
-  packetDocumentId String? @map("packet_document_id")
-  score           Float    @default(100.0)
-  totalIssues     Int      @default(0) @map("total_issues")
-  criticalCount   Int      @default(0) @map("critical_count")
-  warningCount    Int      @default(0) @map("warning_count")
-  infoCount       Int      @default(0) @map("info_count")
-  ranById         String   @map("ran_by_id")
-  ranAt           DateTime @default(now()) @map("ran_at")
+  id               String   @id @default(cuid())
+  organizationId   String   @map("organization_id")
+  packetId         String?  @map("packet_id")
+  packetDocumentId String?  @map("packet_document_id")
+  score            Float    @default(100.0)
+  totalIssues      Int      @default(0) @map("total_issues")
+  criticalCount    Int      @default(0) @map("critical_count")
+  warningCount     Int      @default(0) @map("warning_count")
+  infoCount        Int      @default(0) @map("info_count")
+  ranById          String   @map("ran_by_id")
+  ranAt            DateTime @default(now()) @map("ran_at")
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packet         Packet?         @relation(fields: [packetId], references: [id], onDelete: Cascade)
-  packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
-  ranBy          User            @relation("ValidationRuns", fields: [ranById], references: [id])
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet         Packet?           @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument?   @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  ranBy          User              @relation("ValidationRuns", fields: [ranById], references: [id])
   issues         ValidationIssue[]
 
   @@map("validation_results")
 }
 
 model ValidationIssue {
-  id                 String   @id @default(cuid())
-  validationResultId String   @map("validation_result_id")
-  validationRuleId   String?  @map("validation_rule_id")
-  severity           String   @default("critical")
-  status             String   @default("open")
+  id                 String    @id @default(cuid())
+  validationResultId String    @map("validation_result_id")
+  validationRuleId   String?   @map("validation_rule_id")
+  severity           String    @default("critical")
+  status             String    @default("open")
   message            String
   correction         String?
   targetType         String?
-  targetId           String?  @map("target_id")
-  fieldName          String?  @map("field_name")
-  createdAt          DateTime @default(now())
+  targetId           String?   @map("target_id")
+  fieldName          String?   @map("field_name")
+  createdAt          DateTime  @default(now())
   resolvedAt         DateTime? @map("resolved_at")
-  resolvedById       String?  @map("resolved_by_id")
+  resolvedById       String?   @map("resolved_by_id")
 
   validationResult ValidationResult @relation(fields: [validationResultId], references: [id], onDelete: Cascade)
   validationRule   ValidationRule?  @relation(fields: [validationRuleId], references: [id], onDelete: SetNull)
@@ -615,33 +707,39 @@ model ValidationIssue {
 }
 
 model SignatureRequest {
-  id               String   @id @default(cuid())
-  organizationId   String   @map("organization_id")
-  packetId         String?  @map("packet_id")
-  packetDocumentId String?  @map("packet_document_id")
-  pdfFieldId       String?  @map("pdf_field_id")
-  signerName       String   @map("signer_name")
-  signerEmail      String   @map("signer_email")
-  signerRole       String   @map("signer_role")
-  signerType       String   @map("signer_type")
-  status           String   @default("pending")
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  packetId         String?   @map("packet_id")
+  packetDocumentId String?   @map("packet_document_id")
+  pdfFieldId       String?   @map("pdf_field_id")
+  signerName       String    @map("signer_name")
+  signerEmail      String    @map("signer_email")
+  signerRole       String    @map("signer_role")
+  signerType       String    @map("signer_type")
+  status           String    @default("pending")
   dueDate          DateTime? @map("due_date")
-  consentText      String?  @map("consent_text")
+  consentText      String?   @map("consent_text")
   signedAt         DateTime? @map("signed_at")
-  signedIp         String?  @map("signed_ip")
-  signedUserAgent  String?  @map("signed_user_agent")
-  declineReason    String?  @map("decline_reason")
+  signedIp         String?   @map("signed_ip")
+  signedUserAgent  String?   @map("signed_user_agent")
+  declineReason    String?   @map("decline_reason")
   notes            String?
-  requestedById    String   @map("requested_by_id")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  portalUserId     String?   @map("portal_user_id")
+  clientContactId  String?   @map("client_contact_id")
+  accessGrantId    String?   @map("access_grant_id")
+  requestedById    String    @map("requested_by_id")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packet         Packet?         @relation(fields: [packetId], references: [id], onDelete: Cascade)
-  packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
-  pdfField       PdfField?       @relation(fields: [pdfFieldId], references: [id], onDelete: SetNull)
-  requestedBy    User            @relation("SignatureRequestor", fields: [requestedById], references: [id])
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet         Packet?             @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument?     @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  pdfField       PdfField?           @relation(fields: [pdfFieldId], references: [id], onDelete: SetNull)
+  requestedBy    User                @relation("SignatureRequestor", fields: [requestedById], references: [id])
   events         SignatureEvent[]
+  portalSigner   PortalUser?         @relation("PortalSigner", fields: [portalUserId], references: [id], onDelete: SetNull)
+  signerContact  ClientContact?      @relation(fields: [clientContactId], references: [id], onDelete: SetNull)
+  accessGrant    PortalClientAccess? @relation("PortalSignerAccessGrant", fields: [accessGrantId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status])
   @@index([packetId])
@@ -665,35 +763,35 @@ model SignatureEvent {
 }
 
 model ApprovalRequest {
-  id               String   @id @default(cuid())
-  organizationId   String   @map("organization_id")
-  packetId         String   @map("packet_id")
-  status           String   @default("pending")
-  submittedById    String   @map("submitted_by_id")
-  approverId       String?  @map("approver_id")
-  decisionNotes    String?  @map("decision_notes")
-  correctionReason String?  @map("correction_reason")
-  submittedAt      DateTime @default(now()) @map("submitted_at")
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  packetId         String    @map("packet_id")
+  status           String    @default("pending")
+  submittedById    String    @map("submitted_by_id")
+  approverId       String?   @map("approver_id")
+  decisionNotes    String?   @map("decision_notes")
+  correctionReason String?   @map("correction_reason")
+  submittedAt      DateTime  @default(now()) @map("submitted_at")
   decidedAt        DateTime? @map("decided_at")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packet       Packet       @relation(fields: [packetId], references: [id], onDelete: Cascade)
-  submittedBy  User         @relation("ApprovalSubmitter", fields: [submittedById], references: [id])
-  approver     User?        @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet       Packet          @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  submittedBy  User            @relation("ApprovalSubmitter", fields: [submittedById], references: [id])
+  approver     User?           @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
   events       ApprovalEvent[]
 
   @@map("approval_requests")
 }
 
 model ApprovalEvent {
-  id               String   @id @default(cuid())
-  approvalRequestId String @map("approval_request_id")
-  eventType        String   @map("event_type")
-  notes            String?
-  createdById      String?  @map("created_by_id")
-  createdAt        DateTime @default(now())
+  id                String   @id @default(cuid())
+  approvalRequestId String   @map("approval_request_id")
+  eventType         String   @map("event_type")
+  notes             String?
+  createdById       String?  @map("created_by_id")
+  createdAt         DateTime @default(now())
 
   approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
   createdBy       User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -702,83 +800,89 @@ model ApprovalEvent {
 }
 
 model SupportingDocument {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  clientId        String?  @map("client_id")
-  packetId        String?  @map("packet_id")
-  title           String
-  category        String   @default("supporting")
-  fileUrl         String   @map("file_url")
-  fileKey         String   @map("file_key")
-  fileSize        Int?     @map("file_size")
-  mimeType        String   @map("mime_type") @default("application/pdf")
-  status          String   @default("active")
-  description     String?
-  uploadedById    String   @map("uploaded_by_id")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String                     @id @default(cuid())
+  organizationId    String                     @map("organization_id")
+  clientId          String?                    @map("client_id")
+  packetId          String?                    @map("packet_id")
+  title             String
+  category          String                     @default("supporting")
+  fileUrl           String                     @map("file_url")
+  fileKey           String                     @map("file_key")
+  fileSize          Int?                       @map("file_size")
+  mimeType          String                     @default("application/pdf") @map("mime_type")
+  status            String                     @default("active")
+  description       String?
+  portalVisible     Boolean                    @default(false) @map("portal_visible")
+  portalVisibleAt   DateTime?                  @map("portal_visible_at")
+  sharedByUserId    String?                    @map("shared_by_user_id")
+  portalAccessLevel PortalDocumentAccessLevel? @map("portal_access_level")
+  uploadedById      String                     @map("uploaded_by_id")
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  packet       Packet?      @relation(fields: [packetId], references: [id], onDelete: SetNull)
-  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client               Client?                     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  packet               Packet?                     @relation(fields: [packetId], references: [id], onDelete: SetNull)
+  uploadedBy           User                        @relation(fields: [uploadedById], references: [id])
+  sharedBy             User?                       @relation("PortalDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  portalAuthorizations PortalAccessAuthorization[]
 
   @@map("supporting_documents")
 }
 
 model AiExtraction {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  packetDocumentId String @map("packet_document_id")
-  fields          Json     @default("[]")
-  overallConfidence Float  @default(0) @map("overall_confidence")
-  modelVersion    String   @default("1.0") @map("model_version")
-  status          String   @default("completed")
-  processingTime  Int      @default(0) @map("processing_time")
-  ranById         String   @map("ran_by_id")
-  createdAt       DateTime @default(now())
+  id                String   @id @default(cuid())
+  organizationId    String   @map("organization_id")
+  packetDocumentId  String   @map("packet_document_id")
+  fields            Json     @default("[]")
+  overallConfidence Float    @default(0) @map("overall_confidence")
+  modelVersion      String   @default("1.0") @map("model_version")
+  status            String   @default("completed")
+  processingTime    Int      @default(0) @map("processing_time")
+  ranById           String   @map("ran_by_id")
+  createdAt         DateTime @default(now())
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packetDocument PacketDocument  @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
-  ranBy          User            @relation("AiExtractionRuns", fields: [ranById], references: [id])
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  ranBy          User           @relation("AiExtractionRuns", fields: [ranById], references: [id])
 
   @@map("ai_extractions")
 }
 
 model AiRecommendation {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  packetId        String?  @map("packet_id")
-  packetDocumentId String? @map("packet_document_id")
-  type            String   @default("compliance")
-  message         String
-  confidence      Float    @default(0.5)
-  source          String   @default("ai")
-  status          String   @default("open")
-  appliedAt       DateTime? @map("applied_at")
-  appliedById     String?  @map("applied_by_id")
-  createdAt       DateTime @default(now())
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  packetId         String?   @map("packet_id")
+  packetDocumentId String?   @map("packet_document_id")
+  type             String    @default("compliance")
+  message          String
+  confidence       Float     @default(0.5)
+  source           String    @default("ai")
+  status           String    @default("open")
+  appliedAt        DateTime? @map("applied_at")
+  appliedById      String?   @map("applied_by_id")
+  createdAt        DateTime  @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packet       Packet?      @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet         Packet?         @relation(fields: [packetId], references: [id], onDelete: Cascade)
   packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
-  appliedBy    User?        @relation("AppliedAiRecommendations", fields: [appliedById], references: [id], onDelete: SetNull)
+  appliedBy      User?           @relation("AppliedAiRecommendations", fields: [appliedById], references: [id], onDelete: SetNull)
 
   @@map("ai_recommendations")
 }
 
 model Notification {
-  id              String   @id @default(cuid())
-  organizationId  String   @map("organization_id")
-  userId          String   @map("user_id")
-  type            String   @default("info")
-  title           String
-  message         String
-  link            String?
-  metadata        Json     @default("{}")
-  readAt          DateTime? @map("read_at")
-  dismissedAt     DateTime? @map("dismissed_at")
-  createdAt       DateTime @default(now())
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  userId         String    @map("user_id")
+  type           String    @default("info")
+  title          String
+  message        String
+  link           String?
+  metadata       Json      @default("{}")
+  readAt         DateTime? @map("read_at")
+  dismissedAt    DateTime? @map("dismissed_at")
+  createdAt      DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -787,16 +891,16 @@ model Notification {
 }
 
 model AuditEvent {
-  id             String     @id @default(cuid())
-  organizationId String?    @map("organization_id")
-  actorId        String?    @map("actor_id")
+  id             String      @id @default(cuid())
+  organizationId String?     @map("organization_id")
+  actorId        String?     @map("actor_id")
   action         AuditAction
   targetType     String?
-  targetId       String?    @map("target_id")
-  metadata       Json       @default("{}")
-  ipAddress      String?    @map("ip_address")
-  userAgent      String?    @map("user_agent")
-  createdAt      DateTime   @default(now())
+  targetId       String?     @map("target_id")
+  metadata       Json        @default("{}")
+  ipAddress      String?     @map("ip_address")
+  userAgent      String?     @map("user_agent")
+  createdAt      DateTime    @default(now())
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   actor        User?         @relation("AuditEventActor", fields: [actorId], references: [id], onDelete: SetNull)
@@ -806,4 +910,247 @@ model AuditEvent {
   @@index([organizationId, targetType, targetId])
   @@index([actorId])
   @@map("audit_events")
+}
+
+model PortalUser {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  phone            String?
+  passwordHash     String?          @map("password_hash")
+  emailVerifiedAt  DateTime?        @map("email_verified_at")
+  phoneVerifiedAt  DateTime?        @map("phone_verified_at")
+  status           PortalUserStatus @default(PENDING_VERIFICATION)
+  lastLoginAt      DateTime?        @map("last_login_at")
+  failedLoginCount Int              @default(0) @map("failed_login_count")
+  lockedUntil      DateTime?        @map("locked_until")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  clientAccess            PortalClientAccess[]
+  authorizations          PortalAccessAuthorization[]
+  sessions                PortalSession[]
+  notifications           PortalNotification[]
+  invitationsAccepted     PortalInvitation[]             @relation("PortalInvitationAcceptedBy")
+  signatureRequests       SignatureRequest[]             @relation("PortalSigner")
+  auditEvents             PortalAuditEvent[]             @relation("PortalAuditActor")
+  emailVerificationTokens PortalEmailVerificationToken[]
+  passwordResetTokens     PortalPasswordResetToken[]
+  emailChangeTokens       PortalEmailChangeToken[]
+
+  @@map("portal_users")
+}
+
+model PortalSession {
+  id               String    @id @default(cuid())
+  portalUserId     String    @map("portal_user_id")
+  sessionTokenHash String    @unique @map("session_token_hash")
+  ipAtLogin        String?   @map("ip_at_login")
+  userAgent        String?   @map("user_agent")
+  expires          DateTime
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now())
+
+  portalUser PortalUser @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+
+  @@index([portalUserId, expires])
+  @@map("portal_sessions")
+}
+
+model PortalEmailVerificationToken {
+  id           String    @id @default(cuid())
+  portalUserId String    @map("portal_user_id")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  createdAt    DateTime  @default(now())
+
+  portalUser PortalUser @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+
+  @@index([portalUserId])
+  @@map("portal_email_verification_tokens")
+}
+
+model PortalPasswordResetToken {
+  id           String    @id @default(cuid())
+  portalUserId String    @map("portal_user_id")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  requestIp    String?   @map("request_ip")
+  createdAt    DateTime  @default(now())
+
+  portalUser PortalUser @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+
+  @@index([portalUserId])
+  @@map("portal_password_reset_tokens")
+}
+
+model PortalEmailChangeToken {
+  id           String    @id @default(cuid())
+  portalUserId String    @map("portal_user_id")
+  newEmail     String    @map("new_email")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  createdAt    DateTime  @default(now())
+
+  portalUser PortalUser @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+
+  @@index([portalUserId])
+  @@map("portal_email_change_tokens")
+}
+
+model PortalClientAccess {
+  id                      String             @id @default(cuid())
+  portalUserId            String             @map("portal_user_id")
+  clientId                String             @map("client_id")
+  organizationId          String             @map("organization_id")
+  clientContactId         String?            @map("client_contact_id")
+  relationship            String
+  accessRole              PortalAccessRole   @map("access_role")
+  status                  PortalAccessStatus @default(ACTIVE)
+  grantedByUserId         String             @map("granted_by_user_id")
+  grantedAt               DateTime           @default(now()) @map("granted_at")
+  expiresAt               DateTime?          @map("expires_at")
+  revokedAt               DateTime?          @map("revoked_at")
+  revokedByUserId         String?            @map("revoked_by_user_id")
+  revocationReason        String?            @map("revocation_reason")
+  canViewDocuments        Boolean            @default(false) @map("can_view_documents")
+  canUploadDocuments      Boolean            @default(false) @map("can_upload_documents")
+  canSignDocuments        Boolean            @default(false) @map("can_sign_documents")
+  canViewAppointments     Boolean            @default(false) @map("can_view_appointments")
+  canMessageCareTeam      Boolean            @default(false) @map("can_message_care_team")
+  canManageOtherGuardians Boolean            @default(false) @map("can_manage_other_guardians")
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  portalUser        PortalUser                  @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+  client            Client                      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  organization      Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  clientContact     ClientContact?              @relation(fields: [clientContactId], references: [id], onDelete: SetNull)
+  grantedBy         User                        @relation("PortalAccessGrantedBy", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  revokedBy         User?                       @relation("PortalAccessRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  authorizations    PortalAccessAuthorization[]
+  signatureRequests SignatureRequest[]          @relation("PortalSignerAccessGrant")
+
+  // Prisma has no partial/filtered unique index support, so "one active grant
+  // per portal user/client" cannot be expressed here. Enforced via a raw
+  // partial unique index added directly to the generated migration SQL
+  // (portal_client_access_one_active) plus an application-layer check before insert.
+  @@index([portalUserId, clientId, status])
+  @@index([clientId, status])
+  @@index([organizationId, status])
+  @@map("portal_client_access")
+}
+
+model PortalInvitation {
+  id                     String                 @id @default(cuid())
+  organizationId         String                 @map("organization_id")
+  clientId               String                 @map("client_id")
+  clientContactId        String?                @map("client_contact_id")
+  invitedEmail           String                 @map("invited_email")
+  invitedByUserId        String                 @map("invited_by_user_id")
+  accessRole             PortalAccessRole       @map("access_role")
+  requestedPermissions   Json                   @default("{}") @map("requested_permissions")
+  tokenHash              String                 @unique @map("token_hash")
+  status                 PortalInvitationStatus @default(PENDING)
+  expiresAt              DateTime               @map("expires_at")
+  acceptedAt             DateTime?              @map("accepted_at")
+  acceptedByPortalUserId String?                @map("accepted_by_portal_user_id")
+  revokedAt              DateTime?              @map("revoked_at")
+  revokedByUserId        String?                @map("revoked_by_user_id")
+  createdAt              DateTime               @default(now())
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client        Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  clientContact ClientContact? @relation(fields: [clientContactId], references: [id], onDelete: SetNull)
+  invitedBy     User           @relation("PortalInvitationSentBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  revokedBy     User?          @relation("PortalInvitationRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  acceptedBy    PortalUser?    @relation("PortalInvitationAcceptedBy", fields: [acceptedByPortalUserId], references: [id], onDelete: SetNull)
+
+  @@index([invitedEmail, status])
+  @@index([organizationId, clientId])
+  @@index([expiresAt])
+  @@map("portal_invitations")
+}
+
+model PortalAccessAuthorization {
+  id                   String              @id @default(cuid())
+  clientId             String              @map("client_id")
+  portalUserId         String              @map("portal_user_id")
+  accessGrantId        String              @map("access_grant_id")
+  grantedByUserId      String              @map("granted_by_user_id")
+  authorityType        PortalAuthorityType @map("authority_type")
+  scope                Json                @default("{}")
+  effectiveDate        DateTime            @map("effective_date")
+  expirationDate       DateTime?           @map("expiration_date")
+  supportingDocumentId String?             @map("supporting_document_id")
+  consentText          String              @map("consent_text")
+  consentVersion       String              @map("consent_version")
+  acceptedAt           DateTime?           @map("accepted_at")
+  revokedAt            DateTime?           @map("revoked_at")
+  revokedByUserId      String?             @map("revoked_by_user_id")
+  createdAt            DateTime            @default(now())
+
+  client             Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  portalUser         PortalUser          @relation(fields: [portalUserId], references: [id], onDelete: Restrict)
+  accessGrant        PortalClientAccess  @relation(fields: [accessGrantId], references: [id], onDelete: Restrict)
+  grantedBy          User                @relation("PortalAuthorizationVerifiedBy", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  revokedBy          User?               @relation("PortalAuthorizationRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  supportingDocument SupportingDocument? @relation(fields: [supportingDocumentId], references: [id], onDelete: SetNull)
+
+  // One PortalClientAccess grant may accumulate several authorization records
+  // over time (renewed guardianship order, amended scope) — intentionally
+  // not unique on accessGrantId. Exactly one "current" row is an
+  // application-layer invariant, not a DB constraint.
+  @@index([clientId, portalUserId])
+  @@index([accessGrantId])
+  @@map("portal_access_authorizations")
+}
+
+model PortalNotification {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  portalUserId   String    @map("portal_user_id")
+  clientId       String    @map("client_id")
+  type           String    @default("info")
+  title          String
+  message        String
+  link           String?
+  metadata       Json      @default("{}")
+  readAt         DateTime? @map("read_at")
+  dismissedAt    DateTime? @map("dismissed_at")
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  portalUser   PortalUser   @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([portalUserId, readAt])
+  @@index([clientId])
+  @@map("portal_notifications")
+}
+
+model PortalAuditEvent {
+  id             String            @id @default(cuid())
+  organizationId String?           @map("organization_id")
+  portalUserId   String?           @map("portal_user_id")
+  clientId       String?           @map("client_id")
+  action         PortalAuditAction
+  targetType     String?           @map("target_type")
+  targetId       String?           @map("target_id")
+  metadata       Json              @default("{}")
+  ipAddress      String?           @map("ip_address")
+  userAgent      String?           @map("user_agent")
+  createdAt      DateTime          @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  portalUser   PortalUser?   @relation("PortalAuditActor", fields: [portalUserId], references: [id], onDelete: SetNull)
+  client       Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([portalUserId])
+  @@index([clientId, createdAt])
+  @@index([action])
+  @@map("portal_audit_events")
 }
