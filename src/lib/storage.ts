@@ -46,6 +46,33 @@ export function verifySignedUrl(fileKey: string, expires: number, signature: str
   return !isExpired && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
 }
 
+export type PortalFileMode = "view" | "download"
+export type PortalDocType = "packet_document" | "supporting_document"
+
+/**
+ * Separate signing scheme for portal document access, distinct from the
+ * staff signUrl/verifySignedUrl above. Deliberately signs the document's
+ * (type, id, mode) rather than a raw storage path — the portal-files route
+ * re-derives portalVisible/permission state fresh from the database on every
+ * request using this id, instead of trusting a file path to still be
+ * currently shareable. Also still requires a live portal session cookie;
+ * the signed URL alone is not a bearer credential.
+ */
+export function signPortalFileUrl(docType: PortalDocType, docId: string, mode: PortalFileMode): string {
+  const expires = Date.now() + SIGNED_URL_TTL_MS
+  const payload = `${docType}:${docId}:${mode}:${expires}`
+  const signature = crypto.createHmac("sha256", SIGNING_KEY).update(payload).digest("hex").slice(0, 16)
+  return `/api/portal-files/${docType}/${docId}?mode=${mode}&expires=${expires}&sig=${signature}`
+}
+
+export function verifyPortalFileUrl(docType: PortalDocType, docId: string, mode: PortalFileMode, expires: number, signature: string): boolean {
+  const payload = `${docType}:${docId}:${mode}:${expires}`
+  const expected = crypto.createHmac("sha256", SIGNING_KEY).update(payload).digest("hex").slice(0, 16)
+  const isExpired = Date.now() > expires
+  if (signature.length !== expected.length) return false
+  return !isExpired && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+}
+
 export async function storeFile(
   key: string,
   buffer: Buffer,

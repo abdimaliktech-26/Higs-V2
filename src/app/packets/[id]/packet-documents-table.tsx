@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/states"
 import { FileText, CheckCircle, CircleDot, AlertCircle, AlertTriangle, Circle, Eye, Edit } from "lucide-react"
 import { formatDate } from "@/lib/utils"
+import { PortalShareToggle } from "./portal-share-toggle"
 
 function docStatusIcon(status: string) {
   switch (status) {
@@ -24,6 +25,8 @@ interface DocRow {
   completedAt: Date | null
   documentTemplate: { name: string; formType: string; version: number }
   validationResults: { criticalCount: number; warningCount: number }[]
+  portalVisible: boolean
+  portalAccessLevel: string | null
 }
 
 export function PacketDocumentsTable({ docs, completedDocs }: { docs: DocRow[]; completedDocs: number }) {
@@ -77,6 +80,7 @@ function DocGroup({ title, docs }: { title: string; docs: DocRow[] }) {
               </div>
               <div className="flex items-center gap-2">
                 <StatusChip status={doc.status} size="sm" />
+                <PortalShareToggle documentId={doc.id} portalVisible={doc.portalVisible} portalAccessLevel={doc.portalAccessLevel} />
                 <Link href={`/documents/${doc.id}/edit`}>
                   <Button variant="ghost" size="icon-sm" title={doc.status === "completed" ? "View" : "Edit"}>
                     {doc.status === "completed" ? <Eye className="h-4 w-4" /> : <Edit className="h-4 w-4" />}

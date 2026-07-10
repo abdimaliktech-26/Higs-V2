@@ -261,3 +261,63 @@ export async function addDocumentComment(documentId: string, text: string): Prom
     return { success: false, error: (e as Error).message }
   }
 }
+
+/**
+ * Narrow, single-document portal-sharing toggle — no bulk sharing, no
+ * auto-sharing of an entire packet. Disabling immediately removes portal
+ * access to this specific document (portalVisible defaults false and is
+ * only ever flipped true by this explicit, per-document staff action).
+ */
+export async function setPacketDocumentPortalVisibility(
+  documentId: string,
+  input: { portalVisible: boolean; portalAccessLevel?: "VIEW" | "VIEW_AND_DOWNLOAD" }
+): Promise<ActionResult> {
+  try {
+    const session = await auth()
+    if (!session?.user) return { success: false, error: "Unauthorized" }
+    const user = session.user as Record<string, unknown>
+
+    const doc = await prisma.packetDocument.findUnique({
+      where: { id: documentId },
+      include: { packet: { select: { organizationId: true } } },
+    })
+    if (!doc) return { success: false, error: "Not found" }
+
+    await requireOrgAccess(doc.packet.organizationId)
+    const role = getActiveRole(user as any)
+    if (!EDIT_ROLES.includes(role) && !(user.isSuperAdmin as boolean)) {
+      return { success: false, error: "Insufficient permissions" }
+    }
+
+    const updated = await prisma.packetDocument.update({
+      where: { id: documentId },
+      data: input.portalVisible
+        ? {
+            portalVisible: true,
+            portalVisibleAt: new Date(),
+            sharedByUserId: user.id as string,
+            portalAccessLevel: input.portalAccessLevel || "VIEW",
+          }
+        : {
+            portalVisible: false,
+            portalVisibleAt: null,
+            sharedByUserId: null,
+            portalAccessLevel: null,
+          },
+    })
+
+    await createAuditEvent({
+      organizationId: doc.packet.organizationId,
+      actorId: user.id as string,
+      action: "DOCUMENT_PORTAL_VISIBILITY_CHANGED",
+      targetType: "packet_document",
+      targetId: documentId,
+      metadata: { portalVisible: input.portalVisible, portalAccessLevel: updated.portalAccessLevel },
+    })
+
+    revalidatePath(`/packets/${doc.packetId}`)
+    return { success: true, data: { id: documentId, portalVisible: updated.portalVisible } }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
+  }
+}

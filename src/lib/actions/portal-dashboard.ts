@@ -1,0 +1,224 @@
+"use server"
+
+import { prisma } from "@/lib/db"
+import { requirePortalAuth, requirePortalClientAccess, requirePortalPermission } from "@/lib/portal/auth"
+import { signPortalFileUrl } from "@/lib/storage"
+
+// ── Client switcher: only this PortalUser's own active grants ──
+export async function getPortalAuthorizedClients() {
+  const auth = await requirePortalAuth()
+  const access = await prisma.portalClientAccess.findMany({
+    where: {
+      portalUserId: auth.portalUserId,
+      status: "ACTIVE",
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    include: { client: { select: { id: true, firstName: true, lastName: true } } },
+    orderBy: { createdAt: "asc" },
+  })
+  return access.map((a) => ({
+    clientId: a.client.id,
+    displayName: `${a.client.firstName} ${a.client.lastName}`,
+    relationship: a.relationship,
+    accessRole: a.accessRole,
+  }))
+}
+
+// ── Dashboard: welcome summary, current packet, completion, recent activity ──
+export async function getPortalDashboard(clientId: string) {
+  const context = await requirePortalClientAccess(clientId)
+
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: {
+      firstName: true, lastName: true, program: true,
+      organization: { select: { name: true } },
+    },
+  })
+  if (!client) throw new Error("Client not found")
+
+  const packet = await prisma.packet.findFirst({
+    where: { clientId, status: { not: "archived" } },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true, packetType: true, status: true, dueDate: true,
+      documents: { select: { status: true, isRequired: true } },
+    },
+  })
+
+  let packetSummary: {
+    id: string
+    packetType: string
+    status: string
+    dueDate: Date | null
+    completionPct: number
+    requiredTotal: number
+    requiredCompleted: number
+  } | null = null
+
+  if (packet) {
+    const required = packet.documents.filter((d) => d.isRequired)
+    const requiredCompleted = required.filter((d) => d.status === "completed").length
+    const completionPct = required.length ? Math.round((requiredCompleted / required.length) * 100) : 0
+    packetSummary = {
+      id: packet.id, packetType: packet.packetType, status: packet.status, dueDate: packet.dueDate,
+      completionPct, requiredTotal: required.length, requiredCompleted,
+    }
+  }
+
+  const recentActivity = await prisma.portalAuditEvent.findMany({
+    where: {
+      portalUserId: context.portalUserId,
+      OR: [{ clientId }, { clientId: null }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { id: true, action: true, createdAt: true },
+  })
+
+  return {
+    clientDisplayName: `${client.firstName} ${client.lastName}`,
+    organizationName: client.organization.name,
+    program: client.program,
+    relationship: context.relationship,
+    accessRole: context.accessRole,
+    packet: packetSummary,
+    recentActivity: recentActivity.map((e) => ({ id: e.id, description: describePortalActivity(e.action), createdAt: e.createdAt })),
+  }
+}
+
+function describePortalActivity(action: string): string {
+  const labels: Record<string, string> = {
+    PORTAL_LOGIN_SUCCESS: "You signed in",
+    PORTAL_LOGIN_FAILED: "A sign-in attempt failed",
+    PORTAL_INVITATION_ACCEPTED: "You accepted a portal invitation",
+    PORTAL_ACCESS_GRANTED: "Portal access was granted",
+    PORTAL_ACCESS_REVOKED: "Portal access was removed",
+    PORTAL_EMAIL_VERIFIED: "Your email was verified",
+    PORTAL_SESSION_REVOKED: "You signed out",
+    PORTAL_DOCUMENT_VIEWED: "You viewed a document",
+    PORTAL_DOCUMENT_DOWNLOADED: "You downloaded a document",
+  }
+  return labels[action] || "Account activity"
+}
+
+// ── Documents: only portalVisible rows, gated on canViewDocuments ──
+export interface PortalDocumentRow {
+  id: string
+  docType: "packet_document" | "supporting_document"
+  title: string
+  category: string | null
+  status: string | null
+  accessLevel: string
+  updatedAt: Date
+  viewUrl: string
+  downloadUrl: string | null
+}
+
+export async function getPortalDocuments(clientId: string): Promise<PortalDocumentRow[]> {
+  await requirePortalPermission(clientId, "canViewDocuments")
+
+  const [packetDocs, supportingDocs] = await Promise.all([
+    prisma.packetDocument.findMany({
+      where: { portalVisible: true, packet: { clientId } },
+      select: {
+        id: true, status: true, updatedAt: true, portalAccessLevel: true,
+        documentTemplate: { select: { name: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.supportingDocument.findMany({
+      where: { portalVisible: true, clientId },
+      select: { id: true, title: true, category: true, status: true, updatedAt: true, portalAccessLevel: true },
+      orderBy: { updatedAt: "desc" },
+    }),
+  ])
+
+  const packetRows: PortalDocumentRow[] = packetDocs.map((d) => {
+    const accessLevel = d.portalAccessLevel || "VIEW"
+    return {
+      id: d.id,
+      docType: "packet_document",
+      title: d.documentTemplate.name,
+      category: null,
+      status: d.status,
+      accessLevel,
+      updatedAt: d.updatedAt,
+      viewUrl: signPortalFileUrl("packet_document", d.id, "view"),
+      downloadUrl: accessLevel === "VIEW_AND_DOWNLOAD" ? signPortalFileUrl("packet_document", d.id, "download") : null,
+    }
+  })
+
+  const supportingRows: PortalDocumentRow[] = supportingDocs.map((d) => {
+    const accessLevel = d.portalAccessLevel || "VIEW"
+    return {
+      id: d.id,
+      docType: "supporting_document",
+      title: d.title,
+      category: d.category,
+      status: d.status,
+      accessLevel,
+      updatedAt: d.updatedAt,
+      viewUrl: signPortalFileUrl("supporting_document", d.id, "view"),
+      downloadUrl: accessLevel === "VIEW_AND_DOWNLOAD" ? signPortalFileUrl("supporting_document", d.id, "download") : null,
+    }
+  })
+
+  return [...packetRows, ...supportingRows].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+}
+
+// ── Care team: real StaffAssignment rows, client-facing fields only ──
+export async function getPortalCareTeam(clientId: string) {
+  await requirePortalClientAccess(clientId)
+
+  const assignments = await prisma.staffAssignment.findMany({
+    where: { clientId, endDate: null },
+    select: {
+      id: true, role: true, isPrimary: true,
+      staff: { select: { name: true, email: true } },
+    },
+    orderBy: [{ isPrimary: "desc" }],
+  })
+
+  return assignments.map((a) => ({
+    id: a.id,
+    name: a.staff.name || "Unnamed",
+    role: a.role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+    email: a.staff.email,
+    isPrimary: a.isPrimary,
+  }))
+}
+
+// ── Notifications: read-only, own PortalUser rows only ──
+export async function getPortalNotifications() {
+  const auth = await requirePortalAuth()
+  return prisma.portalNotification.findMany({
+    where: { portalUserId: auth.portalUserId },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: { id: true, type: true, title: true, message: true, readAt: true, createdAt: true },
+  })
+}
+
+// ── Settings/security summary: real, minimal ──
+export async function getPortalSettings() {
+  const auth = await requirePortalAuth()
+  const portalUser = await prisma.portalUser.findUnique({
+    where: { id: auth.portalUserId },
+    select: { email: true, emailVerifiedAt: true, lastLoginAt: true },
+  })
+  if (!portalUser) throw new Error("Account not found")
+
+  const session = await prisma.portalSession.findUnique({
+    where: { id: auth.sessionId },
+    select: { expires: true, createdAt: true, ipAtLogin: true },
+  })
+
+  return {
+    email: portalUser.email,
+    emailVerified: !!portalUser.emailVerifiedAt,
+    lastLoginAt: portalUser.lastLoginAt,
+    currentSession: session ? { expiresAt: session.expires, signedInAt: session.createdAt } : null,
+  }
+}

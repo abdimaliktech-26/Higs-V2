@@ -93,6 +93,8 @@ export const limiters: Record<string, Limiter> = {
   general: createMemoryLimiter({ windowMs: 60000, max: 60, name: "general" }),
   portalInvitationView: createMemoryLimiter({ windowMs: 60000, max: 20, name: "portalInvitationView" }),
   portalActivation: createMemoryLimiter({ windowMs: 60000, max: 8, name: "portalActivation" }),
+  portalLogin: createMemoryLimiter({ windowMs: 60000, max: 8, name: "portalLogin" }),
+  portalFileAccess: createMemoryLimiter({ windowMs: 60000, max: 60, name: "portalFileAccess" }),
 }
 
 export function checkRateLimit(
