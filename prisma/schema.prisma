@@ -1,0 +1,809 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  COMPLIANCE_DIRECTOR
+  CASE_MANAGER
+  DSP
+  NURSE
+  BILLING_ADMIN
+  GUARDIAN
+  EXTERNAL_CASE_MANAGER
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum MemberStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  ORGANIZATION_SWITCH
+  USER_CREATED
+  USER_UPDATED
+  ROLE_CHANGED
+  CLIENT_VIEWED
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_ARCHIVED
+  STAFF_ASSIGNED
+  STAFF_UNASSIGNED
+  CONTACT_ADDED
+  CONTACT_UPDATED
+  CONTACT_REMOVED
+  MEMBER_CREATED
+  MEMBER_UPDATED
+  PACKET_VIEWED
+  PACKET_CREATED
+  PACKET_STATUS_CHANGED
+  PACKET_DOCUMENT_STATUS_CHANGED
+  DOCUMENT_VIEWED
+  DOCUMENT_EDITED
+  DOCUMENT_SAVED
+  DOCUMENT_FIELD_ADDED
+  DOCUMENT_FIELD_UPDATED
+  PDF_VERSION_CREATED
+  DOCUMENT_COMMENT_ADDED
+  SETTINGS_UPDATED
+  EXPORT_PERFORMED
+  TEMPLATE_UPLOADED
+  TEMPLATE_ACTIVATED
+  TEMPLATE_RETIRED
+  PACKET_TEMPLATE_CREATED
+  VALIDATION_RUN
+  VALIDATION_ISSUE_CREATED
+  VALIDATION_ISSUE_RESOLVED
+  COMPLIANCE_SCORE_UPDATED
+  SIGNATURE_REQUESTED
+  SIGNATURE_SENT
+  SIGNATURE_VIEWED
+  SIGNATURE_COMPLETED
+  SIGNATURE_DECLINED
+  SIGNATURE_CANCELLED
+  APPROVAL_SUBMITTED
+  APPROVAL_APPROVED
+  APPROVAL_REJECTED
+  APPROVAL_CHANGES_REQUESTED
+  APPROVAL_CANCELLED
+  DOCUMENT_LOCKED
+  DOCUMENT_UPLOADED
+  DOCUMENT_ARCHIVED
+  DOCUMENT_DOWNLOADED
+  AI_EXTRACTION_RUN
+  AI_RECOMMENDATION_GENERATED
+  AI_RECOMMENDATION_APPLIED
+  NOTIFICATION_VIEWED
+  NOTIFICATION_DISMISSED
+  NOTIFICATION_MARKED_READ
+  ACCESS_DENIED
+}
+
+model Organization {
+  id        String             @id @default(cuid())
+  name      String
+  slug      String             @unique
+  status    OrganizationStatus @default(ACTIVE)
+  plan      String             @default("starter")
+  settings  Json               @default("{}")
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  members  OrganizationMember[]
+  clients  Client[]
+  packets  Packet[]
+  programs Program[]
+  packetTemplates  PacketTemplate[]
+  documentTemplates DocumentTemplate[]
+  validationRules ValidationRule[]
+  validationResults ValidationResult[]
+  signatureRequests SignatureRequest[]
+  approvalRequests ApprovalRequest[]
+  supportingDocuments SupportingDocument[]
+  aiExtractions AiExtraction[]
+  aiRecommendations AiRecommendation[]
+  notifications Notification[]
+  auditEvents AuditEvent[]
+
+  @@map("organizations")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  image         String?
+  passwordHash  String?
+  emailVerified DateTime?
+  isSuperAdmin  Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  accounts     Account[]
+  sessions     Session[]
+  memberships  OrganizationMember[]
+  staffAssignments StaffAssignment[]
+  uploadedTemplates DocumentTemplate[] @relation("TemplateUploads")
+  assignedPackets Packet[] @relation("AssignedPackets")
+  pdfVersionsCreated PdfVersion[]
+  documentCommentsCreated DocumentComment[]
+  validationRuns ValidationResult[] @relation("ValidationRuns")
+  resolvedValidationIssues ValidationIssue[] @relation("IssueResolver")
+  requestedSignatures SignatureRequest[] @relation("SignatureRequestor")
+  signatureEventsCreated SignatureEvent[]
+  submittedApprovals ApprovalRequest[] @relation("ApprovalSubmitter")
+  approvalsDecided ApprovalRequest[] @relation("Approver")
+  approvalEventsCreated ApprovalEvent[]
+  uploadedSupportingDocuments SupportingDocument[]
+  aiExtractionRuns AiExtraction[] @relation("AiExtractionRuns")
+  appliedAiRecommendations AiRecommendation[] @relation("AppliedAiRecommendations")
+  notifications Notification[]
+  createdAuditEvents AuditEvent[] @relation("AuditEventActor")
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refreshToken      String? @map("refresh_token")
+  accessToken       String? @map("access_token")
+  expiresAt         BigInt? @map("expires_at")
+  tokenType         String? @map("token_type")
+  scope             String?
+  idToken           String? @map("id_token")
+  sessionState      String? @map("session_state")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  organizationId String? @map("organization_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  userId         String       @map("user_id")
+  role           UserRole
+  status         MemberStatus @default(ACTIVE)
+  departments    Json         @default("[]")
+  permissions    Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("organization_members")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  module      String
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  role         UserRole
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now())
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([role, permissionId])
+  @@map("role_permissions")
+}
+
+model Program {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  code           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enrollments   ClientProgram[]
+  packetTemplates PacketTemplate[]
+  packets Packet[]
+
+  @@unique([organizationId, code])
+  @@map("programs")
+}
+
+model ClientProgram {
+  id        String   @id @default(cuid())
+  clientId  String   @map("client_id")
+  programId String   @map("program_id")
+  status    String   @default("active")
+  startDate DateTime? @map("start_date")
+  endDate   DateTime? @map("end_date")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, programId])
+  @@map("client_programs")
+}
+
+model ClientContact {
+  id             String   @id @default(cuid())
+  clientId       String   @map("client_id")
+  firstName      String   @map("first_name")
+  lastName       String   @map("last_name")
+  relationship   String
+  email          String?
+  phone          String?
+  address        String?
+  isEmergency    Boolean  @default(false) @map("is_emergency")
+  isGuardian     Boolean  @default(false) @map("is_guardian")
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_contacts")
+}
+
+model StaffAssignment {
+  id             String   @id @default(cuid())
+  clientId       String   @map("client_id")
+  staffUserId    String   @map("staff_user_id")
+  role           String   @default("case_manager")
+  isPrimary      Boolean  @default(false) @map("is_primary")
+  startDate      DateTime? @map("start_date")
+  endDate        DateTime? @map("end_date")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  staff  User   @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, staffUserId, role])
+  @@map("staff_assignments")
+}
+
+model Diagnosis {
+  id         String   @id @default(cuid())
+  clientId   String   @map("client_id")
+  code       String
+  description String?
+  type       String   @default("primary")
+  isActive   Boolean  @default(true)
+  onsetDate  DateTime? @map("onset_date")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("diagnoses")
+}
+
+model Client {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  firstName       String   @map("first_name")
+  lastName        String   @map("last_name")
+  dateOfBirth     DateTime? @map("date_of_birth")
+  email           String?
+  phone           String?
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?  @map("zip_code")
+  mcadId          String?  @map("mcad_id")
+  ssn             String?  @map("ssn")
+  gender          String?
+  preferredLanguage String? @map("preferred_language")
+  status          String   @default("active")
+  program         String?
+  fundingSource   String?  @map("funding_source")
+  notes           String?
+  archivedAt      DateTime? @map("archived_at")
+  archivedReason  String?  @map("archived_reason")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packets      Packet[]
+  enrollments  ClientProgram[]
+  contacts     ClientContact[]
+  assignments  StaffAssignment[]
+  diagnoses    Diagnosis[]
+  supportingDocuments SupportingDocument[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, firstName, lastName])
+  @@index([organizationId, mcadId])
+  @@index([status])
+  @@map("clients")
+}
+
+model DocumentTemplate {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  name            String
+  description     String?
+  formType        String   @map("form_type") @default("dhs")
+  packetTypes     Json     @default("[]")
+  program         String?
+  status          String   @default("draft")
+  version         Int      @default(1)
+  fileUrl         String   @map("file_url")
+  fileKey         String   @map("file_key")
+  fileSize        Int?     @map("file_size")
+  mimeType        String   @map("mime_type") @default("application/pdf")
+  uploadedById    String   @map("uploaded_by_id")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  uploadedBy User         @relation("TemplateUploads", fields: [uploadedById], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packetDocuments PacketDocument[]
+  packetTemplateDocs PacketTemplateDocument[]
+
+  @@map("document_templates")
+}
+
+model PacketTemplate {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  name            String
+  description     String?
+  packetType      String   @map("packet_type")
+  programId       String?  @map("program_id")
+  status          String   @default("active")
+  isDefault       Boolean  @default(false) @map("is_default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  program          Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
+  requiredDocs     PacketTemplateDocument[]
+  packetInstances  Packet[]
+
+  @@map("packet_templates")
+}
+
+model PacketTemplateDocument {
+  id               String   @id @default(cuid())
+  packetTemplateId String   @map("packet_template_id")
+  documentTemplateId String @map("document_template_id")
+  required         Boolean  @default(true)
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now())
+
+  packetTemplate  PacketTemplate   @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+
+  @@unique([packetTemplateId, documentTemplateId])
+  @@map("packet_template_documents")
+}
+
+model Packet {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  clientId        String   @map("client_id")
+  packetTemplateId String? @map("packet_template_id")
+  programId       String?  @map("program_id")
+  packetType      String   @map("packet_type")
+  status          String   @default("draft")
+  assignedToId    String?  @map("assigned_to_id")
+  dueDate         DateTime? @map("due_date")
+  completedAt     DateTime? @map("completed_at")
+  metadata        Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client         Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  packetTemplate PacketTemplate?     @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
+  program        Program?            @relation(fields: [programId], references: [id], onDelete: SetNull)
+  assignedTo     User?               @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  documents      PacketDocument[]
+  validationResults ValidationResult[]
+  signatureRequests SignatureRequest[]
+  approvalRequests ApprovalRequest[]
+  supportingDocuments SupportingDocument[]
+  aiRecommendations AiRecommendation[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, clientId])
+  @@index([organizationId, dueDate])
+  @@index([status])
+  @@map("packets")
+}
+
+model PacketDocument {
+  id                 String   @id @default(cuid())
+  packetId           String   @map("packet_id")
+  documentTemplateId String   @map("document_template_id")
+  status             String   @default("pending")
+  isRequired         Boolean  @default(true) @map("is_required")
+  sortOrder          Int      @default(0) @map("sort_order")
+  currentVersion     Int      @default(0) @map("current_version")
+  completedAt        DateTime? @map("completed_at")
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  packet           Packet           @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  fields           PdfField[]
+  versions         PdfVersion[]
+  comments         DocumentComment[]
+  aiExtractions AiExtraction[]
+  aiRecommendations AiRecommendation[]
+  validationResults ValidationResult[]
+  signatureRequests SignatureRequest[]
+
+  @@unique([packetId, documentTemplateId])
+  @@map("packet_documents")
+}
+
+model PdfField {
+  id             String   @id @default(cuid())
+  packetDocumentId String @map("packet_document_id")
+  name           String
+  fieldType      String   @default("text") @map("field_type")
+  value          String?
+  pageNumber     Int      @default(1) @map("page_number")
+  posX           Float?   @map("pos_x")
+  posY           Float?   @map("pos_y")
+  width          Float?
+  height         Float?
+  confidence     Float?   @default(1.0)
+  source         String   @default("manual")
+  isRequired     Boolean  @default(false) @map("is_required")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  signatureRequests SignatureRequest[]
+
+  @@map("pdf_fields")
+}
+
+model PdfVersion {
+  id               String   @id @default(cuid())
+  packetDocumentId String   @map("packet_document_id")
+  version          Int      @default(1)
+  fileUrl          String   @map("file_url")
+  fileKey          String   @map("file_key")
+  fileSize         Int?
+  comment          String?
+  createdById      String   @map("created_by_id")
+  createdAt        DateTime @default(now())
+
+  packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  createdBy      User           @relation(fields: [createdById], references: [id])
+
+  @@unique([packetDocumentId, version])
+  @@map("pdf_versions")
+}
+
+model DocumentComment {
+  id               String   @id @default(cuid())
+  packetDocumentId String   @map("packet_document_id")
+  text             String
+  createdById      String   @map("created_by_id")
+  createdAt        DateTime @default(now())
+
+  packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  createdBy      User           @relation(fields: [createdById], references: [id])
+
+  @@map("document_comments")
+}
+
+model ValidationRule {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  name            String
+  description     String?
+  category        String   @default("required_field")
+  severity        String   @default("critical")
+  program         String?
+  packetType      String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  issues       ValidationIssue[]
+
+  @@unique([organizationId, name])
+  @@map("validation_rules")
+}
+
+model ValidationResult {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  packetId        String?  @map("packet_id")
+  packetDocumentId String? @map("packet_document_id")
+  score           Float    @default(100.0)
+  totalIssues     Int      @default(0) @map("total_issues")
+  criticalCount   Int      @default(0) @map("critical_count")
+  warningCount    Int      @default(0) @map("warning_count")
+  infoCount       Int      @default(0) @map("info_count")
+  ranById         String   @map("ran_by_id")
+  ranAt           DateTime @default(now()) @map("ran_at")
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet         Packet?         @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  ranBy          User            @relation("ValidationRuns", fields: [ranById], references: [id])
+  issues         ValidationIssue[]
+
+  @@map("validation_results")
+}
+
+model ValidationIssue {
+  id                 String   @id @default(cuid())
+  validationResultId String   @map("validation_result_id")
+  validationRuleId   String?  @map("validation_rule_id")
+  severity           String   @default("critical")
+  status             String   @default("open")
+  message            String
+  correction         String?
+  targetType         String?
+  targetId           String?  @map("target_id")
+  fieldName          String?  @map("field_name")
+  createdAt          DateTime @default(now())
+  resolvedAt         DateTime? @map("resolved_at")
+  resolvedById       String?  @map("resolved_by_id")
+
+  validationResult ValidationResult @relation(fields: [validationResultId], references: [id], onDelete: Cascade)
+  validationRule   ValidationRule?  @relation(fields: [validationRuleId], references: [id], onDelete: SetNull)
+  resolvedBy       User?            @relation("IssueResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@map("validation_issues")
+}
+
+model SignatureRequest {
+  id               String   @id @default(cuid())
+  organizationId   String   @map("organization_id")
+  packetId         String?  @map("packet_id")
+  packetDocumentId String?  @map("packet_document_id")
+  pdfFieldId       String?  @map("pdf_field_id")
+  signerName       String   @map("signer_name")
+  signerEmail      String   @map("signer_email")
+  signerRole       String   @map("signer_role")
+  signerType       String   @map("signer_type")
+  status           String   @default("pending")
+  dueDate          DateTime? @map("due_date")
+  consentText      String?  @map("consent_text")
+  signedAt         DateTime? @map("signed_at")
+  signedIp         String?  @map("signed_ip")
+  signedUserAgent  String?  @map("signed_user_agent")
+  declineReason    String?  @map("decline_reason")
+  notes            String?
+  requestedById    String   @map("requested_by_id")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet         Packet?         @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  pdfField       PdfField?       @relation(fields: [pdfFieldId], references: [id], onDelete: SetNull)
+  requestedBy    User            @relation("SignatureRequestor", fields: [requestedById], references: [id])
+  events         SignatureEvent[]
+
+  @@index([organizationId, status])
+  @@index([packetId])
+  @@map("signature_requests")
+}
+
+model SignatureEvent {
+  id                 String   @id @default(cuid())
+  signatureRequestId String   @map("signature_request_id")
+  eventType          String   @map("event_type")
+  metadata           Json     @default("{}")
+  ipAddress          String?  @map("ip_address")
+  userAgent          String?  @map("user_agent")
+  createdById        String?  @map("created_by_id")
+  createdAt          DateTime @default(now())
+
+  signatureRequest SignatureRequest @relation(fields: [signatureRequestId], references: [id], onDelete: Cascade)
+  createdBy        User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("signature_events")
+}
+
+model ApprovalRequest {
+  id               String   @id @default(cuid())
+  organizationId   String   @map("organization_id")
+  packetId         String   @map("packet_id")
+  status           String   @default("pending")
+  submittedById    String   @map("submitted_by_id")
+  approverId       String?  @map("approver_id")
+  decisionNotes    String?  @map("decision_notes")
+  correctionReason String?  @map("correction_reason")
+  submittedAt      DateTime @default(now()) @map("submitted_at")
+  decidedAt        DateTime? @map("decided_at")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet       Packet       @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  submittedBy  User         @relation("ApprovalSubmitter", fields: [submittedById], references: [id])
+  approver     User?        @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
+  events       ApprovalEvent[]
+
+  @@map("approval_requests")
+}
+
+model ApprovalEvent {
+  id               String   @id @default(cuid())
+  approvalRequestId String @map("approval_request_id")
+  eventType        String   @map("event_type")
+  notes            String?
+  createdById      String?  @map("created_by_id")
+  createdAt        DateTime @default(now())
+
+  approvalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  createdBy       User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("approval_events")
+}
+
+model SupportingDocument {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  clientId        String?  @map("client_id")
+  packetId        String?  @map("packet_id")
+  title           String
+  category        String   @default("supporting")
+  fileUrl         String   @map("file_url")
+  fileKey         String   @map("file_key")
+  fileSize        Int?     @map("file_size")
+  mimeType        String   @map("mime_type") @default("application/pdf")
+  status          String   @default("active")
+  description     String?
+  uploadedById    String   @map("uploaded_by_id")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  packet       Packet?      @relation(fields: [packetId], references: [id], onDelete: SetNull)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+
+  @@map("supporting_documents")
+}
+
+model AiExtraction {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  packetDocumentId String @map("packet_document_id")
+  fields          Json     @default("[]")
+  overallConfidence Float  @default(0) @map("overall_confidence")
+  modelVersion    String   @default("1.0") @map("model_version")
+  status          String   @default("completed")
+  processingTime  Int      @default(0) @map("processing_time")
+  ranById         String   @map("ran_by_id")
+  createdAt       DateTime @default(now())
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument  @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  ranBy          User            @relation("AiExtractionRuns", fields: [ranById], references: [id])
+
+  @@map("ai_extractions")
+}
+
+model AiRecommendation {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  packetId        String?  @map("packet_id")
+  packetDocumentId String? @map("packet_document_id")
+  type            String   @default("compliance")
+  message         String
+  confidence      Float    @default(0.5)
+  source          String   @default("ai")
+  status          String   @default("open")
+  appliedAt       DateTime? @map("applied_at")
+  appliedById     String?  @map("applied_by_id")
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packet       Packet?      @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  packetDocument PacketDocument? @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  appliedBy    User?        @relation("AppliedAiRecommendations", fields: [appliedById], references: [id], onDelete: SetNull)
+
+  @@map("ai_recommendations")
+}
+
+model Notification {
+  id              String   @id @default(cuid())
+  organizationId  String   @map("organization_id")
+  userId          String   @map("user_id")
+  type            String   @default("info")
+  title           String
+  message         String
+  link            String?
+  metadata        Json     @default("{}")
+  readAt          DateTime? @map("read_at")
+  dismissedAt     DateTime? @map("dismissed_at")
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AuditEvent {
+  id             String     @id @default(cuid())
+  organizationId String?    @map("organization_id")
+  actorId        String?    @map("actor_id")
+  action         AuditAction
+  targetType     String?
+  targetId       String?    @map("target_id")
+  metadata       Json       @default("{}")
+  ipAddress      String?    @map("ip_address")
+  userAgent      String?    @map("user_agent")
+  createdAt      DateTime   @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  actor        User?         @relation("AuditEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action])
+  @@index([organizationId, targetType, targetId])
+  @@index([actorId])
+  @@map("audit_events")
+}
