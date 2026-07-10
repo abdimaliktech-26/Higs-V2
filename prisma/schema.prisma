@@ -93,6 +93,9 @@ enum AuditAction {
   NOTIFICATION_MARKED_READ
   ACCESS_DENIED
   DOCUMENT_PORTAL_VISIBILITY_CHANGED
+  PORTAL_DOCUMENT_REQUEST_CREATED
+  PORTAL_DOCUMENT_REQUEST_CANCELLED
+  PORTAL_ACCESS_UPLOAD_PERMISSION_CHANGED
 }
 
 enum PortalUserStatus {
@@ -172,25 +175,26 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  members             OrganizationMember[]
-  clients             Client[]
-  packets             Packet[]
-  programs            Program[]
-  packetTemplates     PacketTemplate[]
-  documentTemplates   DocumentTemplate[]
-  validationRules     ValidationRule[]
-  validationResults   ValidationResult[]
-  signatureRequests   SignatureRequest[]
-  approvalRequests    ApprovalRequest[]
-  supportingDocuments SupportingDocument[]
-  aiExtractions       AiExtraction[]
-  aiRecommendations   AiRecommendation[]
-  notifications       Notification[]
-  auditEvents         AuditEvent[]
-  portalClientAccess  PortalClientAccess[]
-  portalInvitations   PortalInvitation[]
-  portalNotifications PortalNotification[]
-  portalAuditEvents   PortalAuditEvent[]
+  members                OrganizationMember[]
+  clients                Client[]
+  packets                Packet[]
+  programs               Program[]
+  packetTemplates        PacketTemplate[]
+  documentTemplates      DocumentTemplate[]
+  validationRules        ValidationRule[]
+  validationResults      ValidationResult[]
+  signatureRequests      SignatureRequest[]
+  approvalRequests       ApprovalRequest[]
+  supportingDocuments    SupportingDocument[]
+  aiExtractions          AiExtraction[]
+  aiRecommendations      AiRecommendation[]
+  notifications          Notification[]
+  auditEvents            AuditEvent[]
+  portalClientAccess     PortalClientAccess[]
+  portalInvitations      PortalInvitation[]
+  portalNotifications    PortalNotification[]
+  portalAuditEvents      PortalAuditEvent[]
+  portalDocumentRequests PortalDocumentRequest[]
 
   @@map("organizations")
 }
@@ -210,30 +214,33 @@ model User {
   sessions                        Session[]
   memberships                     OrganizationMember[]
   staffAssignments                StaffAssignment[]
-  uploadedTemplates               DocumentTemplate[]          @relation("TemplateUploads")
-  assignedPackets                 Packet[]                    @relation("AssignedPackets")
+  uploadedTemplates               DocumentTemplate[]            @relation("TemplateUploads")
+  assignedPackets                 Packet[]                      @relation("AssignedPackets")
   pdfVersionsCreated              PdfVersion[]
   documentCommentsCreated         DocumentComment[]
-  validationRuns                  ValidationResult[]          @relation("ValidationRuns")
-  resolvedValidationIssues        ValidationIssue[]           @relation("IssueResolver")
-  requestedSignatures             SignatureRequest[]          @relation("SignatureRequestor")
+  validationRuns                  ValidationResult[]            @relation("ValidationRuns")
+  resolvedValidationIssues        ValidationIssue[]             @relation("IssueResolver")
+  requestedSignatures             SignatureRequest[]            @relation("SignatureRequestor")
   signatureEventsCreated          SignatureEvent[]
-  submittedApprovals              ApprovalRequest[]           @relation("ApprovalSubmitter")
-  approvalsDecided                ApprovalRequest[]           @relation("Approver")
+  submittedApprovals              ApprovalRequest[]             @relation("ApprovalSubmitter")
+  approvalsDecided                ApprovalRequest[]             @relation("Approver")
   approvalEventsCreated           ApprovalEvent[]
   uploadedSupportingDocuments     SupportingDocument[]
-  aiExtractionRuns                AiExtraction[]              @relation("AiExtractionRuns")
-  appliedAiRecommendations        AiRecommendation[]          @relation("AppliedAiRecommendations")
+  aiExtractionRuns                AiExtraction[]                @relation("AiExtractionRuns")
+  appliedAiRecommendations        AiRecommendation[]            @relation("AppliedAiRecommendations")
   notifications                   Notification[]
-  createdAuditEvents              AuditEvent[]                @relation("AuditEventActor")
-  portalAccessGranted             PortalClientAccess[]        @relation("PortalAccessGrantedBy")
-  portalAccessRevoked             PortalClientAccess[]        @relation("PortalAccessRevokedBy")
-  portalInvitationsSent           PortalInvitation[]          @relation("PortalInvitationSentBy")
-  portalInvitationsRevoked        PortalInvitation[]          @relation("PortalInvitationRevokedBy")
-  portalAuthorizationsVerified    PortalAccessAuthorization[] @relation("PortalAuthorizationVerifiedBy")
-  portalAuthorizationsRevoked     PortalAccessAuthorization[] @relation("PortalAuthorizationRevokedBy")
-  portalSupportingDocumentsShared SupportingDocument[]        @relation("PortalDocumentSharedBy")
-  portalPacketDocumentsShared     PacketDocument[]            @relation("PortalPacketDocumentSharedBy")
+  createdAuditEvents              AuditEvent[]                  @relation("AuditEventActor")
+  portalAccessGranted             PortalClientAccess[]          @relation("PortalAccessGrantedBy")
+  portalAccessRevoked             PortalClientAccess[]          @relation("PortalAccessRevokedBy")
+  portalInvitationsSent           PortalInvitation[]            @relation("PortalInvitationSentBy")
+  portalInvitationsRevoked        PortalInvitation[]            @relation("PortalInvitationRevokedBy")
+  portalAuthorizationsVerified    PortalAccessAuthorization[]   @relation("PortalAuthorizationVerifiedBy")
+  portalAuthorizationsRevoked     PortalAccessAuthorization[]   @relation("PortalAuthorizationRevokedBy")
+  portalSupportingDocumentsShared SupportingDocument[]          @relation("PortalDocumentSharedBy")
+  portalPacketDocumentsShared     PacketDocument[]              @relation("PortalPacketDocumentSharedBy")
+  portalDocumentRequestsCreated   PortalDocumentRequest[]       @relation("PortalDocumentRequestCreatedBy")
+  portalDocumentRequestsCancelled PortalDocumentRequest[]       @relation("PortalDocumentRequestCancelledBy")
+  portalDocumentTimelineEvents    PortalDocumentTimelineEvent[]
 
   @@map("users")
 }
@@ -441,18 +448,19 @@ model Client {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  packets              Packet[]
-  enrollments          ClientProgram[]
-  contacts             ClientContact[]
-  assignments          StaffAssignment[]
-  diagnoses            Diagnosis[]
-  supportingDocuments  SupportingDocument[]
-  portalAccess         PortalClientAccess[]
-  portalInvitations    PortalInvitation[]
-  portalAuthorizations PortalAccessAuthorization[]
-  portalNotifications  PortalNotification[]
-  portalAuditEvents    PortalAuditEvent[]
+  organization           Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packets                Packet[]
+  enrollments            ClientProgram[]
+  contacts               ClientContact[]
+  assignments            StaffAssignment[]
+  diagnoses              Diagnosis[]
+  supportingDocuments    SupportingDocument[]
+  portalAccess           PortalClientAccess[]
+  portalInvitations      PortalInvitation[]
+  portalAuthorizations   PortalAccessAuthorization[]
+  portalNotifications    PortalNotification[]
+  portalAuditEvents      PortalAuditEvent[]
+  portalDocumentRequests PortalDocumentRequest[]
 
   @@index([organizationId, status])
   @@index([organizationId, firstName, lastName])
@@ -537,17 +545,18 @@ model Packet {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client              Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  packetTemplate      PacketTemplate?      @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
-  program             Program?             @relation(fields: [programId], references: [id], onDelete: SetNull)
-  assignedTo          User?                @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
-  documents           PacketDocument[]
-  validationResults   ValidationResult[]
-  signatureRequests   SignatureRequest[]
-  approvalRequests    ApprovalRequest[]
-  supportingDocuments SupportingDocument[]
-  aiRecommendations   AiRecommendation[]
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client                 Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  packetTemplate         PacketTemplate?         @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
+  program                Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
+  assignedTo             User?                   @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  documents              PacketDocument[]
+  validationResults      ValidationResult[]
+  signatureRequests      SignatureRequest[]
+  approvalRequests       ApprovalRequest[]
+  supportingDocuments    SupportingDocument[]
+  aiRecommendations      AiRecommendation[]
+  portalDocumentRequests PortalDocumentRequest[]
 
   @@index([organizationId, status])
   @@index([organizationId, clientId])
@@ -573,16 +582,17 @@ model PacketDocument {
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
 
-  packet            Packet             @relation(fields: [packetId], references: [id], onDelete: Cascade)
-  documentTemplate  DocumentTemplate   @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
-  fields            PdfField[]
-  versions          PdfVersion[]
-  comments          DocumentComment[]
-  aiExtractions     AiExtraction[]
-  aiRecommendations AiRecommendation[]
-  validationResults ValidationResult[]
-  signatureRequests SignatureRequest[]
-  sharedBy          User?              @relation("PortalPacketDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  packet                 Packet                  @relation(fields: [packetId], references: [id], onDelete: Cascade)
+  documentTemplate       DocumentTemplate        @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  fields                 PdfField[]
+  versions               PdfVersion[]
+  comments               DocumentComment[]
+  aiExtractions          AiExtraction[]
+  aiRecommendations      AiRecommendation[]
+  validationResults      ValidationResult[]
+  signatureRequests      SignatureRequest[]
+  sharedBy               User?                   @relation("PortalPacketDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  portalDocumentRequests PortalDocumentRequest[]
 
   @@unique([packetId, documentTemplateId])
   @@map("packet_documents")
@@ -801,33 +811,40 @@ model ApprovalEvent {
 }
 
 model SupportingDocument {
-  id                String                     @id @default(cuid())
-  organizationId    String                     @map("organization_id")
-  clientId          String?                    @map("client_id")
-  packetId          String?                    @map("packet_id")
-  title             String
-  category          String                     @default("supporting")
-  fileUrl           String                     @map("file_url")
-  fileKey           String                     @map("file_key")
-  fileSize          Int?                       @map("file_size")
-  mimeType          String                     @default("application/pdf") @map("mime_type")
-  status            String                     @default("active")
-  description       String?
-  portalVisible     Boolean                    @default(false) @map("portal_visible")
-  portalVisibleAt   DateTime?                  @map("portal_visible_at")
-  sharedByUserId    String?                    @map("shared_by_user_id")
-  portalAccessLevel PortalDocumentAccessLevel? @map("portal_access_level")
-  uploadedById      String                     @map("uploaded_by_id")
-  createdAt         DateTime                   @default(now())
-  updatedAt         DateTime                   @updatedAt
+  id                     String                     @id @default(cuid())
+  organizationId         String                     @map("organization_id")
+  clientId               String?                    @map("client_id")
+  packetId               String?                    @map("packet_id")
+  title                  String
+  category               String                     @default("supporting")
+  fileUrl                String                     @map("file_url")
+  fileKey                String                     @map("file_key")
+  fileSize               Int?                       @map("file_size")
+  mimeType               String                     @default("application/pdf") @map("mime_type")
+  status                 String                     @default("active")
+  description            String?
+  portalVisible          Boolean                    @default(false) @map("portal_visible")
+  portalVisibleAt        DateTime?                  @map("portal_visible_at")
+  sharedByUserId         String?                    @map("shared_by_user_id")
+  portalAccessLevel      PortalDocumentAccessLevel? @map("portal_access_level")
+  uploadedById           String?                    @map("uploaded_by_id")
+  uploadedByPortalUserId String?                    @map("uploaded_by_portal_user_id")
+  portalRequestId        String?                    @map("portal_request_id")
+  originalFileName       String?                    @map("original_file_name")
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
-  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client               Client?                     @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  packet               Packet?                     @relation(fields: [packetId], references: [id], onDelete: SetNull)
-  uploadedBy           User                        @relation(fields: [uploadedById], references: [id])
-  sharedBy             User?                       @relation("PortalDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
+  organization         Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client               Client?                       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  packet               Packet?                       @relation(fields: [packetId], references: [id], onDelete: SetNull)
+  uploadedBy           User?                         @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedByPortalUser PortalUser?                   @relation(fields: [uploadedByPortalUserId], references: [id], onDelete: SetNull)
+  portalRequest        PortalDocumentRequest?        @relation(fields: [portalRequestId], references: [id], onDelete: SetNull)
+  sharedBy             User?                         @relation("PortalDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
   portalAuthorizations PortalAccessAuthorization[]
+  timelineEvents       PortalDocumentTimelineEvent[]
 
+  @@index([portalRequestId])
   @@map("supporting_documents")
 }
 
@@ -927,16 +944,18 @@ model PortalUser {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  clientAccess            PortalClientAccess[]
-  authorizations          PortalAccessAuthorization[]
-  sessions                PortalSession[]
-  notifications           PortalNotification[]
-  invitationsAccepted     PortalInvitation[]             @relation("PortalInvitationAcceptedBy")
-  signatureRequests       SignatureRequest[]             @relation("PortalSigner")
-  auditEvents             PortalAuditEvent[]             @relation("PortalAuditActor")
-  emailVerificationTokens PortalEmailVerificationToken[]
-  passwordResetTokens     PortalPasswordResetToken[]
-  emailChangeTokens       PortalEmailChangeToken[]
+  clientAccess                PortalClientAccess[]
+  authorizations              PortalAccessAuthorization[]
+  sessions                    PortalSession[]
+  notifications               PortalNotification[]
+  invitationsAccepted         PortalInvitation[]             @relation("PortalInvitationAcceptedBy")
+  signatureRequests           SignatureRequest[]             @relation("PortalSigner")
+  auditEvents                 PortalAuditEvent[]             @relation("PortalAuditActor")
+  emailVerificationTokens     PortalEmailVerificationToken[]
+  passwordResetTokens         PortalPasswordResetToken[]
+  emailChangeTokens           PortalEmailChangeToken[]
+  uploadedSupportingDocuments SupportingDocument[]
+  documentTimelineEvents      PortalDocumentTimelineEvent[]
 
   @@map("portal_users")
 }
@@ -1155,4 +1174,108 @@ model PortalAuditEvent {
   @@index([clientId, createdAt])
   @@index([action])
   @@map("portal_audit_events")
+}
+
+enum PortalDocumentRequestStatus {
+  PENDING
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  NEEDS_REPLACEMENT
+  CANCELLED
+}
+
+enum PortalDocumentRequestPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum PortalDocumentCategory {
+  INSURANCE
+  IDENTIFICATION
+  MEDICATION
+  CARE_PLAN
+  LEGAL
+  CONSENT
+  PHOTO
+  OTHER
+}
+
+/**
+ * Stage 4 Step 1 (Document Request Engine): the "ask" — staff requesting a
+ * specific document from a client/guardian through the portal. Upload
+ * fulfillment (Step 2), review workflow (Step 3), full timeline event log
+ * (Step 4), and notifications (Step 5) are intentionally not modeled yet —
+ * this only covers request creation and its own PENDING/CANCELLED lifecycle.
+ * SUBMITTED/UNDER_REVIEW/APPROVED/NEEDS_REPLACEMENT are defined now (full
+ * blueprint) but unreachable until later steps add the code that sets them.
+ */
+model PortalDocumentRequest {
+  id                 String                        @id @default(cuid())
+  organizationId     String                        @map("organization_id")
+  clientId           String                        @map("client_id")
+  packetId           String?                       @map("packet_id")
+  packetDocumentId   String?                       @map("packet_document_id")
+  title              String
+  description        String?
+  category           PortalDocumentCategory
+  priority           PortalDocumentRequestPriority @default(NORMAL)
+  isRequired         Boolean                       @default(true) @map("is_required")
+  dueDate            DateTime?                     @map("due_date")
+  status             PortalDocumentRequestStatus   @default(PENDING)
+  requestedByUserId  String                        @map("requested_by_user_id")
+  cancelledAt        DateTime?                     @map("cancelled_at")
+  cancelledByUserId  String?                       @map("cancelled_by_user_id")
+  cancellationReason String?                       @map("cancellation_reason")
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+
+  organization        Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client              Client                        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  packet              Packet?                       @relation(fields: [packetId], references: [id], onDelete: SetNull)
+  packetDocument      PacketDocument?               @relation(fields: [packetDocumentId], references: [id], onDelete: SetNull)
+  requestedBy         User                          @relation("PortalDocumentRequestCreatedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  cancelledBy         User?                         @relation("PortalDocumentRequestCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  supportingDocuments SupportingDocument[]
+  timelineEvents      PortalDocumentTimelineEvent[]
+
+  @@index([organizationId, clientId, status])
+  @@index([clientId, status])
+  @@index([dueDate])
+  @@map("portal_document_requests")
+}
+
+enum PortalDocumentTimelineEventType {
+  REQUESTED
+  UPLOADED
+  RESUBMITTED
+  CANCELLED
+}
+
+/**
+ * Stage 4 Step 2 foundation: append-only event log for a document request,
+ * named generically (not "RequestEvent") so it can absorb future event
+ * types (review decisions, downloads, views) without a model rename —
+ * mirrors the SignatureEvent/ApprovalEvent pattern already used elsewhere.
+ * Only REQUESTED/UPLOADED/RESUBMITTED/CANCELLED are ever written as of
+ * Step 2; review-related event types are deferred to a later step.
+ */
+model PortalDocumentTimelineEvent {
+  id                    String                          @id @default(cuid())
+  requestId             String                          @map("request_id")
+  eventType             PortalDocumentTimelineEventType
+  supportingDocumentId  String?                         @map("supporting_document_id")
+  createdByPortalUserId String?                         @map("created_by_portal_user_id")
+  createdByUserId       String?                         @map("created_by_user_id")
+  note                  String?
+  createdAt             DateTime                        @default(now())
+
+  request             PortalDocumentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  supportingDocument  SupportingDocument?   @relation(fields: [supportingDocumentId], references: [id], onDelete: SetNull)
+  createdByPortalUser PortalUser?           @relation(fields: [createdByPortalUserId], references: [id], onDelete: SetNull)
+  createdByUser       User?                 @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+  @@map("portal_document_timeline_events")
 }

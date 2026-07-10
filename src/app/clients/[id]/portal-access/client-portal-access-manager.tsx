@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { createPortalInvitation, revokePortalInvitation, revokePortalAccess } from "@/lib/actions/portal-invitations"
+import { setPortalUploadPermission } from "@/lib/actions/portal-document-requests"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,6 +26,7 @@ interface AccessRow {
   canViewDocuments: boolean
   canViewAppointments: boolean
   canMessageCareTeam: boolean
+  canUploadDocuments: boolean
   expiresAt: string | Date | null
   portalUser: { id: string; email: string; status: string; lastLoginAt: string | Date | null }
 }
@@ -105,6 +107,12 @@ export function ClientPortalAccessManager({ clientId, clientContacts, access, in
     router.refresh()
   }
 
+  async function handleToggleUpload(accessId: string, enabled: boolean) {
+    const result = await setPortalUploadPermission(accessId, enabled)
+    if (!result.success) alert(result.error)
+    router.refresh()
+  }
+
   function closeCreate() {
     setShowCreate(false)
     setNewLink(null)
@@ -140,6 +148,7 @@ export function ClientPortalAccessManager({ clientId, clientContacts, access, in
                     <th className="pb-3 pl-6 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Portal User</th>
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Relationship / Role</th>
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Permissions</th>
+                    <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Uploads</th>
                     <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Status</th>
                     <th className="pb-3 pr-6" />
                   </tr>
@@ -154,6 +163,15 @@ export function ClientPortalAccessManager({ clientId, clientContacts, access, in
                       </td>
                       <td className="py-3 pr-4 text-xs text-surface-500">
                         {[a.canViewDocuments && "View Documents", a.canViewAppointments && "View Appointments", a.canMessageCareTeam && "Message Care Team"].filter(Boolean).join(", ") || "None"}
+                      </td>
+                      <td className="py-3 pr-4">
+                        {a.status === "ACTIVE" ? (
+                          <Button variant="ghost" size="sm" onClick={() => handleToggleUpload(a.id, !a.canUploadDocuments)}>
+                            {a.canUploadDocuments ? "Enabled" : "Disabled"}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-surface-400">{a.canUploadDocuments ? "Enabled" : "Disabled"}</span>
+                        )}
                       </td>
                       <td className="py-3 pr-4"><StatusChip status={a.status.toLowerCase()} size="sm" /></td>
                       <td className="py-3 pr-6 text-right">
@@ -247,7 +265,7 @@ export function ClientPortalAccessManager({ clientId, clientContacts, access, in
             <Select name="accessRole" label="Access Role" required placeholder="Select a role" options={accessRoleOptions} />
             <div className="space-y-2">
               <p className="text-sm font-medium text-surface-700">Requested Permissions</p>
-              <p className="text-xs text-surface-500">Document upload, e-signature, and guardian-management permissions are not available until a legal-authority verification workflow exists.</p>
+              <p className="text-xs text-surface-500">Document upload can be enabled separately once this person&apos;s account is active. E-signature and guardian-management permissions remain unavailable until a legal-authority verification workflow exists.</p>
               <Checkbox name="canViewDocuments" label="View portal-visible documents" />
               <Checkbox name="canViewAppointments" label="View appointments" />
               <Checkbox name="canMessageCareTeam" label="Message care team" />

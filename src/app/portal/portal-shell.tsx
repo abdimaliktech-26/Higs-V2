@@ -26,6 +26,7 @@ interface Props {
 const navItems = [
   { href: "/portal/dashboard", label: "Home", icon: LayoutDashboard },
   { href: "/portal/documents", label: "Documents", icon: FileText },
+  { href: "/portal/upload", label: "Upload Center", icon: Upload },
   { href: "/portal/care-team", label: "Care Team", icon: Users },
   { href: "/portal/notifications", label: "Notifications", icon: Bell },
   { href: "/portal/settings", label: "Settings", icon: Settings },
@@ -34,7 +35,6 @@ const navItems = [
 const comingSoonItems = [
   { label: "Messages", icon: MessageSquare },
   { label: "Appointments", icon: Calendar },
-  { label: "Upload", icon: Upload },
   { label: "Signatures", icon: PenSquare },
 ]
 

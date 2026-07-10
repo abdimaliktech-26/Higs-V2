@@ -215,6 +215,19 @@ export const activatePortalAccountSchema = z.object({
   password: z.string().min(10, "Password must be at least 10 characters").max(200),
 })
 
+// ── Portal Document Requests (Stage 4 Step 1) ──
+export const createPortalDocumentRequestSchema = z.object({
+  clientId: cuid,
+  packetId: z.string().max(50).optional().or(z.literal("")),
+  packetDocumentId: z.string().max(50).optional().or(z.literal("")),
+  title: z.string().min(1, "Title is required").max(200),
+  description: z.string().max(2000).optional().or(z.literal("")),
+  category: z.enum(["INSURANCE", "IDENTIFICATION", "MEDICATION", "CARE_PLAN", "LEGAL", "CONSENT", "PHOTO", "OTHER"]),
+  priority: z.enum(["LOW", "NORMAL", "HIGH"]).default("NORMAL"),
+  isRequired: z.boolean().default(true),
+  dueDate: dateStr,
+})
+
 // ── Helper: Wrapped parse that returns error string ──
 export function validate<T>(schema: z.ZodType<T>, input: unknown): { success: true; data: T } | { success: false; error: string } {
   const result = schema.safeParse(input)
