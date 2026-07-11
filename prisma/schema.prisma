@@ -68,6 +68,9 @@ enum AuditAction {
   PACKET_TEMPLATE_CREATED
   PACKET_TEMPLATE_DOCUMENT_UPDATED
   DOCUMENT_TEMPLATE_VERSION_CREATED
+  TEMPLATE_FIELD_CREATED
+  TEMPLATE_FIELD_UPDATED
+  TEMPLATE_FIELD_DELETED
   VALIDATION_RUN
   VALIDATION_ISSUE_CREATED
   VALIDATION_ISSUE_RESOLVED
@@ -186,6 +189,7 @@ model Organization {
   programs               Program[]
   packetTemplates        PacketTemplate[]
   documentTemplates      DocumentTemplate[]
+  documentTemplateFields DocumentTemplateField[]
   validationRules        ValidationRule[]
   validationResults      ValidationResult[]
   signatureRequests      SignatureRequest[]
@@ -500,8 +504,37 @@ model DocumentTemplate {
   packetTemplateDocs PacketTemplateDocument[]
   previousVersion    DocumentTemplate?        @relation("DocumentTemplateVersionChain", fields: [previousVersionId], references: [id], onDelete: SetNull)
   nextVersions       DocumentTemplate[]       @relation("DocumentTemplateVersionChain")
+  fields             DocumentTemplateField[]
 
   @@map("document_templates")
+}
+
+// Reusable field layout for a DocumentTemplate — seeded into real PdfField
+// rows (source: "template") whenever a packet is created from a template
+// that maps to this document. Coordinates use the exact same convention as
+// PdfField/FieldOverlays: pixels on the PDF canvas rendered at scale 1.5.
+model DocumentTemplateField {
+  id                 String   @id @default(cuid())
+  organizationId     String   @map("organization_id")
+  documentTemplateId String   @map("document_template_id")
+  fieldKey           String   @map("field_key")
+  name               String
+  fieldType          String   @default("text") @map("field_type")
+  pageNumber         Int      @default(1) @map("page_number")
+  posX               Float?   @map("pos_x")
+  posY               Float?   @map("pos_y")
+  width              Float?
+  height             Float?
+  isRequired         Boolean  @default(false) @map("is_required")
+  sortOrder          Int      @default(0) @map("sort_order")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+
+  @@unique([documentTemplateId, fieldKey])
+  @@map("document_template_fields")
 }
 
 model PacketTemplate {

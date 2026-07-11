@@ -79,6 +79,48 @@ export const createPacketTemplateSchema = z.object({
   documents: z.array(packetTemplateDocumentInputSchema).default([]),
 })
 
+// ── Document Template Field ──
+// Reuses the exact same field-type set as PdfField — no new types introduced.
+export const TEMPLATE_FIELD_TYPES = ["text", "date", "checkbox", "signature", "textarea", "select"] as const
+
+// Lowercase snake_case, human-readable (client_name, date_of_birth,
+// guardian_signature) — stable identity for a field across a version family.
+export const templateFieldKeySchema = z
+  .string()
+  .min(1, "Field key is required")
+  .max(100)
+  .regex(/^[a-z][a-z0-9_]*$/, "Field key must be lowercase snake_case, e.g. client_name")
+
+// Generous bound (well beyond any realistic page rendered at the app's
+// supported zoom levels up to 3x) — just enough to reject garbage input.
+const templateFieldCoordinate = z.number().min(0).max(10000)
+
+export const createTemplateFieldSchema = z.object({
+  fieldKey: templateFieldKeySchema,
+  name: z.string().min(1, "Name is required").max(200),
+  fieldType: z.enum(TEMPLATE_FIELD_TYPES),
+  pageNumber: z.number().int().min(1, "Page number must be positive"),
+  posX: templateFieldCoordinate.optional(),
+  posY: templateFieldCoordinate.optional(),
+  width: z.number().positive().max(5000).optional(),
+  height: z.number().positive().max(5000).optional(),
+  isRequired: z.boolean().default(false),
+  sortOrder: z.number().int().min(0).default(0),
+})
+
+export const updateTemplateFieldSchema = z.object({
+  fieldKey: templateFieldKeySchema.optional(),
+  name: z.string().min(1, "Name is required").max(200).optional(),
+  fieldType: z.enum(TEMPLATE_FIELD_TYPES).optional(),
+  pageNumber: z.number().int().min(1, "Page number must be positive").optional(),
+  posX: templateFieldCoordinate.optional(),
+  posY: templateFieldCoordinate.optional(),
+  width: z.number().positive().max(5000).optional(),
+  height: z.number().positive().max(5000).optional(),
+  isRequired: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+})
+
 // ── PDF Document ──
 export const saveFieldsSchema = z.object({
   id: z.string().max(50).optional(),

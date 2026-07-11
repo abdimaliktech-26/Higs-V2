@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
+import { signUrl } from "@/lib/storage"
 import { AuditAction, UserRole, type Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
@@ -29,8 +30,9 @@ export async function getDocumentTemplates(orgId: string, params?: { search?: st
     include: {
       uploadedBy: { select: { name: true, email: true } },
       _count: { select: { packetTemplateDocs: true, packetDocuments: true } },
-      previousVersion: { select: { id: true, version: true, status: true } },
-      nextVersions: { select: { id: true, version: true, status: true } },
+      fields: { select: { isRequired: true, fieldType: true } },
+      previousVersion: { select: { id: true, version: true, status: true, _count: { select: { fields: true } } } },
+      nextVersions: { select: { id: true, version: true, status: true, _count: { select: { fields: true } } } },
     },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
   })
@@ -43,7 +45,9 @@ export async function getDocumentTemplateById(id: string) {
   })
   if (!tpl) return null
   await requireOrgAccess(tpl.organizationId)
-  return tpl
+  // signUrl lives in a server-only module (fs/promises) — computed here so
+  // client components (the Template Field Editor) never import it directly.
+  return { ...tpl, signedFileUrl: signUrl(tpl.fileKey) }
 }
 
 // Document upload (initial creation and new-version uploads) happens via
@@ -319,11 +323,37 @@ export async function createPacket(data: {
     },
   })
 
-  // Generate packet documents from template
+  // Generate packet documents from template, seeding each one's field layout
+  // from the mapped DocumentTemplate's real field definitions (forward-only —
+  // existing packets/PacketDocuments created before this step are never
+  // touched or backfilled).
   for (const doc of pt.requiredDocs) {
-    await prisma.packetDocument.create({
+    const packetDocument = await prisma.packetDocument.create({
       data: { packetId: packet.id, documentTemplateId: doc.documentTemplateId, isRequired: doc.required, sortOrder: doc.sortOrder, status: "pending" },
     })
+
+    const templateFields = await prisma.documentTemplateField.findMany({
+      where: { documentTemplateId: doc.documentTemplateId },
+      orderBy: { sortOrder: "asc" },
+    })
+    if (templateFields.length > 0) {
+      await prisma.pdfField.createMany({
+        data: templateFields.map((f) => ({
+          packetDocumentId: packetDocument.id,
+          name: f.name,
+          fieldType: f.fieldType,
+          value: null,
+          pageNumber: f.pageNumber,
+          posX: f.posX,
+          posY: f.posY,
+          width: f.width,
+          height: f.height,
+          isRequired: f.isRequired,
+          sortOrder: f.sortOrder,
+          source: "template",
+        })),
+      })
+    }
   }
 
   await createAuditEvent({ organizationId: orgId, actorId: user.id as string, action: "PACKET_CREATED", targetType: "packet", targetId: packet.id, metadata: { clientId: data.clientId, packetTemplateId: pt.id } })

@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Layers,
   Library,
+  ListChecks,
   Plus,
   ScrollText,
   ShieldCheck,
@@ -43,6 +44,7 @@ interface Props {
   formType?: string
 }
 
+type VersionChainEntry = { id: string; version: number; status: string; _count: { fields: number } }
 type DocumentTemplate = {
   id: string
   name: string
@@ -56,6 +58,9 @@ type DocumentTemplate = {
   uploadedBy: { name: string | null; email: string | null } | null
   updatedAt: Date
   _count: { packetTemplateDocs: number; packetDocuments: number }
+  fields: Array<{ isRequired: boolean; fieldType: string }>
+  previousVersion: VersionChainEntry | null
+  nextVersions: VersionChainEntry[]
   packetTypes: unknown
 }
 type PacketTemplate = {
@@ -442,6 +447,7 @@ export async function TemplatesListContent({
                         <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Version</th>
                         <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Status</th>
                         <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Mappings</th>
+                        <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Fields</th>
                         <th className="pb-3 pr-4 text-left text-xs font-semibold uppercase tracking-wider text-surface-500">Updated</th>
                         <th className="pb-3 pr-6 text-right text-xs font-semibold uppercase tracking-wider text-surface-500">Actions</th>
                       </tr>
@@ -473,6 +479,16 @@ export async function TemplatesListContent({
                                 {mappedTypes.length === 0 && <span className="text-xs text-surface-400">Unmapped</span>}
                               </div>
                             </td>
+                            <td className="py-3 pr-4 text-xs text-surface-600">
+                              {template.fields.length === 0 ? (
+                                <span className="text-surface-400">None</span>
+                              ) : (
+                                <span>
+                                  {template.fields.length}
+                                  {template.fields.some((f) => f.isRequired) && <span className="ml-1 text-warning-600">({template.fields.filter((f) => f.isRequired).length} req)</span>}
+                                </span>
+                              )}
+                            </td>
                             <td className="py-3 pr-4 text-xs text-surface-500">{formatDate(template.updatedAt)}</td>
                             <td className="py-3 pr-6">
                               <div className="flex justify-end gap-1">
@@ -483,7 +499,12 @@ export async function TemplatesListContent({
                                   <Button variant="ghost" size="icon-sm" type="button"><ExternalLink className="h-4 w-4" /></Button>
                                 </Link>
                                 {canManage && (
-                                  <TemplateVersionUpload templateId={template.id} templateName={template.name} currentVersion={template.version} />
+                                  <>
+                                    <Link href={`/templates/${template.id}/fields`} title={template.status === "retired" ? "View fields (read-only)" : "Open Field Editor"}>
+                                      <Button variant="ghost" size="icon-sm" type="button"><ListChecks className="h-4 w-4" /></Button>
+                                    </Link>
+                                    <TemplateVersionUpload templateId={template.id} templateName={template.name} currentVersion={template.version} />
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -596,7 +617,7 @@ export async function TemplatesListContent({
             <CardTitle>Template Details</CardTitle>
             <CardDescription>Selected-template details using stored template metadata and packet mappings</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 lg:grid-cols-3">
+          <CardContent className="grid gap-4 lg:grid-cols-4">
             <DetailBlock
               title="Template Information"
               rows={[
@@ -607,6 +628,26 @@ export async function TemplatesListContent({
                 ["Uploaded by", selectedTemplate.uploadedBy?.name || selectedTemplate.uploadedBy?.email || "Unknown"],
               ]}
             />
+            <div className="rounded-lg border border-surface-200 p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-surface-900">Version History</p>
+                <Link href={`/templates/${selectedTemplate.id}/fields`} className="text-xs font-medium text-brand-700 hover:text-brand-800">
+                  {selectedTemplate.status === "retired" ? "View fields" : "Edit fields"}
+                </Link>
+              </div>
+              <div className="mt-3 space-y-2 text-xs">
+                {selectedTemplate.previousVersion && (
+                  <VersionHistoryRow label={`v${selectedTemplate.previousVersion.version} (previous)`} status={selectedTemplate.previousVersion.status} fieldCount={selectedTemplate.previousVersion._count.fields} href={`/templates/${selectedTemplate.previousVersion.id}/fields`} />
+                )}
+                <VersionHistoryRow label={`v${selectedTemplate.version} (current)`} status={selectedTemplate.status} fieldCount={selectedTemplate.fields.length} current />
+                {selectedTemplate.nextVersions.map((nv) => (
+                  <VersionHistoryRow key={nv.id} label={`v${nv.version}`} status={nv.status} fieldCount={nv._count.fields} href={`/templates/${nv.id}/fields`} />
+                ))}
+                {!selectedTemplate.previousVersion && selectedTemplate.nextVersions.length === 0 && (
+                  <p className="text-surface-400">No other versions</p>
+                )}
+              </div>
+            </div>
             <div className="rounded-lg border border-surface-200 p-4">
               <p className="text-sm font-semibold text-surface-900">Program Assignment</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -709,6 +750,19 @@ function MetricLine({ label, value }: { label: string; value: string | number })
       <span className="font-medium text-surface-900">{value}</span>
     </div>
   )
+}
+
+function VersionHistoryRow({ label, status, fieldCount, current, href }: { label: string; status: string; fieldCount: number; current?: boolean; href?: string }) {
+  const content = (
+    <div className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${current ? "bg-brand-50" : "hover:bg-surface-50"}`}>
+      <span className={`font-medium ${current ? "text-brand-700" : "text-surface-700"}`}>{label}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-surface-400">{fieldCount} field{fieldCount === 1 ? "" : "s"}</span>
+        <StatusChip status={status} size="sm" />
+      </div>
+    </div>
+  )
+  return href ? <Link href={href}>{content}</Link> : content
 }
 
 function DetailBlock({ title, rows }: { title: string; rows: [string, string][] }) {

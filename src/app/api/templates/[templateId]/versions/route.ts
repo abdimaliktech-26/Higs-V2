@@ -73,22 +73,49 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tem
 
   let tpl
   try {
-    tpl = await prisma.documentTemplate.create({
-      data: {
-        organizationId: previous.organizationId,
-        name: previous.name,
-        description: previous.description,
-        formType: previous.formType,
-        program: previous.program,
-        version: previous.version + 1,
-        previousVersionId: previous.id,
-        fileUrl: record.url,
-        fileKey: record.key,
-        fileSize: record.size,
-        mimeType: "application/pdf",
-        uploadedById: user.id as string,
-        status: "draft",
-      },
+    tpl = await prisma.$transaction(async (tx) => {
+      const created = await tx.documentTemplate.create({
+        data: {
+          organizationId: previous.organizationId,
+          name: previous.name,
+          description: previous.description,
+          formType: previous.formType,
+          program: previous.program,
+          version: previous.version + 1,
+          previousVersionId: previous.id,
+          fileUrl: record.url,
+          fileKey: record.key,
+          fileSize: record.size,
+          mimeType: "application/pdf",
+          uploadedById: user.id as string,
+          status: "draft",
+        },
+      })
+
+      // Carry the prior version's field layout forward as a starting point —
+      // fresh rows/ids, fieldKey and geometry preserved, old version's own
+      // field rows are never touched.
+      const priorFields = await tx.documentTemplateField.findMany({ where: { documentTemplateId: previous.id } })
+      if (priorFields.length > 0) {
+        await tx.documentTemplateField.createMany({
+          data: priorFields.map((f) => ({
+            organizationId: f.organizationId,
+            documentTemplateId: created.id,
+            fieldKey: f.fieldKey,
+            name: f.name,
+            fieldType: f.fieldType,
+            pageNumber: f.pageNumber,
+            posX: f.posX,
+            posY: f.posY,
+            width: f.width,
+            height: f.height,
+            isRequired: f.isRequired,
+            sortOrder: f.sortOrder,
+          })),
+        })
+      }
+
+      return created
     })
   } catch {
     // No new row exists if this fails — the prior version remains the only,
