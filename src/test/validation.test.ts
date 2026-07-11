@@ -110,6 +110,18 @@ describe("validation rule schema", () => {
     })
     expect(r.success).toBe(false)
   })
+
+  it("rejects an unrecognized category (free text no longer accepted)", () => {
+    const r = validate(createValidationRuleSchema, {
+      name: "Test", category: "some_made_up_category", severity: "critical",
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it.each(["required_field", "required_signature", "missing_document", "overdue_due_date"])("accepts the recognized category %s", (category) => {
+    const r = validate(createValidationRuleSchema, { name: "Test", category, severity: "critical" })
+    expect(r.success).toBe(true)
+  })
 })
 
 describe("packet schema", () => {

@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { createValidationRule } from "@/lib/actions/validation"
+import { createValidationRule, updateValidationRuleActive } from "@/lib/actions/validation"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -15,10 +15,18 @@ type RuleRow = Awaited<ReturnType<typeof getValidationRules>>[number]
 
 const severityVariant: Record<string, "danger" | "warning" | "secondary"> = { critical: "danger", warning: "warning", info: "secondary" }
 
+// Only categories runPacketValidation actually knows how to execute —
+// matches VALIDATION_RULE_CATEGORIES in src/lib/validation.ts.
+const CATEGORY_OPTIONS = [
+  { value: "required_field", label: "Required Field" },
+  { value: "required_signature", label: "Required Signature" },
+  { value: "missing_document", label: "Missing Document" },
+  { value: "overdue_due_date", label: "Overdue Due Date" },
+]
+
 interface Filters { category?: string; severity?: string; program?: string; packetType?: string; active?: string }
 
 export function RulesLibraryCard({ allRules, filtered, filters, selectedRuleId }: { allRules: RuleRow[]; filtered: RuleRow[]; filters: Filters; selectedRuleId?: string }) {
-  const categories = distinctValues(allRules, "category")
   const programs = distinctValues(allRules, "program")
   const packetTypes = distinctValues(allRules, "packetType")
 
@@ -30,7 +38,7 @@ export function RulesLibraryCard({ allRules, filtered, filters, selectedRuleId }
       </CardHeader>
       <CardContent className="space-y-6">
         <form className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Select name="category" defaultValue={filters.category || ""} placeholder="All Categories" options={categories.map((c) => ({ value: c, label: c.replace(/_/g, " ") }))} />
+          <Select name="category" defaultValue={filters.category || ""} placeholder="All Categories" options={CATEGORY_OPTIONS} />
           <Select name="severity" defaultValue={filters.severity || ""} placeholder="All Severities" options={[{ value: "critical", label: "Critical" }, { value: "warning", label: "Warning" }, { value: "info", label: "Info" }]} />
           <Select name="program" defaultValue={filters.program || ""} placeholder="All Programs" options={programs.map((p) => ({ value: p, label: p }))} />
           <Select name="packetType" defaultValue={filters.packetType || ""} placeholder="All Packet Types" options={packetTypes.map((p) => ({ value: p, label: p.replace(/_/g, " ") }))} />
@@ -61,7 +69,18 @@ export function RulesLibraryCard({ allRules, filtered, filters, selectedRuleId }
                     <td className="py-3 pr-4"><Badge variant={severityVariant[rule.severity] || "secondary"} size="sm">{rule.severity}</Badge></td>
                     <td className="py-3 pr-4 text-surface-600">{rule.program || "—"}</td>
                     <td className="py-3 pr-4 capitalize text-surface-600">{rule.packetType?.replace(/_/g, " ") || "—"}</td>
-                    <td className="py-3 pr-4 last:pr-0"><Badge variant={rule.active ? "success" : "secondary"} size="sm">{rule.active ? "Active" : "Inactive"}</Badge></td>
+                    <td className="py-3 pr-4 last:pr-0">
+                      <form
+                        action={async () => {
+                          "use server"
+                          await updateValidationRuleActive(rule.id, !rule.active)
+                        }}
+                      >
+                        <button type="submit" title={rule.active ? "Click to deactivate" : "Click to activate"}>
+                          <Badge variant={rule.active ? "success" : "secondary"} size="sm">{rule.active ? "Active" : "Inactive"}</Badge>
+                        </button>
+                      </form>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -95,7 +114,7 @@ function CreateRuleForm() {
       >
         <Input label="Rule Name" name="name" required />
         <Select label="Severity" name="severity" required options={[{ value: "critical", label: "Critical" }, { value: "warning", label: "Warning" }, { value: "info", label: "Info" }]} />
-        <Input label="Category" name="category" required placeholder="e.g. required_field" />
+        <Select label="Category" name="category" required options={CATEGORY_OPTIONS} />
         <Input label="Program" name="program" placeholder="Optional" />
         <Input label="Packet Type" name="packetType" placeholder="Optional" />
         <div className="sm:col-span-2">

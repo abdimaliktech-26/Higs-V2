@@ -155,10 +155,15 @@ export const createSignatureSchema = z.object({
 })
 
 // ── Validation Rule ──
+// Constrained to categories runPacketValidation actually knows how to
+// execute — a rule with any other category would silently never match
+// anything, which is confusing for admins, so free text is rejected outright.
+export const VALIDATION_RULE_CATEGORIES = ["required_field", "required_signature", "missing_document", "overdue_due_date"] as const
+
 export const createValidationRuleSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional().or(z.literal("")),
-  category: z.string().max(100),
+  category: z.enum(VALIDATION_RULE_CATEGORIES),
   severity: z.enum(["critical", "warning", "info"]),
   program: z.string().max(100).optional().or(z.literal("")),
   packetType: z.string().max(50).optional().or(z.literal("")),
