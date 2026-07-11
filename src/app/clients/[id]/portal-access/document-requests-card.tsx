@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge"
 import { StatusChip } from "@/components/ui/status-chip"
 import { Modal } from "@/components/ui/modal"
 import { Alert } from "@/components/ui/alert"
+import { Progress } from "@/components/ui/progress"
 import { EmptyState } from "@/components/ui/states"
-import { FilePlus2, FileStack, FileCheck2, History } from "lucide-react"
+import { FilePlus2, FileStack, FileCheck2, History, ClipboardCheck } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
 
 interface SupportingDocRow {
@@ -38,9 +39,26 @@ interface RequestRow {
   supportingDocuments: SupportingDocRow[]
 }
 
+interface ChecklistSummary {
+  requiredTotal: number
+  requiredCompleted: number
+  remaining: number
+  completionPercent: number
+}
+
 interface Props {
   clientId: string
   requests: RequestRow[]
+  checklist: ChecklistSummary
+}
+
+const STATUS_BREAKDOWN_ORDER = ["PENDING", "SUBMITTED", "UNDER_REVIEW", "NEEDS_REPLACEMENT", "APPROVED"] as const
+const STATUS_BREAKDOWN_LABELS: Record<string, string> = {
+  PENDING: "Pending",
+  SUBMITTED: "Submitted",
+  UNDER_REVIEW: "Under Review",
+  NEEDS_REPLACEMENT: "Needs Replacement",
+  APPROVED: "Approved",
 }
 
 const categoryOptions = [
@@ -77,7 +95,7 @@ const severityOptions = [
   { value: "SUGGESTED", label: "Suggested" },
 ]
 
-export function DocumentRequestsCard({ clientId, requests }: Props) {
+export function DocumentRequestsCard({ clientId, requests, checklist }: Props) {
   const router = useRouter()
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -88,6 +106,11 @@ export function DocumentRequestsCard({ clientId, requests }: Props) {
   const [reviewLoading, setReviewLoading] = useState(false)
 
   const activeRequests = requests.filter((r) => r.status !== "CANCELLED")
+  const statusBreakdown = STATUS_BREAKDOWN_ORDER.map((status) => ({
+    status,
+    label: STATUS_BREAKDOWN_LABELS[status],
+    count: activeRequests.filter((r) => r.status === status).length,
+  })).filter((s) => s.count > 0)
 
   async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -165,6 +188,32 @@ export function DocumentRequestsCard({ clientId, requests }: Props) {
           </div>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="border-b border-surface-100 px-6 py-4">
+            <div className="flex items-center gap-4">
+              <ClipboardCheck className="h-7 w-7 shrink-0 text-brand-600" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-surface-900">Required Documents</p>
+                  <p className="text-sm font-semibold text-surface-700">
+                    {checklist.requiredCompleted} of {checklist.requiredTotal} completed
+                  </p>
+                </div>
+                <Progress value={checklist.completionPercent} className="mt-2" />
+                <p className="mt-1 text-xs text-surface-500">
+                  {checklist.remaining === 0
+                    ? "All required documents are complete."
+                    : `${checklist.remaining} required document${checklist.remaining === 1 ? "" : "s"} remaining`}
+                </p>
+              </div>
+            </div>
+            {statusBreakdown.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {statusBreakdown.map((s) => (
+                  <Badge key={s.status} variant="outline">{s.label}: {s.count}</Badge>
+                ))}
+              </div>
+            )}
+          </div>
           {activeRequests.length === 0 ? (
             <div className="px-6 pb-6">
               <EmptyState title="No document requests yet" description="Ask this client's guardian to upload a specific document through the portal." icon={<FileStack className="h-8 w-8" />} />

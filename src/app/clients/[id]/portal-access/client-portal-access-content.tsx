@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { getClientById } from "@/lib/actions/client"
 import { getClientPortalAccess, getPortalInvitations } from "@/lib/actions/portal-invitations"
-import { getPortalDocumentRequests } from "@/lib/actions/portal-document-requests"
+import { getPortalDocumentRequests, getStaffDocumentChecklist } from "@/lib/actions/portal-document-requests"
 import { ErrorState } from "@/components/ui/states"
 import { ArrowLeft } from "lucide-react"
 import { ClientPortalAccessManager } from "./client-portal-access-manager"
@@ -18,11 +18,13 @@ export async function ClientPortalAccessContent({ orgId, clientId }: Props) {
   let access: Awaited<ReturnType<typeof getClientPortalAccess>>
   let invitations: Awaited<ReturnType<typeof getPortalInvitations>>
   let documentRequests: Awaited<ReturnType<typeof getPortalDocumentRequests>>
+  let checklist: Awaited<ReturnType<typeof getStaffDocumentChecklist>>
   try {
-    ;[access, invitations, documentRequests] = await Promise.all([
+    ;[access, invitations, documentRequests, checklist] = await Promise.all([
       getClientPortalAccess(orgId, clientId),
       getPortalInvitations(orgId, clientId),
       getPortalDocumentRequests(orgId, clientId),
+      getStaffDocumentChecklist(orgId, clientId),
     ])
   } catch (e) {
     return <ErrorState title="Error" description={(e as Error).message} />
@@ -46,7 +48,7 @@ export async function ClientPortalAccessContent({ orgId, clientId }: Props) {
         invitations={invitations}
       />
 
-      <DocumentRequestsCard clientId={clientId} requests={documentRequests} />
+      <DocumentRequestsCard clientId={clientId} requests={documentRequests} checklist={checklist} />
     </div>
   )
 }

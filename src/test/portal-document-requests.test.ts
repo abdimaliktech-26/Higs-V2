@@ -4,14 +4,18 @@ const clientFindUnique = vi.fn()
 const packetFindUnique = vi.fn()
 const packetDocumentFindUnique = vi.fn()
 const portalDocumentRequestCreate = vi.fn()
+const portalDocumentRequestFindFirst = vi.fn()
 const portalDocumentRequestFindUnique = vi.fn()
 const portalDocumentRequestUpdate = vi.fn()
 const portalDocumentRequestFindMany = vi.fn()
+const portalDocumentRequestCount = vi.fn()
 const portalDocumentTimelineEventCreate = vi.fn()
 const portalClientAccessFindUnique = vi.fn()
 const portalClientAccessUpdate = vi.fn()
 const supportingDocumentFindFirst = vi.fn()
 const portalDocumentReviewFeedbackFindMany = vi.fn()
+const packetDocumentFindUniqueTx = vi.fn()
+const packetDocumentUpdateTx = vi.fn()
 
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
@@ -21,10 +25,20 @@ const notifyActiveMock = vi.fn()
 
 function makeTx(overrides: Record<string, any> = {}) {
   return {
-    portalDocumentRequest: { update: vi.fn(), ...overrides.portalDocumentRequest },
+    portalDocumentRequest: {
+      update: vi.fn(),
+      findFirst: (...a: unknown[]) => portalDocumentRequestFindFirst(...a),
+      create: (...a: unknown[]) => portalDocumentRequestCreate(...a),
+      ...overrides.portalDocumentRequest,
+    },
     supportingDocument: { update: vi.fn(), ...overrides.supportingDocument },
     portalDocumentTimelineEvent: { create: vi.fn(), ...overrides.portalDocumentTimelineEvent },
     portalDocumentReviewFeedback: { create: vi.fn(), ...overrides.portalDocumentReviewFeedback },
+    packetDocument: {
+      findUnique: (...a: unknown[]) => packetDocumentFindUniqueTx(...a),
+      update: (...a: unknown[]) => packetDocumentUpdateTx(...a),
+      ...overrides.packetDocument,
+    },
   }
 }
 let currentTx = makeTx()
@@ -40,6 +54,7 @@ vi.mock("@/lib/db", () => ({
       findUnique: (...a: unknown[]) => portalDocumentRequestFindUnique(...a),
       update: (...a: unknown[]) => portalDocumentRequestUpdate(...a),
       findMany: (...a: unknown[]) => portalDocumentRequestFindMany(...a),
+      count: (...a: unknown[]) => portalDocumentRequestCount(...a),
     },
     portalDocumentTimelineEvent: { create: (...a: unknown[]) => portalDocumentTimelineEventCreate(...a) },
     portalDocumentReviewFeedback: { findMany: (...a: unknown[]) => portalDocumentReviewFeedbackFindMany(...a) },
@@ -85,6 +100,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   currentTx = makeTx()
   transactionMock.mockImplementation((cb: any) => cb(currentTx))
+  portalDocumentRequestFindFirst.mockResolvedValue(null)
 })
 
 describe("createPortalDocumentRequest", () => {
@@ -160,6 +176,83 @@ describe("createPortalDocumentRequest", () => {
     if (result.success) return
     expect(result.error).toMatch(/packet not found/i)
     expect(portalDocumentRequestCreate).not.toHaveBeenCalled()
+  })
+})
+
+const PACKET_DOCUMENT_ID = "packet-doc-1"
+
+function withOwnedPacketDocument() {
+  packetDocumentFindUnique.mockResolvedValue({ packetId: "packet-1", packet: { clientId: CLIENT_ID, organizationId: ORG_ID } })
+}
+
+describe("createPortalDocumentRequest — duplicate active request guard", () => {
+  it.each(["PENDING", "SUBMITTED", "UNDER_REVIEW", "NEEDS_REPLACEMENT"])(
+    "rejects a second active request targeting the same packetDocumentId when one is already %s",
+    async (status) => {
+      authMock.mockResolvedValue(staffSession())
+      requireOrgAccessMock.mockResolvedValue({})
+      getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+      clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: ORG_ID })
+      withOwnedPacketDocument()
+      portalDocumentRequestFindFirst.mockResolvedValue({ id: "existing-req", status })
+
+      const { createPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+      const result = await createPortalDocumentRequest(validRequestInput({ packetDocumentId: PACKET_DOCUMENT_ID }))
+
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/active request/i)
+      expect(portalDocumentRequestCreate).not.toHaveBeenCalled()
+    }
+  )
+
+  it("checks only non-terminal statuses for the conflict, scoped to the target packetDocumentId", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: ORG_ID })
+    withOwnedPacketDocument()
+    portalDocumentRequestFindFirst.mockResolvedValue(null)
+    portalDocumentRequestCreate.mockImplementation(async ({ data }: any) => ({ id: REQUEST_ID, ...data }))
+
+    const { createPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    await createPortalDocumentRequest(validRequestInput({ packetDocumentId: PACKET_DOCUMENT_ID }))
+
+    const where = portalDocumentRequestFindFirst.mock.calls[0][0].where
+    expect(where.packetDocumentId).toBe(PACKET_DOCUMENT_ID)
+    expect(where.status.in.sort()).toEqual(["NEEDS_REPLACEMENT", "PENDING", "SUBMITTED", "UNDER_REVIEW"].sort())
+  })
+
+  it("allows a new request once the prior one for the same packetDocumentId is APPROVED or CANCELLED", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: ORG_ID })
+    withOwnedPacketDocument()
+    // The conflict query itself only matches non-terminal statuses, so an
+    // APPROVED/CANCELLED prior request is correctly excluded by the DB query.
+    portalDocumentRequestFindFirst.mockResolvedValue(null)
+    portalDocumentRequestCreate.mockImplementation(async ({ data }: any) => ({ id: REQUEST_ID, ...data }))
+
+    const { createPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await createPortalDocumentRequest(validRequestInput({ packetDocumentId: PACKET_DOCUMENT_ID }))
+
+    expect(result.success).toBe(true)
+    expect(portalDocumentRequestCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the duplicate check entirely for ad-hoc requests with no packetDocumentId", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: ORG_ID })
+    portalDocumentRequestCreate.mockImplementation(async ({ data }: any) => ({ id: REQUEST_ID, ...data }))
+
+    const { createPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await createPortalDocumentRequest(validRequestInput())
+
+    expect(result.success).toBe(true)
+    expect(portalDocumentRequestFindFirst).not.toHaveBeenCalled()
   })
 })
 
@@ -606,6 +699,105 @@ describe("reviewPortalDocumentRequest", () => {
   })
 })
 
+function ownedPacketDocument(overrides: Record<string, unknown> = {}) {
+  return { id: PACKET_DOCUMENT_ID, packetId: "packet-1", status: "pending", packet: { clientId: CLIENT_ID, organizationId: ORG_ID }, ...overrides }
+}
+
+describe("reviewPortalDocumentRequest — packet completion linkage", () => {
+  it("APPROVED updates the linked PacketDocument to completed and records provenance", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", packetId: "packet-1", packetDocumentId: PACKET_DOCUMENT_ID }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+    packetDocumentFindUniqueTx.mockResolvedValue(ownedPacketDocument())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(true)
+    expect(packetDocumentUpdateTx).toHaveBeenCalledWith({
+      where: { id: PACKET_DOCUMENT_ID },
+      data: { status: "completed", completedAt: expect.any(Date) },
+    })
+
+    const provenanceCall = createAuditEventMock.mock.calls.find((c: any) => c[0].action === "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL")
+    expect(provenanceCall).toBeTruthy()
+    expect(provenanceCall![0].metadata).toEqual({
+      requestId: REQUEST_ID, packetDocumentId: PACKET_DOCUMENT_ID, supportingDocumentId: "supdoc-1", transition: "completed",
+    })
+    // Passed the transaction client so it commits atomically with the approval.
+    expect(provenanceCall![1]).toBe(currentTx)
+  })
+
+  it("NEEDS_REPLACEMENT never touches the linked PacketDocument", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", packetId: "packet-1", packetDocumentId: PACKET_DOCUMENT_ID }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "NEEDS_REPLACEMENT", note: "Please resend" })
+
+    expect(result.success).toBe(true)
+    expect(packetDocumentFindUniqueTx).not.toHaveBeenCalled()
+    expect(packetDocumentUpdateTx).not.toHaveBeenCalled()
+    expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL")).toBe(false)
+  })
+
+  it("an ad-hoc request with no packetDocumentId never touches PacketDocument on approval", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(true)
+    expect(packetDocumentFindUniqueTx).not.toHaveBeenCalled()
+    expect(packetDocumentUpdateTx).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["a different organization", ownedPacketDocument({ packet: { clientId: CLIENT_ID, organizationId: "org-OTHER" } })],
+    ["a different client", ownedPacketDocument({ packet: { clientId: "client-OTHER", organizationId: ORG_ID } })],
+    ["a different packet than the request's own packetId", ownedPacketDocument({ packetId: "packet-OTHER" })],
+  ])("rejects the PacketDocument update when it belongs to %s, but still lets the approval succeed", async (_label, doc) => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", packetId: "packet-1", packetDocumentId: PACKET_DOCUMENT_ID }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+    packetDocumentFindUniqueTx.mockResolvedValue(doc)
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(true)
+    expect(packetDocumentUpdateTx).not.toHaveBeenCalled()
+    expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL")).toBe(false)
+  })
+
+  it("handles an already-completed PacketDocument safely — no duplicate write, no duplicate audit noise", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", packetId: "packet-1", packetDocumentId: PACKET_DOCUMENT_ID }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+    packetDocumentFindUniqueTx.mockResolvedValue(ownedPacketDocument({ status: "completed" }))
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(true)
+    expect(packetDocumentUpdateTx).not.toHaveBeenCalled()
+    expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL")).toBe(false)
+  })
+})
+
 describe("getPortalDocumentReviewFeedback — portal-side scoping", () => {
   it("scopes feedback to the correct request and verifies client access", async () => {
     const { requirePortalClientAccess } = await import("@/lib/portal/auth")
@@ -627,5 +819,101 @@ describe("getPortalDocumentReviewFeedback — portal-side scoping", () => {
 
     const { getPortalDocumentReviewFeedback } = await import("@/lib/actions/portal-document-requests")
     await expect(getPortalDocumentReviewFeedback("does-not-exist")).rejects.toThrow(/not found/i)
+  })
+})
+
+describe("getPortalUploadChecklist / getStaffDocumentChecklist — checklist definition", () => {
+  beforeEach(() => {
+    portalDocumentRequestCount.mockReset()
+  })
+
+  it("counts only required, non-cancelled requests as the total, and APPROVED ones as completed", async () => {
+    portalDocumentRequestCount.mockImplementation(async ({ where }: any) => {
+      if (where.status === "APPROVED") return 2
+      return 5
+    })
+
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    const summary = await getPortalUploadChecklist(CLIENT_ID)
+
+    expect(summary).toEqual({ requiredTotal: 5, requiredCompleted: 2, remaining: 3, completionPercent: 40 })
+    const totalWhere = portalDocumentRequestCount.mock.calls[0][0].where
+    expect(totalWhere).toEqual({ clientId: CLIENT_ID, isRequired: true, status: { not: "CANCELLED" } })
+    const completedWhere = portalDocumentRequestCount.mock.calls[1][0].where
+    expect(completedWhere).toEqual({ clientId: CLIENT_ID, isRequired: true, status: "APPROVED" })
+  })
+
+  it("excludes optional requests from both totals (isRequired: true is always part of the query)", async () => {
+    portalDocumentRequestCount.mockResolvedValue(0)
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    await getPortalUploadChecklist(CLIENT_ID)
+
+    for (const call of portalDocumentRequestCount.mock.calls) {
+      expect(call[0].where.isRequired).toBe(true)
+    }
+  })
+
+  it("excludes cancelled requests from the total (status: not CANCELLED)", async () => {
+    portalDocumentRequestCount.mockResolvedValue(0)
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    await getPortalUploadChecklist(CLIENT_ID)
+
+    expect(portalDocumentRequestCount.mock.calls[0][0].where.status).toEqual({ not: "CANCELLED" })
+  })
+
+  it.each(["PENDING", "SUBMITTED", "UNDER_REVIEW", "NEEDS_REPLACEMENT"])(
+    "treats %s as incomplete — only APPROVED counts toward requiredCompleted",
+    async () => {
+      // requiredCompleted's query filters status: "APPROVED" directly, so any
+      // other status (including these four) is never counted, by construction.
+      portalDocumentRequestCount.mockImplementation(async ({ where }: any) => (where.status === "APPROVED" ? 0 : 3))
+      const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+      const summary = await getPortalUploadChecklist(CLIENT_ID)
+      expect(summary.requiredCompleted).toBe(0)
+      expect(summary.requiredTotal).toBe(3)
+    }
+  )
+
+  it("returns 0% (not NaN) when there are zero required requests", async () => {
+    portalDocumentRequestCount.mockResolvedValue(0)
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    const summary = await getPortalUploadChecklist(CLIENT_ID)
+    expect(summary).toEqual({ requiredTotal: 0, requiredCompleted: 0, remaining: 0, completionPercent: 0 })
+  })
+
+  it("rounds the completion percentage", async () => {
+    portalDocumentRequestCount.mockImplementation(async ({ where }: any) => (where.status === "APPROVED" ? 1 : 3))
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    const summary = await getPortalUploadChecklist(CLIENT_ID)
+    expect(summary.completionPercent).toBe(33)
+  })
+
+  it("getPortalUploadChecklist is scoped to the authenticated user + selected client via requirePortalClientAccess", async () => {
+    const { requirePortalClientAccess } = await import("@/lib/portal/auth")
+    portalDocumentRequestCount.mockResolvedValue(0)
+
+    const { getPortalUploadChecklist } = await import("@/lib/actions/portal-document-requests")
+    await getPortalUploadChecklist(CLIENT_ID)
+
+    expect(requirePortalClientAccess).toHaveBeenCalledWith(CLIENT_ID)
+  })
+
+  it("getStaffDocumentChecklist is scoped to the active organization and rejects a cross-tenant client", async () => {
+    requireOrgAccessMock.mockResolvedValue({})
+    clientFindUnique.mockResolvedValue({ organizationId: "org-OTHER" })
+
+    const { getStaffDocumentChecklist } = await import("@/lib/actions/portal-document-requests")
+    await expect(getStaffDocumentChecklist(ORG_ID, CLIENT_ID)).rejects.toThrow(/not found/i)
+    expect(portalDocumentRequestCount).not.toHaveBeenCalled()
+  })
+
+  it("getStaffDocumentChecklist succeeds for a client that belongs to the active organization", async () => {
+    requireOrgAccessMock.mockResolvedValue({})
+    clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
+    portalDocumentRequestCount.mockResolvedValue(0)
+
+    const { getStaffDocumentChecklist } = await import("@/lib/actions/portal-document-requests")
+    const summary = await getStaffDocumentChecklist(ORG_ID, CLIENT_ID)
+    expect(summary.requiredTotal).toBe(0)
   })
 })

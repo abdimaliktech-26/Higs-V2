@@ -12,9 +12,16 @@ export interface AuditEventInput {
   userAgent?: string | null
 }
 
-export async function createAuditEvent(input: AuditEventInput) {
+/**
+ * Accepts an optional transaction client so callers running inside
+ * prisma.$transaction (e.g. portal document review, which writes a
+ * provenance audit event when approval completes a linked PacketDocument)
+ * can pass `tx` and have the audit write commit/roll back atomically with
+ * the rest of the transaction.
+ */
+export async function createAuditEvent(input: AuditEventInput, client: Pick<typeof prisma, "auditEvent"> = prisma) {
   try {
-    await prisma.auditEvent.create({
+    await client.auditEvent.create({
       data: {
         organizationId: input.organizationId ?? null,
         actorId: input.actorId ?? null,

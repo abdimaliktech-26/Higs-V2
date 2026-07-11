@@ -63,20 +63,38 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
       }
     }
 
-    const request = await prisma.portalDocumentRequest.create({
-      data: {
-        organizationId: orgId,
-        clientId: data.clientId,
-        packetId: data.packetId || null,
-        packetDocumentId: data.packetDocumentId || null,
-        title: data.title,
-        description: data.description || null,
-        category: data.category,
-        priority: data.priority,
-        isRequired: data.isRequired,
-        dueDate: data.dueDate ? new Date(data.dueDate) : null,
-        requestedByUserId: user.id as string,
-      },
+    const request = await prisma.$transaction(async (tx) => {
+      // Guard against two active requests targeting the same PacketDocument —
+      // would double-count completion and create conflicting review outcomes.
+      // Not a DB-level unique constraint (that can't safely express "only
+      // among non-terminal statuses"), so this check + create is wrapped in a
+      // transaction to narrow the race window as much as application-level
+      // validation can.
+      if (data.packetDocumentId) {
+        const activeConflict = await tx.portalDocumentRequest.findFirst({
+          where: { packetDocumentId: data.packetDocumentId, status: { in: ["PENDING", "SUBMITTED", "UNDER_REVIEW", "NEEDS_REPLACEMENT"] } },
+          select: { id: true },
+        })
+        if (activeConflict) {
+          throw new Error("Another active request already targets this document")
+        }
+      }
+
+      return tx.portalDocumentRequest.create({
+        data: {
+          organizationId: orgId,
+          clientId: data.clientId,
+          packetId: data.packetId || null,
+          packetDocumentId: data.packetDocumentId || null,
+          title: data.title,
+          description: data.description || null,
+          category: data.category,
+          priority: data.priority,
+          isRequired: data.isRequired,
+          dueDate: data.dueDate ? new Date(data.dueDate) : null,
+          requestedByUserId: user.id as string,
+        },
+      })
     })
 
     await createAuditEvent({
@@ -222,6 +240,39 @@ export async function setPortalUploadPermission(accessId: string, enabled: boole
   } catch (error) {
     return { success: false, error: (error as Error).message || "Failed to update upload permission" }
   }
+}
+
+export interface DocumentChecklistSummary {
+  requiredTotal: number
+  requiredCompleted: number
+  remaining: number
+  completionPercent: number
+}
+
+// ── Checklist: computed from PortalDocumentRequest rows only — optional
+// (isRequired: false) and cancelled requests never count toward the total ──
+async function computeChecklistSummary(clientId: string): Promise<DocumentChecklistSummary> {
+  const [requiredTotal, requiredCompleted] = await Promise.all([
+    prisma.portalDocumentRequest.count({ where: { clientId, isRequired: true, status: { not: "CANCELLED" } } }),
+    prisma.portalDocumentRequest.count({ where: { clientId, isRequired: true, status: "APPROVED" } }),
+  ])
+  const remaining = requiredTotal - requiredCompleted
+  const completionPercent = requiredTotal === 0 ? 0 : Math.round((requiredCompleted / requiredTotal) * 100)
+  return { requiredTotal, requiredCompleted, remaining, completionPercent }
+}
+
+// ── Portal: checklist summary for the authenticated user's selected client ──
+export async function getPortalUploadChecklist(clientId: string): Promise<DocumentChecklistSummary> {
+  await requirePortalClientAccess(clientId)
+  return computeChecklistSummary(clientId)
+}
+
+// ── Staff: checklist summary scoped to the active organization ──
+export async function getStaffDocumentChecklist(orgId: string, clientId: string): Promise<DocumentChecklistSummary> {
+  await requireOrgAccess(orgId)
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { organizationId: true } })
+  if (!client || client.organizationId !== orgId) throw new Error("Client not found")
+  return computeChecklistSummary(clientId)
 }
 
 // ── Portal: list requests for the currently-selected, access-verified client ──
@@ -386,6 +437,39 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
       }
 
       if (data.decision === "APPROVED") {
+        // Bridge into the existing packet-completion system only when this
+        // request explicitly targets a PacketDocument — ad-hoc requests
+        // (no packetDocumentId) have nothing to mark complete. Re-verify
+        // current ownership rather than trusting the FK stored at request
+        // creation time (creation validates packetId/packetDocumentId
+        // independently, so a stale/mismatched pairing is possible).
+        if (request.packetDocumentId) {
+          const packetDocument = await tx.packetDocument.findUnique({
+            where: { id: request.packetDocumentId },
+            select: { id: true, packetId: true, status: true, packet: { select: { clientId: true, organizationId: true } } },
+          })
+          const belongsToSameTenant =
+            packetDocument !== null &&
+            packetDocument.packet.organizationId === orgId &&
+            packetDocument.packet.clientId === request.clientId &&
+            (!request.packetId || packetDocument.packetId === request.packetId)
+
+          if (belongsToSameTenant && packetDocument.status !== "completed") {
+            await tx.packetDocument.update({
+              where: { id: packetDocument.id },
+              data: { status: "completed", completedAt: new Date() },
+            })
+            await createAuditEvent({
+              organizationId: orgId,
+              actorId: user.id as string,
+              action: "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL",
+              targetType: "packet_document",
+              targetId: packetDocument.id,
+              metadata: { requestId, packetDocumentId: packetDocument.id, supportingDocumentId: latestUpload.id, transition: "completed" },
+            }, tx)
+          }
+        }
+
         await notifyActivePortalUsersForClient({
           organizationId: orgId,
           clientId: request.clientId,
