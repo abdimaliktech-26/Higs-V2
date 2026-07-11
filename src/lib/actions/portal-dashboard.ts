@@ -4,6 +4,15 @@ import { prisma } from "@/lib/db"
 import { requirePortalAuth, requirePortalClientAccess, requirePortalPermission } from "@/lib/portal/auth"
 import { signPortalFileUrl } from "@/lib/storage"
 
+const REMINDER_STATUSES = ["PENDING", "NEEDS_REPLACEMENT"] as const
+
+function startOfDayOffset(daysFromNow: number): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() + daysFromNow)
+  return d
+}
+
 // ── Client switcher: only this PortalUser's own active grants ──
 export async function getPortalAuthorizedClients() {
   const auth = await requirePortalAuth()
@@ -197,7 +206,99 @@ export async function getPortalNotifications() {
     where: { portalUserId: auth.portalUserId },
     orderBy: { createdAt: "desc" },
     take: 50,
-    select: { id: true, type: true, title: true, message: true, readAt: true, createdAt: true },
+    select: { id: true, type: true, title: true, message: true, link: true, readAt: true, createdAt: true },
+  })
+}
+
+// ── Due-date reminders: deduplicated on-demand scan, triggered by page load ──
+// No cron/background worker exists in this app — this runs synchronously
+// whenever the portal dashboard or notifications page renders, and relies on
+// a per-recipient dedup check (mirroring the staff generateNotifications
+// JSON-path pattern) so repeated page loads never create duplicate reminders.
+export async function generatePortalDueDateReminders(clientId: string): Promise<void> {
+  const context = await requirePortalClientAccess(clientId)
+
+  const reminderWindows: { type: string; start: Date; end: Date }[] = [
+    { type: "due_tomorrow", start: startOfDayOffset(1), end: startOfDayOffset(2) },
+    { type: "due_in_3_days", start: startOfDayOffset(3), end: startOfDayOffset(4) },
+  ]
+
+  const requests = await prisma.portalDocumentRequest.findMany({
+    where: {
+      clientId,
+      status: { in: [...REMINDER_STATUSES] },
+      dueDate: { gte: reminderWindows[0].start, lt: reminderWindows[1].end },
+    },
+    select: { id: true, dueDate: true },
+  })
+  if (requests.length === 0) return
+
+  const grants = await prisma.portalClientAccess.findMany({
+    where: {
+      clientId,
+      status: "ACTIVE",
+      revokedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+    select: { portalUserId: true },
+  })
+  if (grants.length === 0) return
+
+  for (const request of requests) {
+    if (!request.dueDate) continue
+    const window = reminderWindows.find((w) => request.dueDate! >= w.start && request.dueDate! < w.end)
+    if (!window) continue
+
+    const title = window.type === "due_tomorrow" ? "Document due tomorrow" : "Document due in 3 days"
+    const message =
+      window.type === "due_tomorrow"
+        ? "A requested document is due tomorrow. Please upload it soon."
+        : "A requested document is due in 3 days. Please upload it soon."
+    const link = `/portal/upload?client=${clientId}&request=${request.id}`
+
+    for (const grant of grants) {
+      const existing = await prisma.portalNotification.findFirst({
+        where: {
+          portalUserId: grant.portalUserId,
+          clientId,
+          type: window.type,
+          metadata: { path: ["requestId"], equals: request.id },
+        },
+        select: { id: true },
+      })
+      if (existing) continue
+
+      await prisma.portalNotification.create({
+        data: {
+          organizationId: context.organizationId,
+          portalUserId: grant.portalUserId,
+          clientId,
+          type: window.type,
+          title,
+          message,
+          link,
+          metadata: { requestId: request.id, clientId, event: window.type, dueDate: request.dueDate.toISOString() },
+        },
+      })
+    }
+  }
+}
+
+// ── Mark own notification read — never another PortalUser's ──
+export async function markPortalNotificationRead(notificationId: string): Promise<void> {
+  const auth = await requirePortalAuth()
+
+  const notification = await prisma.portalNotification.findUnique({
+    where: { id: notificationId },
+    select: { id: true, portalUserId: true },
+  })
+  if (!notification || notification.portalUserId !== auth.portalUserId) {
+    throw new Error("Notification not found")
+  }
+
+  await prisma.portalNotification.update({
+    where: { id: notificationId },
+    data: { readAt: new Date() },
   })
 }
 

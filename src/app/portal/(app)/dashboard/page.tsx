@@ -1,5 +1,5 @@
 import { resolvePortalPageContext } from "@/lib/portal/page-context"
-import { getPortalDashboard } from "@/lib/actions/portal-dashboard"
+import { getPortalDashboard, generatePortalDueDateReminders } from "@/lib/actions/portal-dashboard"
 import { PortalShell } from "@/app/portal/portal-shell"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/states"
@@ -20,6 +20,7 @@ export default async function PortalDashboardPage({ searchParams }: { searchPara
     )
   }
 
+  await generatePortalDueDateReminders(currentClientId)
   const dashboard = await getPortalDashboard(currentClientId)
 
   return (

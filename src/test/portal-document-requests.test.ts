@@ -17,6 +17,7 @@ const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
+const notifyActiveMock = vi.fn()
 
 function makeTx(overrides: Record<string, any> = {}) {
   return {
@@ -57,6 +58,7 @@ vi.mock("@/lib/permissions", () => ({
 }))
 vi.mock("@/lib/portal/auth", () => ({ requirePortalClientAccess: vi.fn() }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/portal/notifications", () => ({ notifyActivePortalUsersForClient: (...a: unknown[]) => notifyActiveMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 const ORG_ID = "org-1"
@@ -104,6 +106,13 @@ describe("createPortalDocumentRequest", () => {
 
     const auditCall = createAuditEventMock.mock.calls[0][0]
     expect(auditCall.action).toBe("PORTAL_DOCUMENT_REQUEST_CREATED")
+
+    expect(notifyActiveMock).toHaveBeenCalledTimes(1)
+    const notifyInput = notifyActiveMock.mock.calls[0][0]
+    expect(notifyInput.clientId).toBe(CLIENT_ID)
+    expect(notifyInput.type).toBe("document_request")
+    expect(notifyInput.link).toBe(`/portal/upload?client=${CLIENT_ID}&request=${REQUEST_ID}`)
+    expect(notifyInput.metadata).toEqual({ requestId: REQUEST_ID, clientId: CLIENT_ID, event: "document_request" })
   })
 
   it("rejects a role not permitted to manage documents", async () => {
@@ -119,6 +128,7 @@ describe("createPortalDocumentRequest", () => {
     if (result.success) return
     expect(result.error).toMatch(/insufficient permissions/i)
     expect(portalDocumentRequestCreate).not.toHaveBeenCalled()
+    expect(notifyActiveMock).not.toHaveBeenCalled()
   })
 
   it("rejects a client belonging to a different organization", async () => {
@@ -415,6 +425,15 @@ describe("reviewPortalDocumentRequest", () => {
     expect(currentTx.supportingDocument.update).toHaveBeenCalledWith(expect.objectContaining({ data: { reviewStatus: "APPROVED" } }))
     // No feedback note supplied — no feedback row should be created.
     expect(currentTx.portalDocumentReviewFeedback.create).not.toHaveBeenCalled()
+
+    expect(notifyActiveMock).toHaveBeenCalledTimes(1)
+    const notifyInput = notifyActiveMock.mock.calls[0][0]
+    expect(notifyInput.type).toBe("upload_approved")
+    expect(notifyInput.clientId).toBe(CLIENT_ID)
+    expect(notifyInput.link).toBe(`/portal/documents?client=${CLIENT_ID}`)
+    expect(notifyInput.metadata).toEqual({ requestId: REQUEST_ID, clientId: CLIENT_ID, event: "upload_approved" })
+    // Passed the transaction client so the notification write commits atomically.
+    expect(notifyActiveMock.mock.calls[0][1]).toBe(currentTx)
   })
 
   it("approves from UNDER_REVIEW", async () => {
@@ -496,6 +515,14 @@ describe("reviewPortalDocumentRequest", () => {
     expect(feedbackData.category).toBe("MISSING_PAGES")
     expect(feedbackData.severity).toBe("REQUIRED")
     expect(feedbackData.supportingDocumentId).toBe("supdoc-1")
+
+    expect(notifyActiveMock).toHaveBeenCalledTimes(1)
+    const notifyInput = notifyActiveMock.mock.calls[0][0]
+    expect(notifyInput.type).toBe("needs_replacement")
+    expect(notifyInput.link).toBe(`/portal/upload?client=${CLIENT_ID}&request=${REQUEST_ID}`)
+    expect(notifyInput.metadata).toEqual({ requestId: REQUEST_ID, clientId: CLIENT_ID, event: "needs_replacement" })
+    // Feedback note text itself must never leak into notification metadata.
+    expect(JSON.stringify(notifyInput.metadata)).not.toContain("Front of insurance card missing")
   })
 
   it.each(["PENDING", "CANCELLED", "APPROVED"])("rejects reviewing a request in %s state", async (status) => {

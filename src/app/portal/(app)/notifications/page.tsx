@@ -1,10 +1,10 @@
 import { resolvePortalPageContext } from "@/lib/portal/page-context"
-import { getPortalNotifications } from "@/lib/actions/portal-dashboard"
+import { getPortalNotifications, generatePortalDueDateReminders } from "@/lib/actions/portal-dashboard"
 import { PortalShell } from "@/app/portal/portal-shell"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/states"
 import { Bell, Building2 } from "lucide-react"
-import { formatDateTime } from "@/lib/utils"
+import { NotificationList } from "./notification-list"
 
 export const dynamic = "force-dynamic"
 
@@ -20,6 +20,7 @@ export default async function PortalNotificationsPage({ searchParams }: { search
     )
   }
 
+  await generatePortalDueDateReminders(currentClientId)
   const notifications = await getPortalNotifications()
 
   return (
@@ -37,18 +38,9 @@ export default async function PortalNotificationsPage({ searchParams }: { search
                 <EmptyState title="No notifications yet" description="You're all caught up." icon={<Bell className="h-8 w-8" />} />
               </div>
             ) : (
-              <div className="divide-y divide-surface-100">
-                {notifications.map((n) => (
-                  <div key={n.id} className="px-6 py-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-surface-900">{n.title}</p>
-                      {!n.readAt && <span className="h-2 w-2 rounded-full bg-brand-600" />}
-                    </div>
-                    <p className="mt-0.5 text-sm text-surface-600">{n.message}</p>
-                    <p className="mt-1 text-xs text-surface-400">{formatDateTime(n.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
+              <NotificationList
+                notifications={notifications.map((n) => ({ ...n, link: n.link ?? "/portal/notifications" }))}
+              />
             )}
           </CardContent>
         </Card>

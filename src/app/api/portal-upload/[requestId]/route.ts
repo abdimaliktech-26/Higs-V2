@@ -5,6 +5,7 @@ import { storeFile } from "@/lib/storage"
 import { limiters } from "@/lib/rate-limit"
 import { requirePortalAuth, requirePortalPermission, PortalAuthError } from "@/lib/portal/auth"
 import { createPortalAuditEvent } from "@/lib/audit"
+import { notifySinglePortalUser } from "@/lib/portal/notifications"
 import { validateUploadFile, sanitizeFileName } from "@/lib/portal/upload-validation"
 
 const UPLOADABLE_STATUSES = ["PENDING", "NEEDS_REPLACEMENT"] as const
@@ -138,6 +139,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ req
           mimeType: file.type,
           eventType,
         },
+      }, tx)
+
+      await notifySinglePortalUser(portalUserId, {
+        organizationId: request.organizationId,
+        clientId: request.clientId,
+        type: "upload_received",
+        title: "Upload received",
+        message: "We received your uploaded document. It's now pending review.",
+        link: `/portal/upload?client=${request.clientId}&request=${requestId}`,
+        metadata: { requestId, clientId: request.clientId, event: "upload_received" },
       }, tx)
 
       return supportingDocument.id

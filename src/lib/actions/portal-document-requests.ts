@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent } from "@/lib/audit"
+import { notifyActivePortalUsersForClient } from "@/lib/portal/notifications"
 import { validate, createPortalDocumentRequestSchema, reviewPortalDocumentRequestSchema } from "@/lib/validation"
 
 // Matches documents.ts's EDIT_ROLES — requesting a document from a client is
@@ -89,6 +90,16 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
 
     await prisma.portalDocumentTimelineEvent.create({
       data: { requestId: request.id, eventType: "REQUESTED", createdByUserId: user.id as string },
+    })
+
+    await notifyActivePortalUsersForClient({
+      organizationId: orgId,
+      clientId: data.clientId,
+      type: "document_request",
+      title: "New document requested",
+      message: "Your care team has requested a document. Please review and upload.",
+      link: `/portal/upload?client=${data.clientId}&request=${request.id}`,
+      metadata: { requestId: request.id, clientId: data.clientId, event: "document_request" },
     })
 
     revalidatePath(`/clients/${data.clientId}/portal-access`)
@@ -372,6 +383,28 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
         await tx.portalDocumentTimelineEvent.create({
           data: { requestId, eventType: "FEEDBACK_ADDED", supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
         })
+      }
+
+      if (data.decision === "APPROVED") {
+        await notifyActivePortalUsersForClient({
+          organizationId: orgId,
+          clientId: request.clientId,
+          type: "upload_approved",
+          title: "Document approved",
+          message: "A document you submitted has been approved.",
+          link: `/portal/documents?client=${request.clientId}`,
+          metadata: { requestId, clientId: request.clientId, event: "upload_approved" },
+        }, tx)
+      } else {
+        await notifyActivePortalUsersForClient({
+          organizationId: orgId,
+          clientId: request.clientId,
+          type: "needs_replacement",
+          title: "Replacement needed",
+          message: "Your care team needs you to re-upload a document. Please check the details.",
+          link: `/portal/upload?client=${request.clientId}&request=${requestId}`,
+          metadata: { requestId, clientId: request.clientId, event: "needs_replacement" },
+        }, tx)
       }
     })
 

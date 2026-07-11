@@ -17,6 +17,7 @@ const supportingDocumentCreate = vi.fn()
 const portalDocumentTimelineEventCreate = vi.fn()
 const createPortalAuditEventMock = vi.fn()
 const storeFileMock = vi.fn()
+const notifySingleMock = vi.fn()
 
 const cookieStore = new Map<string, string>()
 const cookiesMock = {
@@ -47,6 +48,7 @@ vi.mock("@/lib/db", () => ({
 }))
 vi.mock("next/headers", () => ({ cookies: async () => cookiesMock }))
 vi.mock("@/lib/audit", () => ({ createPortalAuditEvent: (...a: unknown[]) => createPortalAuditEventMock(...a) }))
+vi.mock("@/lib/portal/notifications", () => ({ notifySinglePortalUser: (...a: unknown[]) => notifySingleMock(...a) }))
 vi.mock("@/lib/storage", () => ({ storeFile: (...a: unknown[]) => storeFileMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
   limiters: { portalUpload: { check: () => ({ allowed: true, remaining: 10, retryAfter: 0, total: 10, resetAt: 0 }) } },
@@ -319,6 +321,20 @@ describe("portal upload route — persistence", () => {
     const serialized = JSON.stringify(auditCall)
     expect(serialized).not.toContain("%PDF")
     expect(serialized).not.toContain("Insurance Card")
+  })
+
+  it("notifies only the uploading portal user that their upload was received — no fan-out, no staff Notification row", async () => {
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
+    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
+
+    expect(notifySingleMock).toHaveBeenCalledTimes(1)
+    const [notifiedUserId, notifyInput, txArg] = notifySingleMock.mock.calls[0]
+    expect(notifiedUserId).toBe(PORTAL_USER_ID)
+    expect(notifyInput.type).toBe("upload_received")
+    expect(notifyInput.link).toBe(`/portal/upload?client=${CLIENT_ID}&request=${REQUEST_ID}`)
+    expect(notifyInput.metadata).toEqual({ requestId: REQUEST_ID, clientId: CLIENT_ID, event: "upload_received" })
+    // Passed the transaction client so the notification commits atomically with the upload.
+    expect(txArg).toBe(currentTx)
   })
 
   it("rejects a concurrent double-upload race via the conditional status update", async () => {
