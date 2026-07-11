@@ -7,7 +7,7 @@ import { auth } from "@/lib/auth"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent } from "@/lib/audit"
-import { validate, createPortalDocumentRequestSchema } from "@/lib/validation"
+import { validate, createPortalDocumentRequestSchema, reviewPortalDocumentRequestSchema } from "@/lib/validation"
 
 // Matches documents.ts's EDIT_ROLES — requesting a document from a client is
 // a routine document-management task, same tier as editing/sharing one.
@@ -158,8 +158,7 @@ export async function getPortalDocumentRequests(orgId: string, clientId?: string
       requestedBy: { select: { id: true, name: true, email: true } },
       supportingDocuments: {
         orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true, originalFileName: true, fileSize: true, mimeType: true, createdAt: true },
+        select: { id: true, originalFileName: true, fileSize: true, mimeType: true, reviewStatus: true, createdAt: true },
       },
     },
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
@@ -224,10 +223,23 @@ export async function getPortalDocumentRequestsForClient(clientId: string) {
       isRequired: true, dueDate: true, status: true, createdAt: true,
       supportingDocuments: {
         orderBy: { createdAt: "desc" },
-        select: { id: true, originalFileName: true, fileSize: true, mimeType: true, createdAt: true },
+        select: { id: true, originalFileName: true, fileSize: true, mimeType: true, reviewStatus: true, createdAt: true },
       },
     },
     orderBy: [{ status: "asc" }, { dueDate: "asc" }],
+  })
+}
+
+// ── Portal: client-visible reviewer feedback for a single request ──
+export async function getPortalDocumentReviewFeedback(requestId: string) {
+  const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId }, select: { clientId: true } })
+  if (!request) throw new Error("Request not found")
+  await requirePortalClientAccess(request.clientId)
+
+  return prisma.portalDocumentReviewFeedback.findMany({
+    where: { requestId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, note: true, category: true, severity: true, createdAt: true },
   })
 }
 
@@ -242,4 +254,140 @@ export async function getPortalDocumentRequestHistory(requestId: string) {
     orderBy: { createdAt: "asc" },
     select: { id: true, eventType: true, note: true, createdAt: true },
   })
+}
+
+async function getLatestSupportingDocument(requestId: string) {
+  return prisma.supportingDocument.findFirst({
+    where: { portalRequestId: requestId },
+    orderBy: { createdAt: "desc" },
+  })
+}
+
+// ── Staff: SUBMITTED → UNDER_REVIEW (informational — signals a reviewer is looking at it) ──
+export async function markPortalDocumentUnderReview(requestId: string): Promise<ActionResult<{ id: string }>> {
+  try {
+    const session = await auth()
+    if (!session?.user) return { success: false, error: "Unauthorized" }
+    const user = session.user as Record<string, unknown>
+    const orgId = user.activeOrganizationId as string | undefined
+    if (!orgId) return { success: false, error: "No organization selected" }
+
+    await requireOrgAccess(orgId)
+    const role = getActiveRole(user as any)
+    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
+      return { success: false, error: "Insufficient permissions" }
+    }
+
+    const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId } })
+    if (!request || request.organizationId !== orgId) {
+      return { success: false, error: "Request not found" }
+    }
+    if (request.status !== "SUBMITTED") {
+      return { success: false, error: "Review can only be started from a Submitted request" }
+    }
+
+    const latestUpload = await getLatestSupportingDocument(requestId)
+    if (!latestUpload) {
+      return { success: false, error: "This request has no uploaded document to review" }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.portalDocumentRequest.update({ where: { id: requestId }, data: { status: "UNDER_REVIEW" } })
+      await tx.supportingDocument.update({ where: { id: latestUpload.id }, data: { reviewStatus: "UNDER_REVIEW" } })
+      await tx.portalDocumentTimelineEvent.create({
+        data: { requestId, eventType: "UNDER_REVIEW", supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+      })
+    })
+
+    await createAuditEvent({
+      organizationId: orgId,
+      actorId: user.id as string,
+      action: "PORTAL_DOCUMENT_REQUEST_UNDER_REVIEW",
+      targetType: "portal_document_request",
+      targetId: requestId,
+      metadata: { supportingDocumentId: latestUpload.id },
+    })
+
+    revalidatePath(`/clients/${request.clientId}/portal-access`)
+
+    return { success: true, data: { id: requestId } }
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to start review" }
+  }
+}
+
+// ── Staff: SUBMITTED/UNDER_REVIEW → APPROVED | NEEDS_REPLACEMENT ──
+export async function reviewPortalDocumentRequest(requestId: string, raw: Record<string, unknown>): Promise<ActionResult<{ id: string; status: string }>> {
+  const parsed = validate(reviewPortalDocumentRequestSchema, raw)
+  if (!parsed.success) return { success: false, error: parsed.error }
+  const data = parsed.data
+
+  try {
+    const session = await auth()
+    if (!session?.user) return { success: false, error: "Unauthorized" }
+    const user = session.user as Record<string, unknown>
+    const orgId = user.activeOrganizationId as string | undefined
+    if (!orgId) return { success: false, error: "No organization selected" }
+
+    await requireOrgAccess(orgId)
+    const role = getActiveRole(user as any)
+    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
+      return { success: false, error: "Insufficient permissions" }
+    }
+
+    const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId } })
+    if (!request || request.organizationId !== orgId) {
+      return { success: false, error: "Request not found" }
+    }
+    if (request.status !== "SUBMITTED" && request.status !== "UNDER_REVIEW") {
+      return { success: false, error: "This request cannot be reviewed in its current state" }
+    }
+
+    const latestUpload = await getLatestSupportingDocument(requestId)
+    if (!latestUpload) {
+      return { success: false, error: "This request has no uploaded document to review" }
+    }
+
+    const note = (data.note || "").trim()
+    const hasFeedback = note.length > 0
+
+    await prisma.$transaction(async (tx) => {
+      await tx.portalDocumentRequest.update({ where: { id: requestId }, data: { status: data.decision } })
+      await tx.supportingDocument.update({ where: { id: latestUpload.id }, data: { reviewStatus: data.decision } })
+      await tx.portalDocumentTimelineEvent.create({
+        data: { requestId, eventType: data.decision, supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+      })
+
+      if (hasFeedback) {
+        await tx.portalDocumentReviewFeedback.create({
+          data: {
+            requestId,
+            supportingDocumentId: latestUpload.id,
+            reviewerUserId: user.id as string,
+            note,
+            category: data.category || "OTHER",
+            severity: data.severity || (data.decision === "NEEDS_REPLACEMENT" ? "REQUIRED" : "SUGGESTED"),
+          },
+        })
+        await tx.portalDocumentTimelineEvent.create({
+          data: { requestId, eventType: "FEEDBACK_ADDED", supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+        })
+      }
+    })
+
+    await createAuditEvent({
+      organizationId: orgId,
+      actorId: user.id as string,
+      action: "PORTAL_DOCUMENT_REQUEST_REVIEWED",
+      targetType: "portal_document_request",
+      targetId: requestId,
+      metadata: { decision: data.decision, category: data.category || null, severity: data.severity || null, hasFeedback },
+    })
+
+    revalidatePath(`/clients/${request.clientId}/portal-access`)
+
+    return { success: true, data: { id: requestId, status: data.decision } }
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to review document request" }
+  }
 }

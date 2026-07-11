@@ -109,6 +109,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ req
           portalRequestId: requestId,
           uploadedByPortalUserId: portalUserId,
           status: "active",
+          // Only ever set for portal-request uploads (this route) — staff
+          // uploads elsewhere never touch reviewStatus, leaving it null.
+          reviewStatus: "PENDING_REVIEW",
         },
       })
 

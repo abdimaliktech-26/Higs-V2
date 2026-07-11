@@ -1,8 +1,8 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { getPortalDocumentRequestHistory } from "@/lib/actions/portal-document-requests"
+import { getPortalDocumentRequestHistory, getPortalDocumentReviewFeedback } from "@/lib/actions/portal-document-requests"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { StatusChip } from "@/components/ui/status-chip"
@@ -12,7 +12,7 @@ import { EmptyState } from "@/components/ui/states"
 import { UploadCloud, FileCheck2, Lock, Clock, History } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
 
-interface SupportingDocRow { id: string; originalFileName: string | null; fileSize: number | null; mimeType: string; createdAt: string | Date }
+interface SupportingDocRow { id: string; originalFileName: string | null; fileSize: number | null; mimeType: string; reviewStatus: string | null; createdAt: string | Date }
 interface RequestRow {
   id: string
   title: string
@@ -25,6 +25,7 @@ interface RequestRow {
   createdAt: string | Date
   supportingDocuments: SupportingDocRow[]
 }
+interface FeedbackRow { id: string; note: string; category: string; severity: string; createdAt: string | Date }
 
 interface Props { requests: RequestRow[] }
 
@@ -33,11 +34,21 @@ const categoryLabels: Record<string, string> = {
   CARE_PLAN: "Care Plan", LEGAL: "Legal", CONSENT: "Consent", PHOTO: "Photo", OTHER: "Other",
 }
 
+const reviewCategoryLabels: Record<string, string> = {
+  PHOTO_QUALITY: "Photo Quality", UNREADABLE: "Unreadable", MISSING_PAGES: "Missing Pages",
+  WRONG_DOCUMENT: "Wrong Document", INCOMPLETE: "Incomplete", EXPIRED: "Expired",
+  MISMATCHED_INFO: "Mismatched Info", OTHER: "Other",
+}
+
 const timelineLabels: Record<string, string> = {
   REQUESTED: "Requested by your care team",
   UPLOADED: "You uploaded a document",
   RESUBMITTED: "You uploaded a replacement document",
   CANCELLED: "Request cancelled",
+  UNDER_REVIEW: "Your care team started reviewing this document",
+  APPROVED: "Your document was approved",
+  NEEDS_REPLACEMENT: "Your care team requested a replacement",
+  FEEDBACK_ADDED: "Your care team left feedback",
 }
 
 const UPLOADABLE_STATUSES = ["PENDING", "NEEDS_REPLACEMENT"]
@@ -56,7 +67,20 @@ export function UploadCenterManager({ requests }: Props) {
   const [success, setSuccess] = useState<Record<string, boolean>>({})
   const [history, setHistory] = useState<Record<string, { id: string; eventType: string; note: string | null; createdAt: string }[]>>({})
   const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({})
+  const [feedback, setFeedback] = useState<Record<string, FeedbackRow[]>>({})
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  // Eagerly load feedback for requests currently needing a replacement, so
+  // the reason is visible immediately without an extra click. Skips
+  // requests whose feedback is already loaded rather than re-fetching on
+  // every render.
+  useEffect(() => {
+    const needsReplacement = requests.filter((r) => r.status === "NEEDS_REPLACEMENT" && !feedback[r.id])
+    needsReplacement.forEach(async (r) => {
+      const rows = await getPortalDocumentReviewFeedback(r.id)
+      setFeedback((prev) => ({ ...prev, [r.id]: rows as any }))
+    })
+  }, [requests, feedback])
 
   function uploadFile(requestId: string, file: File) {
     setErrors((prev) => ({ ...prev, [requestId]: "" }))
@@ -110,6 +134,10 @@ export function UploadCenterManager({ requests }: Props) {
       const events = await getPortalDocumentRequestHistory(requestId)
       setHistory((prev) => ({ ...prev, [requestId]: events as any }))
     }
+    if (!isOpen && !feedback[requestId]) {
+      const rows = await getPortalDocumentReviewFeedback(requestId)
+      setFeedback((prev) => ({ ...prev, [requestId]: rows as any }))
+    }
   }
 
   if (requests.length === 0) {
@@ -151,7 +179,22 @@ export function UploadCenterManager({ requests }: Props) {
               </div>
 
               {r.status === "NEEDS_REPLACEMENT" && (
-                <Alert variant="warning">Your care team has requested a replacement for this document.</Alert>
+                <Alert variant="warning">
+                  <p>Your care team has requested a replacement for this document.</p>
+                  {feedback[r.id]?.slice(-1).map((f) => (
+                    <div key={f.id} className="mt-2 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" size="sm">{reviewCategoryLabels[f.category] || f.category}</Badge>
+                        <Badge variant={f.severity === "REQUIRED" ? "danger" : "secondary"} size="sm">{f.severity === "REQUIRED" ? "Required" : "Suggested"}</Badge>
+                      </div>
+                      <p className="text-sm">{f.note}</p>
+                    </div>
+                  ))}
+                </Alert>
+              )}
+
+              {r.status === "APPROVED" && (
+                <Alert variant="success">This document has been approved.</Alert>
               )}
 
               {errors[r.id] && (
@@ -195,7 +238,10 @@ export function UploadCenterManager({ requests }: Props) {
                   {r.supportingDocuments.map((doc) => (
                     <div key={doc.id} className="flex items-center justify-between text-sm">
                       <span className="flex items-center gap-1.5 text-surface-700"><FileCheck2 className="h-3.5 w-3.5 text-success-600" /> {doc.originalFileName || "Uploaded file"}</span>
-                      <span className="text-xs text-surface-400">{formatBytes(doc.fileSize)} · {formatDateTime(doc.createdAt)}</span>
+                      <span className="flex items-center gap-2 text-xs text-surface-400">
+                        {formatBytes(doc.fileSize)} · {formatDateTime(doc.createdAt)}
+                        {doc.reviewStatus && <StatusChip status={doc.reviewStatus.toLowerCase()} size="sm" />}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -205,12 +251,27 @@ export function UploadCenterManager({ requests }: Props) {
                 <History className="h-3.5 w-3.5" /> {historyOpen[r.id] ? "Hide history" : "View history"}
               </button>
               {historyOpen[r.id] && history[r.id] && (
-                <div className="space-y-1 border-l-2 border-surface-200 pl-3">
+                <div className="space-y-2 border-l-2 border-surface-200 pl-3">
                   {history[r.id].map((e) => (
                     <div key={e.id} className="text-xs text-surface-500">
                       <span className="text-surface-700">{timelineLabels[e.eventType] || e.eventType}</span> — {formatDateTime(e.createdAt)}
                     </div>
                   ))}
+                  {feedback[r.id] && feedback[r.id].length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-surface-400">Feedback from your care team</p>
+                      {feedback[r.id].map((f) => (
+                        <div key={f.id} className="rounded-lg bg-surface-50 p-2 text-xs">
+                          <div className="mb-1 flex items-center gap-2">
+                            <Badge variant="outline" size="sm">{reviewCategoryLabels[f.category] || f.category}</Badge>
+                            <Badge variant={f.severity === "REQUIRED" ? "danger" : "secondary"} size="sm">{f.severity === "REQUIRED" ? "Required" : "Suggested"}</Badge>
+                            <span className="text-surface-400">{formatDateTime(f.createdAt)}</span>
+                          </div>
+                          <p className="text-surface-700">{f.note}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

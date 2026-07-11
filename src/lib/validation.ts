@@ -228,6 +228,17 @@ export const createPortalDocumentRequestSchema = z.object({
   dueDate: dateStr,
 })
 
+// ── Portal Document Review (Stage 4 Step 3) ──
+export const reviewPortalDocumentRequestSchema = z.object({
+  decision: z.enum(["APPROVED", "NEEDS_REPLACEMENT"]),
+  note: z.string().max(2000).optional().or(z.literal("")),
+  category: z.enum(["PHOTO_QUALITY", "UNREADABLE", "MISSING_PAGES", "WRONG_DOCUMENT", "INCOMPLETE", "EXPIRED", "MISMATCHED_INFO", "OTHER"]).optional(),
+  severity: z.enum(["REQUIRED", "SUGGESTED"]).optional(),
+}).refine(
+  (data) => data.decision !== "NEEDS_REPLACEMENT" || (data.note && data.note.trim().length > 0),
+  { message: "Feedback note is required when requesting a replacement", path: ["note"] }
+)
+
 // ── Helper: Wrapped parse that returns error string ──
 export function validate<T>(schema: z.ZodType<T>, input: unknown): { success: true; data: T } | { success: false; error: string } {
   const result = schema.safeParse(input)

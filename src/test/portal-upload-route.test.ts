@@ -115,7 +115,7 @@ async function callUploadRoute(requestId: string, file: FakeFile) {
   const req = new NextRequest("http://localhost/api/portal-upload/" + requestId, {
     method: "POST",
     headers: { "content-type": contentType },
-    body,
+    body: new Uint8Array(body),
   })
   const res = await POST(req, { params: Promise.resolve({ requestId }) })
   const resBody = await res.json()
@@ -329,5 +329,17 @@ describe("portal upload route — persistence", () => {
     expect(status).toBe(409)
     expect(body.success).toBe(false)
     expect(supportingDocumentCreate).not.toHaveBeenCalled()
+  })
+
+  it("a replacement upload creates a new attempt starting PENDING_REVIEW, never touching the prior NEEDS_REPLACEMENT attempt", async () => {
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "NEEDS_REPLACEMENT" }))
+    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance-v2.pdf", "application/pdf"))
+
+    const createData = supportingDocumentCreate.mock.calls[0][0].data
+    expect(createData.reviewStatus).toBe("PENDING_REVIEW")
+    // The route never issues any update/upsert against a prior SupportingDocument row —
+    // the only supportingDocument call made is the new create, so the prior
+    // NEEDS_REPLACEMENT attempt is left completely untouched.
+    expect(supportingDocumentCreate).toHaveBeenCalledTimes(1)
   })
 })

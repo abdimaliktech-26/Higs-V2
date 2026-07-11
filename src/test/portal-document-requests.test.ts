@@ -10,11 +10,24 @@ const portalDocumentRequestFindMany = vi.fn()
 const portalDocumentTimelineEventCreate = vi.fn()
 const portalClientAccessFindUnique = vi.fn()
 const portalClientAccessUpdate = vi.fn()
+const supportingDocumentFindFirst = vi.fn()
+const portalDocumentReviewFeedbackFindMany = vi.fn()
 
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
+
+function makeTx(overrides: Record<string, any> = {}) {
+  return {
+    portalDocumentRequest: { update: vi.fn(), ...overrides.portalDocumentRequest },
+    supportingDocument: { update: vi.fn(), ...overrides.supportingDocument },
+    portalDocumentTimelineEvent: { create: vi.fn(), ...overrides.portalDocumentTimelineEvent },
+    portalDocumentReviewFeedback: { create: vi.fn(), ...overrides.portalDocumentReviewFeedback },
+  }
+}
+let currentTx = makeTx()
+const transactionMock = vi.fn((cb: any) => cb(currentTx))
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -28,10 +41,13 @@ vi.mock("@/lib/db", () => ({
       findMany: (...a: unknown[]) => portalDocumentRequestFindMany(...a),
     },
     portalDocumentTimelineEvent: { create: (...a: unknown[]) => portalDocumentTimelineEventCreate(...a) },
+    portalDocumentReviewFeedback: { findMany: (...a: unknown[]) => portalDocumentReviewFeedbackFindMany(...a) },
     portalClientAccess: {
       findUnique: (...a: unknown[]) => portalClientAccessFindUnique(...a),
       update: (...a: unknown[]) => portalClientAccessUpdate(...a),
     },
+    supportingDocument: { findFirst: (...a: unknown[]) => supportingDocumentFindFirst(...a) },
+    $transaction: (cb: any) => transactionMock(cb),
   },
 }))
 vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
@@ -65,6 +81,8 @@ function validRequestInput(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  currentTx = makeTx()
+  transactionMock.mockImplementation((cb: any) => cb(currentTx))
 })
 
 describe("createPortalDocumentRequest", () => {
@@ -301,5 +319,286 @@ describe("setPortalUploadPermission", () => {
     const updateData = portalClientAccessUpdate.mock.calls[0][0].data
     expect(updateData).not.toHaveProperty("canSignDocuments")
     expect(updateData).not.toHaveProperty("canManageOtherGuardians")
+  })
+})
+
+function baseRequest(overrides: Record<string, unknown> = {}) {
+  return { id: REQUEST_ID, organizationId: ORG_ID, clientId: CLIENT_ID, status: "SUBMITTED", ...overrides }
+}
+
+function latestUpload(overrides: Record<string, unknown> = {}) {
+  return { id: "supdoc-1", createdAt: new Date(), reviewStatus: "PENDING_REVIEW", ...overrides }
+}
+
+describe("markPortalDocumentUnderReview", () => {
+  it("transitions SUBMITTED to UNDER_REVIEW and updates the latest upload's reviewStatus", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { markPortalDocumentUnderReview } = await import("@/lib/actions/portal-document-requests")
+    const result = await markPortalDocumentUnderReview(REQUEST_ID)
+
+    expect(result.success).toBe(true)
+    expect(currentTx.portalDocumentRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "UNDER_REVIEW" } }))
+    expect(currentTx.supportingDocument.update).toHaveBeenCalledWith(expect.objectContaining({ data: { reviewStatus: "UNDER_REVIEW" } }))
+    const eventData = currentTx.portalDocumentTimelineEvent.create.mock.calls[0][0].data
+    expect(eventData.eventType).toBe("UNDER_REVIEW")
+
+    const auditCall = createAuditEventMock.mock.calls[0][0]
+    expect(auditCall.action).toBe("PORTAL_DOCUMENT_REQUEST_UNDER_REVIEW")
+  })
+
+  it.each(["PENDING", "CANCELLED", "APPROVED", "NEEDS_REPLACEMENT"])("rejects starting review from %s", async (status) => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status }))
+
+    const { markPortalDocumentUnderReview } = await import("@/lib/actions/portal-document-requests")
+    const result = await markPortalDocumentUnderReview(REQUEST_ID)
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/submitted/i)
+  })
+
+  it("rejects when the request has no uploaded document", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(null)
+
+    const { markPortalDocumentUnderReview } = await import("@/lib/actions/portal-document-requests")
+    const result = await markPortalDocumentUnderReview(REQUEST_ID)
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/no uploaded document/i)
+  })
+
+  it("rejects an unauthorized role and a cross-tenant request", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("NURSE")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+
+    const { markPortalDocumentUnderReview } = await import("@/lib/actions/portal-document-requests")
+    const unauthorized = await markPortalDocumentUnderReview(REQUEST_ID)
+    expect(unauthorized.success).toBe(false)
+
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", organizationId: "org-OTHER" }))
+    const crossTenant = await markPortalDocumentUnderReview(REQUEST_ID)
+    expect(crossTenant.success).toBe(false)
+    if (crossTenant.success) return
+    expect(crossTenant.error).toMatch(/not found/i)
+  })
+})
+
+describe("reviewPortalDocumentRequest", () => {
+  it("approves from SUBMITTED", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(true)
+    expect(currentTx.portalDocumentRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "APPROVED" } }))
+    expect(currentTx.supportingDocument.update).toHaveBeenCalledWith(expect.objectContaining({ data: { reviewStatus: "APPROVED" } }))
+    // No feedback note supplied — no feedback row should be created.
+    expect(currentTx.portalDocumentReviewFeedback.create).not.toHaveBeenCalled()
+  })
+
+  it("approves from UNDER_REVIEW", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "UNDER_REVIEW" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+    expect(result.success).toBe(true)
+  })
+
+  it("accepts optional feedback on approval and records it", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED", note: "Looks great, thanks!", category: "OTHER", severity: "SUGGESTED" })
+
+    const feedbackData = currentTx.portalDocumentReviewFeedback.create.mock.calls[0][0].data
+    expect(feedbackData.note).toBe("Looks great, thanks!")
+    expect(feedbackData.category).toBe("OTHER")
+    expect(feedbackData.severity).toBe("SUGGESTED")
+    const eventTypes = currentTx.portalDocumentTimelineEvent.create.mock.calls.map((c: any) => c[0].data.eventType)
+    expect(eventTypes).toEqual(["APPROVED", "FEEDBACK_ADDED"])
+  })
+
+  it("requires feedback for NEEDS_REPLACEMENT from SUBMITTED", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "NEEDS_REPLACEMENT" })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/note/i)
+    expect(currentTx.portalDocumentRequest.update).not.toHaveBeenCalled()
+  })
+
+  it("rejects whitespace-only replacement feedback", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "NEEDS_REPLACEMENT", note: "   " })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/note/i)
+  })
+
+  it("requests replacement from UNDER_REVIEW with feedback, category, and severity stored", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "UNDER_REVIEW" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, {
+      decision: "NEEDS_REPLACEMENT", note: "Front of insurance card missing", category: "MISSING_PAGES", severity: "REQUIRED",
+    })
+
+    expect(result.success).toBe(true)
+    expect(currentTx.portalDocumentRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "NEEDS_REPLACEMENT" } }))
+    expect(currentTx.supportingDocument.update).toHaveBeenCalledWith(expect.objectContaining({ data: { reviewStatus: "NEEDS_REPLACEMENT" } }))
+    const feedbackData = currentTx.portalDocumentReviewFeedback.create.mock.calls[0][0].data
+    expect(feedbackData.category).toBe("MISSING_PAGES")
+    expect(feedbackData.severity).toBe("REQUIRED")
+    expect(feedbackData.supportingDocumentId).toBe("supdoc-1")
+  })
+
+  it.each(["PENDING", "CANCELLED", "APPROVED"])("rejects reviewing a request in %s state", async (status) => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status }))
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/cannot be reviewed/i)
+  })
+
+  it("rejects reviewing a request with no uploaded document", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(null)
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const result = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/no uploaded document/i)
+  })
+
+  it("resolves the latest upload by createdAt descending, not array order", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload({ id: "supdoc-newest" }))
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+
+    expect(supportingDocumentFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { portalRequestId: REQUEST_ID }, orderBy: { createdAt: "desc" } })
+    )
+    expect(currentTx.supportingDocument.update.mock.calls[0][0].where.id).toBe("supdoc-newest")
+  })
+
+  it("rejects an unauthorized role and a cross-tenant request", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("NURSE")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    const unauthorized = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+    expect(unauthorized.success).toBe(false)
+
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED", organizationId: "org-OTHER" }))
+    const crossTenant = await reviewPortalDocumentRequest(REQUEST_ID, { decision: "APPROVED" })
+    expect(crossTenant.success).toBe(false)
+    if (crossTenant.success) return
+    expect(crossTenant.error).toMatch(/not found/i)
+  })
+
+  it("never exposes raw feedback note text or internal notes in the staff audit event metadata", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "SUBMITTED" }))
+    supportingDocumentFindFirst.mockResolvedValue(latestUpload())
+
+    const { reviewPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
+    await reviewPortalDocumentRequest(REQUEST_ID, {
+      decision: "NEEDS_REPLACEMENT", note: "Sensitive note about the client's condition", category: "OTHER", severity: "REQUIRED",
+    })
+
+    const auditCall = createAuditEventMock.mock.calls[0][0]
+    expect(auditCall.action).toBe("PORTAL_DOCUMENT_REQUEST_REVIEWED")
+    expect(JSON.stringify(auditCall.metadata)).not.toContain("Sensitive note")
+  })
+})
+
+describe("getPortalDocumentReviewFeedback — portal-side scoping", () => {
+  it("scopes feedback to the correct request and verifies client access", async () => {
+    const { requirePortalClientAccess } = await import("@/lib/portal/auth")
+    portalDocumentRequestFindUnique.mockResolvedValue({ clientId: CLIENT_ID })
+    portalDocumentReviewFeedbackFindMany.mockResolvedValue([])
+
+    const { getPortalDocumentReviewFeedback } = await import("@/lib/actions/portal-document-requests")
+    await getPortalDocumentReviewFeedback(REQUEST_ID)
+
+    expect(requirePortalClientAccess).toHaveBeenCalledWith(CLIENT_ID)
+    expect(portalDocumentReviewFeedbackFindMany.mock.calls[0][0].where.requestId).toBe(REQUEST_ID)
+    // Only client-visible fields are selected — no reviewer-internal identifiers.
+    const select = portalDocumentReviewFeedbackFindMany.mock.calls[0][0].select
+    expect(select).toEqual({ id: true, note: true, category: true, severity: true, createdAt: true })
+  })
+
+  it("rejects when the request does not exist", async () => {
+    portalDocumentRequestFindUnique.mockResolvedValue(null)
+
+    const { getPortalDocumentReviewFeedback } = await import("@/lib/actions/portal-document-requests")
+    await expect(getPortalDocumentReviewFeedback("does-not-exist")).rejects.toThrow(/not found/i)
   })
 })
