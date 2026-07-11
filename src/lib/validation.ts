@@ -51,23 +51,32 @@ export const packetQuerySchema = z.object({
 })
 
 // ── Document Template ──
+// Deliberately excludes fileUrl/fileKey/fileSize — those are never accepted
+// as client input. Only src/app/api/templates/route.ts (and its
+// [templateId]/versions counterpart) may set them, derived from a real,
+// validated, server-stored PDF via storeFile(). packetTypes is likewise
+// excluded — that field is deprecated (kept on the schema for compatibility
+// only) and receives no new writes; packet usage is derived solely from
+// PacketTemplateDocument mappings.
 export const createDocTemplateSchema = z.object({
   name: z.string().min(1, "Name is required").max(200),
   description: z.string().max(1000).optional().or(z.literal("")),
   formType: z.string().max(50).default("dhs"),
   program: z.string().max(100).optional().or(z.literal("")),
-  fileUrl: z.string().max(1000),
-  fileKey: z.string().max(1000),
-  fileSize: z.number().int().optional(),
 })
 
 // ── Packet Template ──
+export const packetTemplateDocumentInputSchema = z.object({
+  documentTemplateId: z.string().max(50),
+  required: z.boolean().default(true),
+})
+
 export const createPacketTemplateSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).optional().or(z.literal("")),
   packetType: z.string().max(50),
   programId: z.string().max(50).optional().or(z.literal("")),
-  documentIds: z.array(z.string().max(50)).default([]),
+  documents: z.array(packetTemplateDocumentInputSchema).default([]),
 })
 
 // ── PDF Document ──

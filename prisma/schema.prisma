@@ -66,6 +66,8 @@ enum AuditAction {
   TEMPLATE_ACTIVATED
   TEMPLATE_RETIRED
   PACKET_TEMPLATE_CREATED
+  PACKET_TEMPLATE_DOCUMENT_UPDATED
+  DOCUMENT_TEMPLATE_VERSION_CREATED
   VALIDATION_RUN
   VALIDATION_ISSUE_CREATED
   VALIDATION_ISSUE_RESOLVED
@@ -474,27 +476,30 @@ model Client {
 }
 
 model DocumentTemplate {
-  id             String   @id @default(cuid())
-  organizationId String   @map("organization_id")
-  name           String
-  description    String?
-  formType       String   @default("dhs") @map("form_type")
-  packetTypes    Json     @default("[]")
-  program        String?
-  status         String   @default("draft")
-  version        Int      @default(1)
-  fileUrl        String   @map("file_url")
-  fileKey        String   @map("file_key")
-  fileSize       Int?     @map("file_size")
-  mimeType       String   @default("application/pdf") @map("mime_type")
-  uploadedById   String   @map("uploaded_by_id")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String   @id @default(cuid())
+  organizationId    String   @map("organization_id")
+  name              String
+  description       String?
+  formType          String   @default("dhs") @map("form_type")
+  packetTypes       Json     @default("[]")
+  program           String?
+  status            String   @default("draft")
+  version           Int      @default(1)
+  previousVersionId String?  @map("previous_version_id")
+  fileUrl           String   @map("file_url")
+  fileKey           String   @map("file_key")
+  fileSize          Int?     @map("file_size")
+  mimeType          String   @default("application/pdf") @map("mime_type")
+  uploadedById      String   @map("uploaded_by_id")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   uploadedBy         User                     @relation("TemplateUploads", fields: [uploadedById], references: [id])
   organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   packetDocuments    PacketDocument[]
   packetTemplateDocs PacketTemplateDocument[]
+  previousVersion    DocumentTemplate?        @relation("DocumentTemplateVersionChain", fields: [previousVersionId], references: [id], onDelete: SetNull)
+  nextVersions       DocumentTemplate[]       @relation("DocumentTemplateVersionChain")
 
   @@map("document_templates")
 }

@@ -21,7 +21,6 @@ import {
   FolderOpen,
   Layers,
   Library,
-  MoreHorizontal,
   Plus,
   ScrollText,
   ShieldCheck,
@@ -30,6 +29,8 @@ import {
 import { formatDate, formatDateTime } from "@/lib/utils"
 import { signUrl } from "@/lib/storage"
 import { getDocumentTemplates, getPacketTemplates, getProgramsForOrg, getTemplateActivity } from "@/lib/actions/templates"
+import { TemplateVersionUpload } from "./template-version-upload"
+import { PacketTemplateRequiredToggle } from "./packet-template-required-toggle"
 
 interface Props {
   orgId: string
@@ -128,19 +129,6 @@ function formatFileSize(bytes: number | null | undefined) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function parsePacketTypes(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string")
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []
-    } catch {
-      return []
-    }
-  }
-  return []
-}
-
 function programLabel(programValue: string | null | undefined, programs: Program[]) {
   if (!programValue) return "All programs"
   const program = programs.find((item) => item.id === programValue || item.code === programValue || item.name === programValue)
@@ -212,11 +200,9 @@ export async function TemplatesListContent({
     }
   }
 
-  const getDocPacketTypes = (template: DocumentTemplate) => {
-    const mapped = Array.from(docPacketTypes.get(template.id) ?? [])
-    const declared = parsePacketTypes(template.packetTypes)
-    return Array.from(new Set([...mapped, ...declared]))
-  }
+  // Derived solely from real PacketTemplateDocument mappings —
+  // DocumentTemplate.packetTypes is deprecated and no longer read here.
+  const getDocPacketTypes = (template: DocumentTemplate) => Array.from(docPacketTypes.get(template.id) ?? [])
 
   const filteredDocTemplates = docTemplates.filter((template) => {
     const mappedPacketTypes = getDocPacketTypes(template)
@@ -496,7 +482,9 @@ export async function TemplatesListContent({
                                 <Link href={`/library?tab=templates&search=${encodeURIComponent(template.name)}`} title="View in library">
                                   <Button variant="ghost" size="icon-sm" type="button"><ExternalLink className="h-4 w-4" /></Button>
                                 </Link>
-                                <Button variant="ghost" size="icon-sm" type="button" disabled title="Template detail editing is not part of this pass"><MoreHorizontal className="h-4 w-4" /></Button>
+                                {canManage && (
+                                  <TemplateVersionUpload templateId={template.id} templateName={template.name} currentVersion={template.version} />
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -561,7 +549,7 @@ export async function TemplatesListContent({
                           {template.requiredDocs.slice(0, 4).map((row) => (
                             <div key={row.id} className="flex items-center justify-between gap-3 text-xs">
                               <span className="min-w-0 truncate text-surface-700">{row.sortOrder + 1}. {row.documentTemplate.name}</span>
-                              <Badge variant={row.required ? "warning" : "secondary"} size="sm">{row.required ? "Required" : "Optional"}</Badge>
+                              <PacketTemplateRequiredToggle packetTemplateDocumentId={row.id} required={row.required} canManage={canManage} />
                             </div>
                           ))}
                           {template.requiredDocs.length > 4 && <p className="text-xs text-surface-400">+{template.requiredDocs.length - 4} more mapped documents</p>}
