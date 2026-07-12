@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { Prisma } from "@prisma/client"
 
 const documentTemplateFieldFindUnique = vi.fn()
 const documentTemplateFieldFindFirst = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
 const templateConditionGroupFindUnique = vi.fn()
+const templateConditionGroupFindFirst = vi.fn()
 const templateConditionGroupFindMany = vi.fn()
 const templateConditionGroupCreate = vi.fn()
 const templateConditionGroupUpdate = vi.fn()
@@ -31,6 +33,7 @@ vi.mock("@/lib/db", () => ({
     },
     templateConditionGroup: {
       findUnique: (...a: unknown[]) => templateConditionGroupFindUnique(...a),
+      findFirst: (...a: unknown[]) => templateConditionGroupFindFirst(...a),
       findMany: (...a: unknown[]) => templateConditionGroupFindMany(...a),
       create: (...a: unknown[]) => templateConditionGroupCreate(...a),
       update: (...a: unknown[]) => templateConditionGroupUpdate(...a),
@@ -85,6 +88,7 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   getActiveRoleMock.mockReturnValue("ORG_ADMIN")
   requireOrgAccessMock.mockResolvedValue({})
+  templateConditionGroupFindFirst.mockResolvedValue(null)
 })
 
 describe("createRootConditionGroup", () => {
@@ -140,6 +144,48 @@ describe("createRootConditionGroup", () => {
     expect(result.success).toBe(false)
     if (result.success) return
     expect(result.error).toMatch(/not found/i)
+  })
+
+  it.each(["FIELD_VISIBILITY", "FIELD_REQUIREDNESS"])("rejects a duplicate %s root for the same field", async (purpose) => {
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
+    templateConditionGroupFindFirst.mockResolvedValue({ id: "existing-root" })
+    const { createRootConditionGroup } = await import("@/lib/actions/template-conditions")
+    const result = await createRootConditionGroup(FIELD_ID, { purpose, logicOperator: "AND" })
+    expect(result.success).toBe(false)
+    if (!result.success) expect(result.error).toContain("already exists")
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
+  })
+
+  it("allows a separate purpose for the same field", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
+    templateConditionGroupFindFirst.mockResolvedValue(null)
+    templateConditionGroupCreate.mockResolvedValue({ id: GROUP_ID, purpose: "FIELD_REQUIREDNESS" })
+    const { createRootConditionGroup } = await import("@/lib/actions/template-conditions")
+    const result = await createRootConditionGroup(FIELD_ID, { purpose: "FIELD_REQUIREDNESS", logicOperator: "AND" })
+    expect(result.success).toBe(true)
+  })
+
+  it("turns a concurrent-create race (P2002 past the pre-check) into the same clean duplicate-root error, not an unhandled throw", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
+    // Pre-check passes (no existing row seen yet) — but the create itself
+    // loses the race against another request and hits the DB's unique index.
+    templateConditionGroupFindFirst.mockResolvedValue(null)
+    templateConditionGroupCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`document_template_field_id`,`purpose`)", { code: "P2002", clientVersion: "7.8.0" })
+    )
+    const { createRootConditionGroup } = await import("@/lib/actions/template-conditions")
+    const result = await createRootConditionGroup(FIELD_ID, { purpose: "FIELD_VISIBILITY", logicOperator: "AND" })
+    expect(result.success).toBe(false)
+    if (!result.success) expect(result.error).toBe("A FIELD_VISIBILITY root group already exists for this field")
+    expect(createAuditEventMock).not.toHaveBeenCalled()
+  })
+
+  it("rethrows a non-P2002 database error unchanged", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
+    templateConditionGroupFindFirst.mockResolvedValue(null)
+    templateConditionGroupCreate.mockRejectedValue(new Error("connection reset"))
+    const { createRootConditionGroup } = await import("@/lib/actions/template-conditions")
+    await expect(createRootConditionGroup(FIELD_ID, { purpose: "FIELD_VISIBILITY", logicOperator: "AND" })).rejects.toThrow("connection reset")
   })
 })
 

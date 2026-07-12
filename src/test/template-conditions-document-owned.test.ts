@@ -3,6 +3,7 @@
 // Field-owned (same-document) behavior is covered by template-conditions.test.ts
 // and is unaffected by anything in this file.
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { Prisma } from "@prisma/client"
 
 const packetTemplateFindUnique = vi.fn()
 const packetTemplateDocumentFindUnique = vi.fn()
@@ -11,6 +12,7 @@ const documentTemplateFieldFindUnique = vi.fn()
 const documentTemplateFieldFindFirst = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
 const templateConditionGroupFindUnique = vi.fn()
+const templateConditionGroupFindFirst = vi.fn()
 const templateConditionGroupFindMany = vi.fn()
 const templateConditionGroupCreate = vi.fn()
 const templateConditionGroupUpdate = vi.fn()
@@ -40,6 +42,7 @@ vi.mock("@/lib/db", () => ({
     },
     templateConditionGroup: {
       findUnique: (...a: unknown[]) => templateConditionGroupFindUnique(...a),
+      findFirst: (...a: unknown[]) => templateConditionGroupFindFirst(...a),
       findMany: (...a: unknown[]) => templateConditionGroupFindMany(...a),
       create: (...a: unknown[]) => templateConditionGroupCreate(...a),
       update: (...a: unknown[]) => templateConditionGroupUpdate(...a),
@@ -126,6 +129,7 @@ beforeEach(() => {
   documentTemplateFieldFindMany.mockResolvedValue([])
   packetTemplateDocumentFindMany.mockResolvedValue([])
   templateConditionGroupFindMany.mockResolvedValue([])
+  templateConditionGroupFindFirst.mockResolvedValue(null)
 })
 
 describe("createRootConditionGroupForDocument", () => {
@@ -195,6 +199,29 @@ describe("createRootConditionGroupForDocument", () => {
     expect(result.success).toBe(false)
     if (result.success) return
     expect(result.error).toMatch(/not found/i)
+  })
+
+  it.each(["DOCUMENT_INCLUSION", "DOCUMENT_REQUIREDNESS"])("rejects a duplicate %s root for the same mapping", async (purpose) => {
+    mockMappings({ [MAPPING_A]: mappingRow(MAPPING_A, DT_A) })
+    templateConditionGroupFindFirst.mockResolvedValue({ id: "existing-root" })
+    const { createRootConditionGroupForDocument } = await import("@/lib/actions/template-conditions")
+    const result = await createRootConditionGroupForDocument(MAPPING_A, { purpose, logicOperator: "AND" })
+    expect(result.success).toBe(false)
+    if (!result.success) expect(result.error).toContain("already exists")
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
+  })
+
+  it("turns a concurrent-create race (P2002 past the pre-check) into the same clean duplicate-root error", async () => {
+    mockMappings({ [MAPPING_A]: mappingRow(MAPPING_A, DT_A) })
+    templateConditionGroupFindFirst.mockResolvedValue(null)
+    templateConditionGroupCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`packet_template_document_id`,`purpose`)", { code: "P2002", clientVersion: "7.8.0" })
+    )
+    const { createRootConditionGroupForDocument } = await import("@/lib/actions/template-conditions")
+    const result = await createRootConditionGroupForDocument(MAPPING_A, { purpose: "DOCUMENT_INCLUSION", logicOperator: "AND" })
+    expect(result.success).toBe(false)
+    if (!result.success) expect(result.error).toBe("A DOCUMENT_INCLUSION root group already exists for this document mapping")
+    expect(createAuditEventMock).not.toHaveBeenCalled()
   })
 })
 
@@ -356,7 +383,7 @@ describe("validatePacketTemplateConditions", () => {
   function mockAllFields(fields: { documentTemplateId: string; fieldKey: string; fieldType: string }[]) {
     documentTemplateFieldFindMany.mockResolvedValue(fields)
   }
-  function inclusionGroup(mappingId: string, id: string, conditions: any[], childGroups: any[] = []) {
+  function inclusionGroup(mappingId: string, id: string, conditions: any[], childGroups: any[] = []): { id: string; packetTemplateDocumentId: string; documentTemplateFieldId: null; validationRuleId: null; parentGroupId: string | null; purpose: string; conditions: any[]; childGroups: any[] } {
     return { id, packetTemplateDocumentId: mappingId, documentTemplateFieldId: null, validationRuleId: null, parentGroupId: null, purpose: "DOCUMENT_INCLUSION", conditions, childGroups }
   }
   function fieldCond(id: string, sourcePacketTemplateDocumentId: string, sourceFieldKey: string, operator = "CHECKED", comparisonValue: unknown = null) {

@@ -372,7 +372,7 @@ describe("createPacket — DocumentTemplateField seeding", () => {
 
   it("seeds PdfField rows from the mapped DocumentTemplate's field definitions", async () => {
     packetTemplateFindUnique.mockResolvedValue(
-      packetTemplateWithDocs([{ documentTemplateId: TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: {} }])
+      packetTemplateWithDocs([{ id: "mapping-1", documentTemplateId: TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: {} }])
     )
     documentTemplateFieldFindMany.mockResolvedValue([
       { id: "dtf-1", fieldKey: "client_name", name: "Client Name", fieldType: "text", pageNumber: 1, posX: 40, posY: 30, width: 180, height: 32, isRequired: true, sortOrder: 0 },
@@ -383,11 +383,12 @@ describe("createPacket — DocumentTemplateField seeding", () => {
     const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
 
     expect(result.success).toBe(true)
+    expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ packetTemplateDocumentId: "mapping-1" }) })
     expect(pdfFieldCreateMany).toHaveBeenCalledTimes(1)
     const seeded = pdfFieldCreateMany.mock.calls[0][0].data
     expect(seeded).toHaveLength(2)
-    expect(seeded[0]).toMatchObject({ name: "Client Name", fieldType: "text", posX: 40, posY: 30, isRequired: true, source: "template", value: null })
-    expect(seeded[1]).toMatchObject({ name: "Guardian Signature", fieldType: "signature", source: "template" })
+    expect(seeded[0]).toMatchObject({ name: "Client Name", fieldType: "text", templateFieldKey: "client_name", documentTemplateFieldId: "dtf-1", posX: 40, posY: 30, isRequired: true, source: "template", value: null })
+    expect(seeded[1]).toMatchObject({ name: "Guardian Signature", fieldType: "signature", templateFieldKey: "guardian_signature", documentTemplateFieldId: "dtf-2", source: "template" })
   })
 
   it("every seeded field has source \"template\" and a null value", async () => {

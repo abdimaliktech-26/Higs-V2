@@ -340,7 +340,14 @@ export async function createPacket(data: {
   // touched or backfilled).
   for (const doc of pt.requiredDocs) {
     const packetDocument = await prisma.packetDocument.create({
-      data: { packetId: packet.id, documentTemplateId: doc.documentTemplateId, isRequired: doc.required, sortOrder: doc.sortOrder, status: "pending" },
+      data: {
+        packetId: packet.id,
+        documentTemplateId: doc.documentTemplateId,
+        packetTemplateDocumentId: doc.id,
+        isRequired: doc.required,
+        sortOrder: doc.sortOrder,
+        status: "pending",
+      },
     })
 
     const templateFields = await prisma.documentTemplateField.findMany({
@@ -351,6 +358,8 @@ export async function createPacket(data: {
       await prisma.pdfField.createMany({
         data: templateFields.map((f) => ({
           packetDocumentId: packetDocument.id,
+          templateFieldKey: f.fieldKey,
+          documentTemplateFieldId: f.id,
           name: f.name,
           fieldType: f.fieldType,
           value: null,

@@ -16,7 +16,7 @@ import {
 import { resolveCompatibilityKind, isOperatorCompatible, validateComparisonValueShape } from "@/lib/conditions/operator-compatibility"
 import { findInclusionCycle, type InclusionEdge } from "@/lib/conditions/inclusion-cycles"
 import type { ConditionOperator, ConditionSourceType } from "@/lib/conditions/types"
-import { UserRole, Prisma } from "@prisma/client"
+import { UserRole, Prisma, type ConditionPurpose } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
@@ -125,6 +125,26 @@ async function getRootOwnerContext(groupId: string): Promise<RootOwnerContext | 
   return null
 }
 
+// The pre-check in each create action is a check-then-act race — two
+// concurrent requests can both pass it before either commits. The DB's own
+// (documentTemplateFieldId|packetTemplateDocumentId|validationRuleId, purpose)
+// unique index is the real guard; this just turns its P2002 into the same
+// clean error shape the pre-check already returns, instead of an unhandled
+// Prisma exception.
+function isDuplicateRootGroupError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+}
+
+async function rootPurposeAlreadyExists(owner: "field" | "document", ownerId: string, purpose: ConditionPurpose): Promise<boolean> {
+  const existing = await prisma.templateConditionGroup.findFirst({
+    where: owner === "field"
+      ? { documentTemplateFieldId: ownerId, purpose }
+      : { packetTemplateDocumentId: ownerId, purpose },
+    select: { id: true },
+  })
+  return Boolean(existing)
+}
+
 // ── Root group: create (field-owned) ──
 export async function createRootConditionGroup(documentTemplateFieldId: string, raw: Record<string, unknown>): Promise<ActionResult<{ id: string }>> {
   const parsed = validate(createRootConditionGroupSchema, raw)
@@ -142,15 +162,24 @@ export async function createRootConditionGroup(documentTemplateFieldId: string, 
   if (!owner) return { success: false, error: "Field not found" }
   await requireOrgAccess(owner.template.organizationId)
   if (owner.template.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
+  if (await rootPurposeAlreadyExists("field", documentTemplateFieldId, data.purpose)) {
+    return { success: false, error: `A ${data.purpose} root group already exists for this field` }
+  }
 
-  const group = await prisma.templateConditionGroup.create({
-    data: {
-      organizationId: owner.template.organizationId,
-      purpose: data.purpose,
-      logicOperator: data.logicOperator,
-      documentTemplateFieldId,
-    },
-  })
+  let group
+  try {
+    group = await prisma.templateConditionGroup.create({
+      data: {
+        organizationId: owner.template.organizationId,
+        purpose: data.purpose,
+        logicOperator: data.logicOperator,
+        documentTemplateFieldId,
+      },
+    })
+  } catch (error) {
+    if (isDuplicateRootGroupError(error)) return { success: false, error: `A ${data.purpose} root group already exists for this field` }
+    throw error
+  }
 
   await createAuditEvent({
     organizationId: owner.template.organizationId,
@@ -181,15 +210,24 @@ export async function createRootConditionGroupForDocument(packetTemplateDocument
   if (!owner) return { success: false, error: "Document mapping not found" }
   await requireOrgAccess(owner.packetTemplate.organizationId)
   if (owner.documentTemplate.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
+  if (await rootPurposeAlreadyExists("document", packetTemplateDocumentId, data.purpose)) {
+    return { success: false, error: `A ${data.purpose} root group already exists for this document mapping` }
+  }
 
-  const group = await prisma.templateConditionGroup.create({
-    data: {
-      organizationId: owner.packetTemplate.organizationId,
-      purpose: data.purpose,
-      logicOperator: data.logicOperator,
-      packetTemplateDocumentId,
-    },
-  })
+  let group
+  try {
+    group = await prisma.templateConditionGroup.create({
+      data: {
+        organizationId: owner.packetTemplate.organizationId,
+        purpose: data.purpose,
+        logicOperator: data.logicOperator,
+        packetTemplateDocumentId,
+      },
+    })
+  } catch (error) {
+    if (isDuplicateRootGroupError(error)) return { success: false, error: `A ${data.purpose} root group already exists for this document mapping` }
+    throw error
+  }
 
   await createAuditEvent({
     organizationId: owner.packetTemplate.organizationId,
@@ -702,6 +740,7 @@ export interface TemplateConditionValidationError {
     | "empty_group"
     | "ownerless_root_group"
     | "multiple_owners"
+    | "duplicate_root_group"
   groupId?: string
   conditionId?: string
   message: string
@@ -731,6 +770,12 @@ export async function validateTemplateConditions(documentTemplateId: string): Pr
       childGroups: { include: { conditions: true, childGroups: true } },
     },
   })
+  const rootPurposeCounts = new Map<string, number>()
+  for (const root of rootGroups) {
+    if (!root.documentTemplateFieldId) continue
+    const key = `${root.documentTemplateFieldId}:${root.purpose}`
+    rootPurposeCounts.set(key, (rootPurposeCounts.get(key) ?? 0) + 1)
+  }
 
   async function checkCondition(condition: { id: string; sourceType: string; sourceFieldKey: string | null; operator: string; comparisonValue: unknown }, groupId: string) {
     if (condition.sourceType === "TEMPLATE_FIELD") {
@@ -758,6 +803,9 @@ export async function validateTemplateConditions(documentTemplateId: string): Pr
   }
 
   for (const root of rootGroups) {
+    if (root.documentTemplateFieldId && (rootPurposeCounts.get(`${root.documentTemplateFieldId}:${root.purpose}`) ?? 0) > 1) {
+      errors.push({ type: "duplicate_root_group", groupId: root.id, message: `More than one ${root.purpose} root group exists for this field` })
+    }
     if (root.parentGroupId === root.id) errors.push({ type: "circular_group", groupId: root.id, message: "Group references itself as its own parent" })
 
     const ownerCount = [root.documentTemplateFieldId, root.packetTemplateDocumentId, root.validationRuleId].filter(Boolean).length
@@ -804,6 +852,7 @@ export interface PacketTemplateConditionValidationError {
     | "inclusion_cycle"
     | "empty_group"
     | "orphan_nested_group"
+    | "duplicate_root_group"
   groupId?: string
   conditionId?: string
   packetTemplateDocumentIds?: string[]
@@ -848,6 +897,12 @@ export async function validatePacketTemplateConditions(packetTemplateId: string)
       childGroups: { include: { conditions: true, childGroups: true } },
     },
   })
+  const rootPurposeCounts = new Map<string, number>()
+  for (const root of rootGroups) {
+    if (!root.packetTemplateDocumentId) continue
+    const key = `${root.packetTemplateDocumentId}:${root.purpose}`
+    rootPurposeCounts.set(key, (rootPurposeCounts.get(key) ?? 0) + 1)
+  }
 
   const inclusionEdges: InclusionEdge[] = []
 
@@ -910,6 +965,9 @@ export async function validatePacketTemplateConditions(packetTemplateId: string)
   }
 
   for (const root of rootGroups) {
+    if (root.packetTemplateDocumentId && (rootPurposeCounts.get(`${root.packetTemplateDocumentId}:${root.purpose}`) ?? 0) > 1) {
+      errors.push({ type: "duplicate_root_group", groupId: root.id, message: `More than one ${root.purpose} root group exists for this document mapping` })
+    }
     if (root.parentGroupId === root.id) errors.push({ type: "circular_group", groupId: root.id, message: "Group references itself as its own parent" })
 
     const ownerCount = [root.documentTemplateFieldId, root.packetTemplateDocumentId, root.validationRuleId].filter(Boolean).length

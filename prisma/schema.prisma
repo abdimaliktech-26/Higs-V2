@@ -108,6 +108,12 @@ enum AuditAction {
   PORTAL_DOCUMENT_REQUEST_UNDER_REVIEW
   PORTAL_DOCUMENT_REQUEST_REVIEWED
   PACKET_DOCUMENT_COMPLETED_VIA_PORTAL
+  PACKET_CONDITION_SNAPSHOT_CREATED
+}
+
+enum PacketDocumentApplicabilityStatus {
+  ACTIVE
+  CONDITIONALLY_INACTIVE
 }
 
 enum PortalUserStatus {
@@ -187,28 +193,29 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  members                 OrganizationMember[]
-  clients                 Client[]
-  packets                 Packet[]
-  programs                Program[]
-  packetTemplates         PacketTemplate[]
-  documentTemplates       DocumentTemplate[]
-  documentTemplateFields  DocumentTemplateField[]
-  templateConditionGroups TemplateConditionGroup[]
-  validationRules         ValidationRule[]
-  validationResults       ValidationResult[]
-  signatureRequests       SignatureRequest[]
-  approvalRequests        ApprovalRequest[]
-  supportingDocuments     SupportingDocument[]
-  aiExtractions           AiExtraction[]
-  aiRecommendations       AiRecommendation[]
-  notifications           Notification[]
-  auditEvents             AuditEvent[]
-  portalClientAccess      PortalClientAccess[]
-  portalInvitations       PortalInvitation[]
-  portalNotifications     PortalNotification[]
-  portalAuditEvents       PortalAuditEvent[]
-  portalDocumentRequests  PortalDocumentRequest[]
+  members                  OrganizationMember[]
+  clients                  Client[]
+  packets                  Packet[]
+  programs                 Program[]
+  packetTemplates          PacketTemplate[]
+  documentTemplates        DocumentTemplate[]
+  documentTemplateFields   DocumentTemplateField[]
+  templateConditionGroups  TemplateConditionGroup[]
+  validationRules          ValidationRule[]
+  validationResults        ValidationResult[]
+  signatureRequests        SignatureRequest[]
+  approvalRequests         ApprovalRequest[]
+  supportingDocuments      SupportingDocument[]
+  aiExtractions            AiExtraction[]
+  aiRecommendations        AiRecommendation[]
+  notifications            Notification[]
+  auditEvents              AuditEvent[]
+  portalClientAccess       PortalClientAccess[]
+  portalInvitations        PortalInvitation[]
+  portalNotifications      PortalNotification[]
+  portalAuditEvents        PortalAuditEvent[]
+  portalDocumentRequests   PortalDocumentRequest[]
+  packetConditionSnapshots PacketConditionSnapshot[]
 
   @@map("organizations")
 }
@@ -538,6 +545,7 @@ model DocumentTemplateField {
   organization     Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   documentTemplate DocumentTemplate         @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
   conditionGroups  TemplateConditionGroup[]
+  pdfFields        PdfField[]
 
   @@unique([documentTemplateId, fieldKey])
   @@map("document_template_fields")
@@ -614,6 +622,9 @@ model TemplateConditionGroup {
   validationRule         ValidationRule?          @relation(fields: [validationRuleId], references: [id], onDelete: Cascade)
   conditions             TemplateCondition[]
 
+  @@unique([documentTemplateFieldId, purpose])
+  @@unique([packetTemplateDocumentId, purpose])
+  @@unique([validationRuleId, purpose])
   @@index([documentTemplateFieldId])
   @@index([parentGroupId])
   @@map("template_condition_groups")
@@ -667,10 +678,11 @@ model PacketTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  program         Program?                 @relation(fields: [programId], references: [id], onDelete: SetNull)
-  requiredDocs    PacketTemplateDocument[]
-  packetInstances Packet[]
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  program            Program?                  @relation(fields: [programId], references: [id], onDelete: SetNull)
+  requiredDocs       PacketTemplateDocument[]
+  packetInstances    Packet[]
+  conditionSnapshots PacketConditionSnapshot[]
 
   @@map("packet_templates")
 }
@@ -690,31 +702,34 @@ model PacketTemplateDocument {
   // in the same PacketTemplate whose TEMPLATE_FIELD source points at this
   // mapping's document (Step 4b).
   referencedByConditions TemplateCondition[]
+  packetDocuments        PacketDocument[]
 
   @@unique([packetTemplateId, documentTemplateId])
   @@map("packet_template_documents")
 }
 
 model Packet {
-  id               String    @id @default(cuid())
-  organizationId   String    @map("organization_id")
-  clientId         String    @map("client_id")
-  packetTemplateId String?   @map("packet_template_id")
-  programId        String?   @map("program_id")
-  packetType       String    @map("packet_type")
-  status           String    @default("draft")
-  assignedToId     String?   @map("assigned_to_id")
-  dueDate          DateTime? @map("due_date")
-  completedAt      DateTime? @map("completed_at")
-  metadata         Json      @default("{}")
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  organizationId          String    @map("organization_id")
+  clientId                String    @map("client_id")
+  packetTemplateId        String?   @map("packet_template_id")
+  programId               String?   @map("program_id")
+  packetType              String    @map("packet_type")
+  status                  String    @default("draft")
+  assignedToId            String?   @map("assigned_to_id")
+  dueDate                 DateTime? @map("due_date")
+  completedAt             DateTime? @map("completed_at")
+  metadata                Json      @default("{}")
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  conditionRuntimeVersion Int?      @map("condition_runtime_version")
+  conditionSnapshotId     String?   @unique @map("condition_snapshot_id")
 
-  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client                 Client                  @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  packetTemplate         PacketTemplate?         @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
-  program                Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
-  assignedTo             User?                   @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client                 Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  packetTemplate         PacketTemplate?          @relation(fields: [packetTemplateId], references: [id], onDelete: SetNull)
+  program                Program?                 @relation(fields: [programId], references: [id], onDelete: SetNull)
+  assignedTo             User?                    @relation("AssignedPackets", fields: [assignedToId], references: [id], onDelete: SetNull)
   documents              PacketDocument[]
   validationResults      ValidationResult[]
   signatureRequests      SignatureRequest[]
@@ -722,6 +737,7 @@ model Packet {
   supportingDocuments    SupportingDocument[]
   aiRecommendations      AiRecommendation[]
   portalDocumentRequests PortalDocumentRequest[]
+  conditionSnapshot      PacketConditionSnapshot? @relation(fields: [conditionSnapshotId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status])
   @@index([organizationId, clientId])
@@ -730,22 +746,46 @@ model Packet {
   @@map("packets")
 }
 
+// Immutable, definition-only runtime snapshot. It deliberately contains no
+// client field values or raw DOB; isMinor is frozen at evaluationReferenceAt.
+model PacketConditionSnapshot {
+  id                    String   @id @default(cuid())
+  organizationId        String   @map("organization_id")
+  packetTemplateId      String   @map("packet_template_id")
+  runtimeVersion        Int      @default(1) @map("runtime_version")
+  evaluationReferenceAt DateTime @map("evaluation_reference_at")
+  clientIsMinor         Boolean  @map("client_is_minor")
+  definition            Json
+  createdAt             DateTime @default(now())
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  packetTemplate PacketTemplate @relation(fields: [packetTemplateId], references: [id], onDelete: Restrict)
+  packet         Packet?
+
+  @@index([organizationId, packetTemplateId])
+  @@map("packet_condition_snapshots")
+}
+
 model PacketDocument {
-  id                 String                     @id @default(cuid())
-  packetId           String                     @map("packet_id")
-  documentTemplateId String                     @map("document_template_id")
-  status             String                     @default("pending")
-  isRequired         Boolean                    @default(true) @map("is_required")
-  sortOrder          Int                        @default(0) @map("sort_order")
-  currentVersion     Int                        @default(0) @map("current_version")
-  completedAt        DateTime?                  @map("completed_at")
-  notes              String?
-  portalVisible      Boolean                    @default(false) @map("portal_visible")
-  portalVisibleAt    DateTime?                  @map("portal_visible_at")
-  sharedByUserId     String?                    @map("shared_by_user_id")
-  portalAccessLevel  PortalDocumentAccessLevel? @map("portal_access_level")
-  createdAt          DateTime                   @default(now())
-  updatedAt          DateTime                   @updatedAt
+  id                          String                            @id @default(cuid())
+  packetId                    String                            @map("packet_id")
+  documentTemplateId          String                            @map("document_template_id")
+  status                      String                            @default("pending")
+  isRequired                  Boolean                           @default(true) @map("is_required")
+  sortOrder                   Int                               @default(0) @map("sort_order")
+  currentVersion              Int                               @default(0) @map("current_version")
+  completedAt                 DateTime?                         @map("completed_at")
+  notes                       String?
+  portalVisible               Boolean                           @default(false) @map("portal_visible")
+  portalVisibleAt             DateTime?                         @map("portal_visible_at")
+  sharedByUserId              String?                           @map("shared_by_user_id")
+  portalAccessLevel           PortalDocumentAccessLevel?        @map("portal_access_level")
+  createdAt                   DateTime                          @default(now())
+  updatedAt                   DateTime                          @updatedAt
+  packetTemplateDocumentId    String?                           @map("packet_template_document_id")
+  applicabilityStatus         PacketDocumentApplicabilityStatus @default(ACTIVE) @map("applicability_status")
+  conditionallyInactiveAt     DateTime?                         @map("conditionally_inactive_at")
+  conditionallyInactiveReason String?                           @map("conditionally_inactive_reason")
 
   packet                 Packet                  @relation(fields: [packetId], references: [id], onDelete: Cascade)
   documentTemplate       DocumentTemplate        @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
@@ -758,32 +798,40 @@ model PacketDocument {
   signatureRequests      SignatureRequest[]
   sharedBy               User?                   @relation("PortalPacketDocumentSharedBy", fields: [sharedByUserId], references: [id], onDelete: SetNull)
   portalDocumentRequests PortalDocumentRequest[]
+  packetTemplateDocument PacketTemplateDocument? @relation(fields: [packetTemplateDocumentId], references: [id], onDelete: SetNull)
 
   @@unique([packetId, documentTemplateId])
+  @@unique([packetId, packetTemplateDocumentId])
+  @@index([packetTemplateDocumentId, applicabilityStatus])
   @@map("packet_documents")
 }
 
 model PdfField {
-  id               String   @id @default(cuid())
-  packetDocumentId String   @map("packet_document_id")
-  name             String
-  fieldType        String   @default("text") @map("field_type")
-  value            String?
-  pageNumber       Int      @default(1) @map("page_number")
-  posX             Float?   @map("pos_x")
-  posY             Float?   @map("pos_y")
-  width            Float?
-  height           Float?
-  confidence       Float?   @default(1.0)
-  source           String   @default("manual")
-  isRequired       Boolean  @default(false) @map("is_required")
-  sortOrder        Int      @default(0) @map("sort_order")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                      String   @id @default(cuid())
+  packetDocumentId        String   @map("packet_document_id")
+  name                    String
+  fieldType               String   @default("text") @map("field_type")
+  value                   String?
+  pageNumber              Int      @default(1) @map("page_number")
+  posX                    Float?   @map("pos_x")
+  posY                    Float?   @map("pos_y")
+  width                   Float?
+  height                  Float?
+  confidence              Float?   @default(1.0)
+  source                  String   @default("manual")
+  isRequired              Boolean  @default(false) @map("is_required")
+  sortOrder               Int      @default(0) @map("sort_order")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  templateFieldKey        String?  @map("template_field_key")
+  documentTemplateFieldId String?  @map("document_template_field_id")
 
-  packetDocument    PacketDocument     @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
-  signatureRequests SignatureRequest[]
+  packetDocument        PacketDocument         @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
+  documentTemplateField DocumentTemplateField? @relation(fields: [documentTemplateFieldId], references: [id], onDelete: SetNull)
+  signatureRequests     SignatureRequest[]
 
+  @@unique([packetDocumentId, templateFieldKey])
+  @@index([documentTemplateFieldId])
   @@map("pdf_fields")
 }
 
