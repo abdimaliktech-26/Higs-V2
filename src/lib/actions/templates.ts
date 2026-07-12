@@ -330,10 +330,15 @@ export async function getPacketById(packetId: string) {
 export async function createPacket(data: {
   clientId: string; packetTemplateId: string; dueDate?: string; assignedToId?: string
 }) {
+  // Deliberately open to any authenticated org member — not gated by
+  // canManage() — matching the pre-existing packet-creation behavior
+  // (case managers/DSPs routinely create client packets as normal work,
+  // unlike template administration). A dedicated packet-creation permission
+  // or configurable role matrix is a separate, later design, not something
+  // to hardcode here as template-management roles.
   const session = await auth()
   if (!session?.user) return { success: false as const, error: "Unauthorized" }
   const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false as const, error: "Insufficient permissions" }
   const orgId = user.activeOrganizationId as string
   if (!orgId) return { success: false as const, error: "No org" }
   await requireOrgAccess(orgId)

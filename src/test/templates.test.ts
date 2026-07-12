@@ -499,6 +499,26 @@ describe("createPacket — Step 4c.2a: transactional, condition-aware creation",
   })
 
   describe("ownership verification", () => {
+    it("rejects when there is no authenticated session", async () => {
+      authMock.mockResolvedValue(null)
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/unauthorized/i)
+      expect(clientFindUnique).not.toHaveBeenCalled()
+    })
+
+    it("rejects a user with no active organization membership", async () => {
+      authMock.mockResolvedValue(staffSession({ activeOrganizationId: undefined }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/no org/i)
+      expect(clientFindUnique).not.toHaveBeenCalled()
+    })
+
     it("rejects a cross-tenant client", async () => {
       clientFindUnique.mockResolvedValue(clientRow({ organizationId: "org-OTHER" }))
       const { createPacket } = await import("@/lib/actions/templates")
@@ -541,21 +561,11 @@ describe("createPacket — Step 4c.2a: transactional, condition-aware creation",
       expect(packetCreate).not.toHaveBeenCalled()
     })
 
-    it("rejects a role not permitted to create packets", async () => {
+    it("allows a DSP/case-manager role (packet creation is intentionally not restricted to template-management roles)", async () => {
       getActiveRoleMock.mockReturnValue("DSP")
       const { createPacket } = await import("@/lib/actions/templates")
       const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-      expect(result.success).toBe(false)
-      expect(clientFindUnique).not.toHaveBeenCalled()
-    })
-
-    it("rejects an unauthenticated caller", async () => {
-      authMock.mockResolvedValue(null)
-      const { createPacket } = await import("@/lib/actions/templates")
-      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-      expect(result.success).toBe(false)
-      if (result.success) return
-      expect(result.error).toMatch(/unauthorized/i)
+      expect(result.success).toBe(true)
     })
   })
 
