@@ -362,7 +362,9 @@ export function evaluatePdfFieldRequiredness(runtime: PacketConditionRuntime, pa
   const visibility = evaluatePdfFieldVisibility(runtime, packetDocumentId, fieldId)
   if (visibility.status === "integrity_error" || !visibility.result) return visibility.status === "integrity_error" ? visibility : { ...visibility, result: false }
   const { document, field, snapshotField } = fieldOwner(runtime, packetDocumentId, fieldId)
-  if (!document || !field || !snapshotField) return { status: "integrity_error", errors: [{ type: "missing_field", message: "PDF field source is unavailable", packetDocumentId, fieldId }] }
+  if (!document || !field) return { status: "integrity_error", errors: [{ type: "missing_field", message: "PDF field source is unavailable", packetDocumentId, fieldId }] }
+  if (!field.templateFieldKey) return { status: "evaluated", result: field.staticRequired, knownEmptyInputs: [], detail: null }
+  if (!snapshotField) return { status: "integrity_error", errors: [{ type: "missing_field_key", message: "PDF field key is absent from snapshot", packetDocumentId, fieldId }] }
   return evaluate(runtime, snapshotField.conditionGroups.find((group) => group.purpose === "FIELD_REQUIREDNESS") ?? null, document.fieldValues, field.staticRequired)
 }
 
@@ -658,4 +660,97 @@ export async function reconcilePacketDocumentApplicability(
   }
 
   return transitions
+}
+
+// ── Step 4c.3a — server-authoritative editor field/document condition state ──
+//
+// Read-only: computes derived visibility/requiredness for the PDF editor DTO
+// from an already-built PacketConditionRuntime. No writes, no new evaluation
+// rules — every value here is produced by the same evaluatePdfFieldVisibility/
+// Requiredness/determinePacketReconciliationNeeds primitives already used
+// elsewhere, just packaged for a single document's field list in one pass so
+// the caller (getEditableDocument) never has to call buildPacketConditionContext
+// or the evaluator more than once per request.
+export interface EditorFieldConditionView {
+  isVisible: boolean
+  effectiveRequired: boolean
+  staticRequired: boolean
+  visibilityConditionPresent: boolean
+  requirednessConditionPresent: boolean
+  conditionallyRequired: boolean
+  integrityError: boolean
+}
+
+export interface EditorDocumentConditionState {
+  conditionMode: "legacy" | "snapshot"
+  isConditionAware: boolean
+  applicabilityStatus: "ACTIVE" | "CONDITIONALLY_INACTIVE"
+  hasConditionIntegrityError: boolean
+  conditionIntegrityErrorCount: number
+  reconciliationPending: boolean
+  fieldsById: Record<string, EditorFieldConditionView>
+}
+
+export function buildEditorDocumentConditionState(
+  runtime: PacketConditionRuntime,
+  packetDocument: { id: string; applicabilityStatus: "ACTIVE" | "CONDITIONALLY_INACTIVE"; packetTemplateDocumentId: string | null },
+  fields: { id: string; templateFieldKey: string | null; isRequired: boolean }[]
+): EditorDocumentConditionState {
+  // A packet-wide integrity error (e.g. a malformed snapshot) makes every
+  // field evaluation cascade to "integrity_error" uniformly — that's one
+  // underlying problem, not one-per-field, so it's counted once here (even
+  // when the root cause produces more than one raw error record, e.g. a
+  // malformed snapshot also leaves every document unresolvable) and
+  // per-field cascades are not added on top. A field-specific problem
+  // (e.g. its own templateFieldKey missing from the snapshot) only ever
+  // shows up when there is no packet-wide error, so counting each of those
+  // individually never double-counts the same root cause.
+  const globalErrorCount = runtime.integrityErrors.length > 0 ? 1 : 0
+  let fieldSpecificErrorCount = 0
+
+  const mapping =
+    runtime.mode === "snapshot" && packetDocument.packetTemplateDocumentId
+      ? runtime.definition?.mappings.find((m) => m.id === packetDocument.packetTemplateDocumentId)
+      : undefined
+
+  const fieldsById: Record<string, EditorFieldConditionView> = {}
+  for (const field of fields) {
+    const visibility = evaluatePdfFieldVisibility(runtime, packetDocument.id, field.id)
+    const requiredness = evaluatePdfFieldRequiredness(runtime, packetDocument.id, field.id)
+
+    const isVisible = visibility.status === "evaluated" ? visibility.result : false
+    const effectiveRequired = requiredness.status === "evaluated" ? requiredness.result : false
+    const fieldIntegrityError = visibility.status === "integrity_error" || requiredness.status === "integrity_error"
+    if (fieldIntegrityError && globalErrorCount === 0) fieldSpecificErrorCount += 1
+
+    const snapshotField = mapping && field.templateFieldKey ? mapping.fields.find((f) => f.fieldKey === field.templateFieldKey) : undefined
+    const visibilityConditionPresent = Boolean(snapshotField?.conditionGroups.some((g) => g.purpose === "FIELD_VISIBILITY"))
+    const requirednessConditionPresent = Boolean(snapshotField?.conditionGroups.some((g) => g.purpose === "FIELD_REQUIREDNESS"))
+
+    fieldsById[field.id] = {
+      isVisible,
+      effectiveRequired,
+      staticRequired: field.isRequired,
+      visibilityConditionPresent,
+      requirednessConditionPresent,
+      conditionallyRequired: requirednessConditionPresent && effectiveRequired,
+      integrityError: fieldIntegrityError,
+    }
+  }
+
+  const reconciliationPending = packetDocument.packetTemplateDocumentId
+    ? determinePacketReconciliationNeeds(runtime).some((need) => need.mappingId === packetDocument.packetTemplateDocumentId)
+    : false
+
+  const conditionIntegrityErrorCount = globalErrorCount + fieldSpecificErrorCount
+
+  return {
+    conditionMode: runtime.mode,
+    isConditionAware: runtime.mode === "snapshot",
+    applicabilityStatus: packetDocument.applicabilityStatus,
+    hasConditionIntegrityError: conditionIntegrityErrorCount > 0,
+    conditionIntegrityErrorCount,
+    reconciliationPending,
+    fieldsById,
+  }
 }
