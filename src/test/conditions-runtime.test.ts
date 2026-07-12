@@ -324,3 +324,125 @@ describe("legacy requiredness — real persisted values, no condition logic", ()
   })
 })
 
+describe("evaluateInitialPacketApplicability — Step 4c.2a creation-time classification", () => {
+  function baseDefinition(mappingOverrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1 as const,
+      packetTemplateId: TEMPLATE,
+      mappings: [{
+        id: MAPPING, documentTemplateId: DOC_TEMPLATE, required: true, sortOrder: 3,
+        conditionGroups: [], fields: [{ id: "dtf-1", fieldKey: "trigger", fieldType: "checkbox", isRequired: false, conditionGroups: [] }],
+        ...mappingOverrides,
+      }],
+    }
+  }
+
+  it("no DOCUMENT_INCLUSION/REQUIREDNESS group — includes the document with the static required value", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const result = evaluateInitialPacketApplicability(baseDefinition(), { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result).toEqual([{ mappingId: MAPPING, documentTemplateId: DOC_TEMPLATE, sortOrder: 3, include: true, applicabilityStatus: "ACTIVE", isRequired: true, inclusionResolution: "no_condition", requirednessResolution: "no_condition" }])
+  })
+
+  it("pseudo-field-only inclusion condition resolves true — included", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const definition = baseDefinition({
+      conditionGroups: [{ id: "g1", purpose: "DOCUMENT_INCLUSION" as const, logicOperator: "AND" as const, conditions: [{ sourceType: "PACKET_TYPE" as const, sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS" as const, comparisonValue: "initial_intake" }], childGroups: [] }],
+    })
+    const result = evaluateInitialPacketApplicability(definition, { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result[0]).toMatchObject({ include: true, inclusionResolution: "resolved" })
+  })
+
+  it("pseudo-field-only inclusion condition resolves false — excluded", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const definition = baseDefinition({
+      conditionGroups: [{ id: "g1", purpose: "DOCUMENT_INCLUSION" as const, logicOperator: "AND" as const, conditions: [{ sourceType: "PACKET_TYPE" as const, sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS" as const, comparisonValue: "45_day" }], childGroups: [] }],
+    })
+    const result = evaluateInitialPacketApplicability(definition, { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result[0]).toMatchObject({ include: false, inclusionResolution: "resolved" })
+  })
+
+  it("TEMPLATE_FIELD-dependent inclusion condition is unresolved at creation — conservatively included", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const definition = baseDefinition({
+      conditionGroups: [{ id: "g1", purpose: "DOCUMENT_INCLUSION" as const, logicOperator: "AND" as const, conditions: [{ sourceType: "TEMPLATE_FIELD" as const, sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED" as const, comparisonValue: null }], childGroups: [] }],
+    })
+    const result = evaluateInitialPacketApplicability(definition, { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result[0]).toMatchObject({ include: true, applicabilityStatus: "ACTIVE", inclusionResolution: "unresolved" })
+  })
+
+  it("TEMPLATE_FIELD-dependent requiredness condition is unresolved — preserves static required value unchanged", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const definition = baseDefinition({
+      required: false,
+      conditionGroups: [{ id: "g1", purpose: "DOCUMENT_REQUIREDNESS" as const, logicOperator: "AND" as const, conditions: [{ sourceType: "TEMPLATE_FIELD" as const, sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED" as const, comparisonValue: null }], childGroups: [] }],
+    })
+    const result = evaluateInitialPacketApplicability(definition, { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result[0]).toMatchObject({ isRequired: false, requirednessResolution: "unresolved" })
+  })
+
+  it("a TEMPLATE_FIELD leaf nested inside a child group still makes the whole group unresolved", async () => {
+    const { evaluateInitialPacketApplicability } = await import("@/lib/conditions/runtime")
+    const definition = baseDefinition({
+      conditionGroups: [{
+        id: "g1", purpose: "DOCUMENT_INCLUSION" as const, logicOperator: "AND" as const,
+        conditions: [{ sourceType: "PACKET_TYPE" as const, sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS" as const, comparisonValue: "initial_intake" }],
+        childGroups: [{ id: "g1a", purpose: "DOCUMENT_INCLUSION" as const, logicOperator: "OR" as const, conditions: [{ sourceType: "TEMPLATE_FIELD" as const, sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED" as const, comparisonValue: null }], childGroups: [] }],
+      }],
+    })
+    const result = evaluateInitialPacketApplicability(definition, { client: { isMinor: false }, packet: { programCode: null, packetType: "initial_intake" } })
+    expect(result[0].inclusionResolution).toBe("unresolved")
+  })
+})
+
+describe("determinePacketReconciliationNeeds", () => {
+  it("returns empty for a legacy runtime", async () => {
+    const { determinePacketReconciliationNeeds } = await import("@/lib/conditions/runtime")
+    expect(determinePacketReconciliationNeeds(legacyRuntime())).toEqual([])
+  })
+
+  it("returns empty when a runtime has integrity errors (never guesses over broken state)", async () => {
+    const { determinePacketReconciliationNeeds } = await import("@/lib/conditions/runtime")
+    const rt = runtime({ integrityErrors: [{ type: "malformed_snapshot", message: "broken" }] })
+    expect(determinePacketReconciliationNeeds(rt)).toEqual([])
+  })
+
+  it("flags a mapping whose DOCUMENT_INCLUSION condition still has an unresolved TEMPLATE_FIELD source", async () => {
+    const { determinePacketReconciliationNeeds } = await import("@/lib/conditions/runtime")
+    const withInclusion = runtime()
+    withInclusion.definition!.mappings[0].conditionGroups = [{
+      id: "g1", purpose: "DOCUMENT_INCLUSION", logicOperator: "AND",
+      conditions: [{ sourceType: "TEMPLATE_FIELD", sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED", comparisonValue: null }],
+      childGroups: [],
+    }]
+    withInclusion.documentFieldValues[MAPPING].trigger = null
+    const needs = determinePacketReconciliationNeeds(withInclusion)
+    expect(needs).toEqual([{ mappingId: MAPPING, purpose: "DOCUMENT_INCLUSION", unresolvedSourceFieldKeys: ["trigger"] }])
+  })
+
+  it("no longer flags a mapping once its controlling field has a real value", async () => {
+    const { determinePacketReconciliationNeeds } = await import("@/lib/conditions/runtime")
+    const withInclusion = runtime()
+    withInclusion.definition!.mappings[0].conditionGroups = [{
+      id: "g1", purpose: "DOCUMENT_INCLUSION", logicOperator: "AND",
+      conditions: [{ sourceType: "TEMPLATE_FIELD", sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED", comparisonValue: null }],
+      childGroups: [],
+    }]
+    withInclusion.documentFieldValues[MAPPING].trigger = "true"
+    expect(determinePacketReconciliationNeeds(withInclusion)).toEqual([])
+  })
+
+  it("returns no PHI — only mapping ids, purposes, and field keys", async () => {
+    const { determinePacketReconciliationNeeds } = await import("@/lib/conditions/runtime")
+    const withInclusion = runtime()
+    withInclusion.definition!.mappings[0].conditionGroups = [{
+      id: "g1", purpose: "DOCUMENT_INCLUSION", logicOperator: "AND",
+      conditions: [{ sourceType: "TEMPLATE_FIELD", sourceFieldKey: "trigger", sourcePacketTemplateDocumentId: MAPPING, operator: "CHECKED", comparisonValue: null }],
+      childGroups: [],
+    }]
+    withInclusion.documentFieldValues[MAPPING].trigger = null
+    const needs = determinePacketReconciliationNeeds(withInclusion)
+    expect(JSON.stringify(needs)).not.toContain("comparisonValue")
+    expect(JSON.stringify(needs)).not.toMatch(/dateOfBirth|dob/i)
+  })
+})
+

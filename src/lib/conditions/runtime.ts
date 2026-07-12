@@ -18,7 +18,7 @@ import {
   type SnapshotMapping,
 } from "./runtime-types"
 
-function deriveIsMinor(dateOfBirth: Date | null, referenceAt: Date): boolean {
+export function deriveIsMinor(dateOfBirth: Date | null, referenceAt: Date): boolean {
   if (!dateOfBirth) return false
   let age = referenceAt.getUTCFullYear() - dateOfBirth.getUTCFullYear()
   const beforeBirthday = referenceAt.getUTCMonth() < dateOfBirth.getUTCMonth()
@@ -49,6 +49,62 @@ function isDefinition(value: unknown): value is PacketConditionDefinition {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<PacketConditionDefinition>
   return candidate.schemaVersion === 1 && typeof candidate.packetTemplateId === "string" && Array.isArray(candidate.mappings)
+}
+
+/**
+ * Assembles a PacketConditionDefinition from a PacketTemplate's current
+ * mapped documents/fields/condition trees. Pure read, no packet dependency —
+ * usable both for an existing packet's snapshot (createPacketConditionSnapshot)
+ * and for packet-creation-time evaluation (createPacket in templates.ts,
+ * before the packet row exists).
+ */
+export async function buildPacketConditionDefinition(organizationId: string, packetTemplateId: string): Promise<PacketConditionDefinition> {
+  const mappings = await prisma.packetTemplateDocument.findMany({
+    where: { packetTemplateId },
+    orderBy: { sortOrder: "asc" },
+    include: {
+      conditionGroups: {
+        where: { parentGroupId: null },
+        include: { conditions: true, childGroups: { include: { conditions: true, childGroups: true } } },
+      },
+      documentTemplate: {
+        include: {
+          fields: {
+            orderBy: { sortOrder: "asc" },
+            include: {
+              conditionGroups: {
+                where: { parentGroupId: null },
+                include: { conditions: true, childGroups: { include: { conditions: true, childGroups: true } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  for (const mapping of mappings) {
+    if (mapping.documentTemplate.organizationId !== organizationId) throw new Error("Mapping/document organization mismatch")
+  }
+
+  return {
+    schemaVersion: 1,
+    packetTemplateId,
+    mappings: mappings.map((mapping): SnapshotMapping => ({
+      id: mapping.id,
+      documentTemplateId: mapping.documentTemplateId,
+      required: mapping.required,
+      sortOrder: mapping.sortOrder,
+      conditionGroups: mapping.conditionGroups.map(normalizeGroup),
+      fields: mapping.documentTemplate.fields.map((field) => ({
+        id: field.id,
+        fieldKey: field.fieldKey,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        conditionGroups: field.conditionGroups.map(normalizeGroup),
+      })),
+    })),
+  }
 }
 
 async function requireAuthorizedPacket(packetId: string) {
@@ -82,53 +138,11 @@ export async function createPacketConditionSnapshot(packetId: string) {
   const packetCheck = await validatePacketTemplateConditions(packet.packetTemplate!.id)
   if (!packetCheck.valid) throw new Error(`Packet template has ${packetCheck.errors.length} invalid condition definition(s)`)
 
-  const mappings = await prisma.packetTemplateDocument.findMany({
-    where: { packetTemplateId: packet.packetTemplate!.id },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      conditionGroups: {
-        where: { parentGroupId: null },
-        include: { conditions: true, childGroups: { include: { conditions: true, childGroups: true } } },
-      },
-      documentTemplate: {
-        include: {
-          fields: {
-            orderBy: { sortOrder: "asc" },
-            include: {
-              conditionGroups: {
-                where: { parentGroupId: null },
-                include: { conditions: true, childGroups: { include: { conditions: true, childGroups: true } } },
-              },
-            },
-          },
-        },
-      },
-    },
-  })
+  const definition = await buildPacketConditionDefinition(packet.organizationId, packet.packetTemplate!.id)
 
-  for (const mapping of mappings) {
-    if (mapping.documentTemplate.organizationId !== packet.organizationId) throw new Error("Mapping/document organization mismatch")
+  for (const mapping of definition.mappings) {
     const check = await validateTemplateConditions(mapping.documentTemplateId)
     if (!check.valid) throw new Error(`Document template has ${check.errors.length} invalid condition definition(s)`)
-  }
-
-  const definition: PacketConditionDefinition = {
-    schemaVersion: 1,
-    packetTemplateId: packet.packetTemplate!.id,
-    mappings: mappings.map((mapping): SnapshotMapping => ({
-      id: mapping.id,
-      documentTemplateId: mapping.documentTemplateId,
-      required: mapping.required,
-      sortOrder: mapping.sortOrder,
-      conditionGroups: mapping.conditionGroups.map(normalizeGroup),
-      fields: mapping.documentTemplate.fields.map((field) => ({
-        id: field.id,
-        fieldKey: field.fieldKey,
-        fieldType: field.fieldType,
-        isRequired: field.isRequired,
-        conditionGroups: field.conditionGroups.map(normalizeGroup),
-      })),
-    })),
   }
 
   const referenceAt = packet.createdAt
@@ -359,4 +373,163 @@ export function evaluatePacketApplicability(runtime: PacketConditionRuntime) {
     requiredness: evaluatePacketDocumentRequiredness(runtime, entry.id),
   }]))
   return { mode: "snapshot" as const, documents, integrityErrors: runtime.integrityErrors }
+}
+
+// ── Step 4c.2a — creation-time classification & reconciliation foundation ──
+//
+// Document inclusion is deliberately NOT treated as permanently static: a
+// DOCUMENT_INCLUSION/DOCUMENT_REQUIREDNESS condition that depends on a
+// TEMPLATE_FIELD value can only be judged "resolved" once that field's real
+// current value is known. At packet-creation time every field is still null,
+// so any such condition is classified "unresolved" and the conservative
+// compliance-safe default applies (include the document, keep the static
+// requiredness) rather than guessing. The same classification primitive
+// (`classifyGroup`) is reused later by `determinePacketReconciliationNeeds`
+// against a live runtime context with real field values — the only thing
+// that changes between "at creation" and "later" is which values are
+// currently known, not the logic itself. Actual automatic re-evaluation
+// after a field changes is Step 4c.2b; this only computes and reports state.
+
+interface TemplateFieldSource {
+  sourceFieldKey: string
+  sourcePacketTemplateDocumentId: string | null
+}
+
+// EvaluationGroup, not SnapshotGroup — SnapshotGroup.childGroups is typed as
+// EvaluationGroup[] (inherited, not narrowed), and this function only ever
+// touches conditions/childGroups, so the wider type avoids a mismatch
+// without changing the shared type.
+function collectTemplateFieldSources(group: EvaluationGroup): TemplateFieldSource[] {
+  const own = group.conditions
+    .filter((condition) => condition.sourceType === "TEMPLATE_FIELD" && condition.sourceFieldKey)
+    .map((condition) => ({ sourceFieldKey: condition.sourceFieldKey as string, sourcePacketTemplateDocumentId: condition.sourcePacketTemplateDocumentId }))
+  return [...own, ...group.childGroups.flatMap(collectTemplateFieldSources)]
+}
+
+function isSourceValueEmpty(value: unknown): boolean {
+  return value === null || value === undefined || value === ""
+}
+
+type GroupClassification =
+  | { kind: "no_condition" }
+  | { kind: "resolved"; result: boolean }
+  | { kind: "unresolved"; unresolvedSources: TemplateFieldSource[] }
+
+/**
+ * Classifies a condition group against a given set of known field values —
+ * "unresolved" whenever ANY TEMPLATE_FIELD leaf anywhere in the tree (root
+ * or nested) still has an empty resolved value, regardless of AND/OR
+ * short-circuiting. This is intentionally simple rather than attempting
+ * short-circuit-aware partial evaluation (e.g. "the AND is already false
+ * from a resolved pseudo-field leaf, so the empty field leaf doesn't
+ * matter") — that class of optimization belongs with live re-evaluation in
+ * Step 4c.2b, not this foundation.
+ */
+function classifyGroup(
+  group: EvaluationGroup | null,
+  ownFieldValues: Record<string, unknown>,
+  documentFieldValues: Record<string, Record<string, unknown>>,
+  context: EvaluationContext
+): GroupClassification {
+  if (!group) return { kind: "no_condition" }
+  const sources = collectTemplateFieldSources(group)
+  const unresolvedSources = sources.filter((source) => {
+    const value = source.sourcePacketTemplateDocumentId
+      ? documentFieldValues[source.sourcePacketTemplateDocumentId]?.[source.sourceFieldKey]
+      : ownFieldValues[source.sourceFieldKey]
+    return isSourceValueEmpty(value)
+  })
+  if (unresolvedSources.length > 0) return { kind: "unresolved", unresolvedSources }
+  const result = evaluateConditionTree(group, context)
+  return { kind: "resolved", result: result.result }
+}
+
+export interface InitialMappingApplicability {
+  mappingId: string
+  documentTemplateId: string
+  sortOrder: number
+  include: boolean
+  applicabilityStatus: "ACTIVE"
+  isRequired: boolean
+  inclusionResolution: "no_condition" | "resolved" | "unresolved"
+  requirednessResolution: "no_condition" | "resolved" | "unresolved"
+}
+
+/**
+ * Pure creation-time classifier — no Prisma, no packet dependency. Every
+ * field starts null, so any TEMPLATE_FIELD-sourced condition is necessarily
+ * "unresolved" here; the conservative policy always wins in that case:
+ * include the document (never hide a possibly-required 245D document for
+ * lack of an answer yet) and keep its static requiredness unchanged.
+ * `applicabilityStatus` is always "ACTIVE" — this function never produces
+ * CONDITIONALLY_INACTIVE, which is reserved for a future reconciliation
+ * pass (Step 4c.2b) once real field values exist to justify it.
+ */
+export function evaluateInitialPacketApplicability(
+  definition: PacketConditionDefinition,
+  context: { client: { isMinor: boolean }; packet: { programCode: string | null; packetType: string } }
+): InitialMappingApplicability[] {
+  const documentFieldValues: Record<string, Record<string, unknown>> = Object.fromEntries(
+    definition.mappings.map((m) => [m.id, Object.fromEntries(m.fields.map((f) => [f.fieldKey, null]))])
+  )
+  const evalContext: EvaluationContext = { fieldValues: {}, documentFieldValues, client: context.client, packet: context.packet }
+
+  return definition.mappings.map((m): InitialMappingApplicability => {
+    const inclusionGroup = m.conditionGroups.find((g) => g.purpose === "DOCUMENT_INCLUSION") ?? null
+    const requirednessGroup = m.conditionGroups.find((g) => g.purpose === "DOCUMENT_REQUIREDNESS") ?? null
+
+    const inclusion = classifyGroup(inclusionGroup, {}, documentFieldValues, evalContext)
+    const include = inclusion.kind === "resolved" ? inclusion.result : true
+
+    const requiredness = classifyGroup(requirednessGroup, {}, documentFieldValues, evalContext)
+    const isRequired = requiredness.kind === "resolved" ? requiredness.result : m.required
+
+    return {
+      mappingId: m.id,
+      documentTemplateId: m.documentTemplateId,
+      sortOrder: m.sortOrder,
+      include,
+      applicabilityStatus: "ACTIVE",
+      isRequired,
+      inclusionResolution: inclusion.kind,
+      requirednessResolution: requiredness.kind,
+    }
+  })
+}
+
+export interface ReconciliationNeed {
+  mappingId: string
+  purpose: "DOCUMENT_INCLUSION" | "DOCUMENT_REQUIREDNESS"
+  unresolvedSourceFieldKeys: string[]
+}
+
+/**
+ * General-purpose, reusable against ANY snapshot-mode runtime context at ANY
+ * later point in time (not just right after creation) — the API boundary
+ * Step 4c.2b builds on to decide what still needs re-evaluating. Contains no
+ * PHI: only mapping ids, purpose, and field *keys* (never values).
+ */
+export function determinePacketReconciliationNeeds(runtime: PacketConditionRuntime): ReconciliationNeed[] {
+  if (runtime.mode === "legacy" || !runtime.definition) return []
+  if (runtime.integrityErrors.length > 0) return []
+
+  const context: EvaluationContext = {
+    fieldValues: {},
+    documentFieldValues: runtime.documentFieldValues,
+    client: { isMinor: runtime.client.isMinor ?? false },
+    packet: { programCode: runtime.programCode, packetType: runtime.packetType },
+  }
+
+  const needs: ReconciliationNeed[] = []
+  for (const m of runtime.definition.mappings) {
+    for (const purpose of ["DOCUMENT_INCLUSION", "DOCUMENT_REQUIREDNESS"] as const) {
+      const group = m.conditionGroups.find((g) => g.purpose === purpose) ?? null
+      if (!group) continue
+      const classification = classifyGroup(group, {}, runtime.documentFieldValues, context)
+      if (classification.kind === "unresolved") {
+        needs.push({ mappingId: m.id, purpose, unresolvedSourceFieldKeys: classification.unresolvedSources.map((s) => s.sourceFieldKey) })
+      }
+    }
+  }
+  return needs
 }

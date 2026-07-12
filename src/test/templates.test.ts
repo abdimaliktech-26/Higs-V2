@@ -10,8 +10,11 @@ const packetTemplateFindUnique = vi.fn()
 const packetTemplateDocumentCreate = vi.fn()
 const packetTemplateDocumentFindUnique = vi.fn()
 const packetTemplateDocumentUpdate = vi.fn()
+const packetTemplateDocumentFindMany = vi.fn()
+const clientFindUnique = vi.fn()
 const packetCreate = vi.fn()
 const packetDocumentCreate = vi.fn()
+const packetConditionSnapshotCreate = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
 const documentTemplateFieldFindFirst = vi.fn()
 const templateConditionGroupFindMany = vi.fn()
@@ -30,6 +33,11 @@ function makeTx(overrides: Record<string, any> = {}) {
       update: (...a: unknown[]) => documentTemplateUpdate(...a),
       ...overrides.documentTemplate,
     },
+    packetConditionSnapshot: { create: (...a: unknown[]) => packetConditionSnapshotCreate(...a), ...overrides.packetConditionSnapshot },
+    packet: { create: (...a: unknown[]) => packetCreate(...a), ...overrides.packet },
+    packetDocument: { create: (...a: unknown[]) => packetDocumentCreate(...a), ...overrides.packetDocument },
+    documentTemplateField: { findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a), ...overrides.documentTemplateField },
+    pdfField: { createMany: (...a: unknown[]) => pdfFieldCreateMany(...a), ...overrides.pdfField },
   }
 }
 let currentTx = makeTx()
@@ -51,9 +59,12 @@ vi.mock("@/lib/db", () => ({
       create: (...a: unknown[]) => packetTemplateDocumentCreate(...a),
       findUnique: (...a: unknown[]) => packetTemplateDocumentFindUnique(...a),
       update: (...a: unknown[]) => packetTemplateDocumentUpdate(...a),
+      findMany: (...a: unknown[]) => packetTemplateDocumentFindMany(...a),
     },
+    client: { findUnique: (...a: unknown[]) => clientFindUnique(...a) },
     packet: { create: (...a: unknown[]) => packetCreate(...a) },
     packetDocument: { create: (...a: unknown[]) => packetDocumentCreate(...a) },
+    packetConditionSnapshot: { create: (...a: unknown[]) => packetConditionSnapshotCreate(...a) },
     documentTemplateField: {
       findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a),
       findFirst: (...a: unknown[]) => documentTemplateFieldFindFirst(...a),
@@ -357,98 +368,425 @@ describe("updateTemplateStatus — one active version per family", () => {
 const CLIENT_ID = "client-1"
 const PACKET_TEMPLATE_ID = "pt-1"
 const PACKET_ID = "pkt-1"
+const MAPPING_ID = "mapping-1"
+const DOC_TEMPLATE_ID = TEMPLATE_ID
 
-function packetTemplateWithDocs(requiredDocs: any[]) {
-  return { id: PACKET_TEMPLATE_ID, packetType: "initial_intake", requiredDocs }
+function clientRow(overrides: Record<string, unknown> = {}) {
+  return { id: CLIENT_ID, organizationId: ORG_ID, dateOfBirth: null, ...overrides }
 }
 
-describe("createPacket — DocumentTemplateField seeding", () => {
+function conditionGroupRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "grp-1", purpose: "DOCUMENT_INCLUSION", logicOperator: "AND", parentGroupId: null,
+    packetTemplateDocumentId: MAPPING_ID, documentTemplateFieldId: null, validationRuleId: null,
+    conditions: [], childGroups: [],
+    ...overrides,
+  }
+}
+
+function mappingRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: MAPPING_ID, packetTemplateId: PACKET_TEMPLATE_ID, documentTemplateId: DOC_TEMPLATE_ID, required: true, sortOrder: 0,
+    conditionGroups: [],
+    documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: ORG_ID, fields: [] },
+    ...overrides,
+  }
+}
+
+function packetTemplateRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PACKET_TEMPLATE_ID, organizationId: ORG_ID, packetType: "initial_intake", programId: null, program: null,
+    requiredDocs: [{ id: MAPPING_ID, documentTemplateId: DOC_TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: ORG_ID } }],
+    ...overrides,
+  }
+}
+
+function packetTemplateWithDocs(requiredDocs: any[]) {
+  return packetTemplateRow({ requiredDocs })
+}
+
+describe("createPacket — Step 4c.2a: transactional, condition-aware creation", () => {
   beforeEach(() => {
     authMock.mockResolvedValue(staffSession())
     requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    clientFindUnique.mockResolvedValue(clientRow())
+    packetTemplateFindUnique.mockResolvedValue(packetTemplateRow())
+    packetTemplateDocumentFindMany.mockResolvedValue([mappingRow()])
+    documentTemplateFindUnique.mockResolvedValue({ id: DOC_TEMPLATE_ID, organizationId: ORG_ID })
+    documentTemplateFieldFindMany.mockImplementation(async () => [])
+    templateConditionGroupFindMany.mockResolvedValue([])
     packetCreate.mockResolvedValue({ id: PACKET_ID })
+    packetConditionSnapshotCreate.mockImplementation(async ({ data }: any) => ({ id: "snap-1", ...data }))
     packetDocumentCreate.mockImplementation(async ({ data }: any) => ({ id: `pd-${data.documentTemplateId}`, ...data }))
   })
 
-  it("seeds PdfField rows from the mapped DocumentTemplate's field definitions", async () => {
-    packetTemplateFindUnique.mockResolvedValue(
-      packetTemplateWithDocs([{ id: "mapping-1", documentTemplateId: TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: {} }])
-    )
-    documentTemplateFieldFindMany.mockResolvedValue([
-      { id: "dtf-1", fieldKey: "client_name", name: "Client Name", fieldType: "text", pageNumber: 1, posX: 40, posY: 30, width: 180, height: 32, isRequired: true, sortOrder: 0 },
-      { id: "dtf-2", fieldKey: "guardian_signature", name: "Guardian Signature", fieldType: "signature", pageNumber: 1, posX: 300, posY: 30, width: 200, height: 40, isRequired: true, sortOrder: 1 },
-    ])
-
-    const { createPacket } = await import("@/lib/actions/templates")
-    const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-
-    expect(result.success).toBe(true)
-    expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ packetTemplateDocumentId: "mapping-1" }) })
-    expect(pdfFieldCreateMany).toHaveBeenCalledTimes(1)
-    const seeded = pdfFieldCreateMany.mock.calls[0][0].data
-    expect(seeded).toHaveLength(2)
-    expect(seeded[0]).toMatchObject({ name: "Client Name", fieldType: "text", templateFieldKey: "client_name", documentTemplateFieldId: "dtf-1", posX: 40, posY: 30, isRequired: true, source: "template", value: null })
-    expect(seeded[1]).toMatchObject({ name: "Guardian Signature", fieldType: "signature", templateFieldKey: "guardian_signature", documentTemplateFieldId: "dtf-2", source: "template" })
-  })
-
-  it("every seeded field has source \"template\" and a null value", async () => {
-    packetTemplateFindUnique.mockResolvedValue(
-      packetTemplateWithDocs([{ documentTemplateId: TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: {} }])
-    )
-    documentTemplateFieldFindMany.mockResolvedValue([
-      { id: "dtf-1", fieldKey: "dob", name: "Date of Birth", fieldType: "date", pageNumber: 1, posX: 40, posY: 30, width: 180, height: 32, isRequired: false, sortOrder: 0 },
-    ])
-
-    const { createPacket } = await import("@/lib/actions/templates")
-    await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-
-    const seeded = pdfFieldCreateMany.mock.calls[0][0].data
-    expect(seeded.every((f: any) => f.source === "template")).toBe(true)
-    expect(seeded.every((f: any) => f.value === null)).toBe(true)
-  })
-
-  it("a document template with no field definitions still creates the packet successfully", async () => {
-    packetTemplateFindUnique.mockResolvedValue(
-      packetTemplateWithDocs([{ documentTemplateId: TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: {} }])
-    )
-    documentTemplateFieldFindMany.mockResolvedValue([])
-
-    const { createPacket } = await import("@/lib/actions/templates")
-    const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-
-    expect(result.success).toBe(true)
-    expect(pdfFieldCreateMany).not.toHaveBeenCalled()
-  })
-
-  it("a packet template with zero mapped documents creates the packet successfully with no field seeding", async () => {
-    packetTemplateFindUnique.mockResolvedValue(packetTemplateWithDocs([]))
-
-    const { createPacket } = await import("@/lib/actions/templates")
-    const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
-
-    expect(result.success).toBe(true)
-    expect(packetDocumentCreate).not.toHaveBeenCalled()
-    expect(documentTemplateFieldFindMany).not.toHaveBeenCalled()
-    expect(pdfFieldCreateMany).not.toHaveBeenCalled()
-  })
-
-  it("seeds fields independently per mapped document", async () => {
-    packetTemplateFindUnique.mockResolvedValue(
-      packetTemplateWithDocs([
-        { documentTemplateId: "tpl-a", required: true, sortOrder: 0, documentTemplate: {} },
-        { documentTemplateId: "tpl-b", required: false, sortOrder: 1, documentTemplate: {} },
+  describe("field seeding and provenance", () => {
+    it("seeds PdfField rows from the mapped DocumentTemplate's field definitions, with full identity provenance", async () => {
+      documentTemplateFieldFindMany.mockImplementation(async () => [
+        { id: "dtf-1", fieldKey: "client_name", name: "Client Name", fieldType: "text", pageNumber: 1, posX: 40, posY: 30, width: 180, height: 32, isRequired: true, sortOrder: 0 },
+        { id: "dtf-2", fieldKey: "guardian_signature", name: "Guardian Signature", fieldType: "signature", pageNumber: 1, posX: 300, posY: 30, width: 200, height: 40, isRequired: true, sortOrder: 1 },
       ])
-    )
-    documentTemplateFieldFindMany.mockImplementation(async ({ where }: any) =>
-      where.documentTemplateId === "tpl-a"
-        ? [{ id: "dtf-a1", fieldKey: "a_field", name: "A Field", fieldType: "text", pageNumber: 1, posX: 0, posY: 0, width: 100, height: 20, isRequired: false, sortOrder: 0 }]
-        : []
-    )
 
-    const { createPacket } = await import("@/lib/actions/templates")
-    await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
 
-    expect(documentTemplateFieldFindMany).toHaveBeenCalledTimes(2)
-    expect(pdfFieldCreateMany).toHaveBeenCalledTimes(1)
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ packetTemplateDocumentId: MAPPING_ID, applicabilityStatus: "ACTIVE" }) })
+      expect(pdfFieldCreateMany).toHaveBeenCalledTimes(1)
+      const seeded = pdfFieldCreateMany.mock.calls[0][0].data
+      expect(seeded).toHaveLength(2)
+      expect(seeded[0]).toMatchObject({ name: "Client Name", fieldType: "text", templateFieldKey: "client_name", documentTemplateFieldId: "dtf-1", posX: 40, posY: 30, isRequired: true, source: "template", value: null })
+      expect(seeded[1]).toMatchObject({ name: "Guardian Signature", fieldType: "signature", templateFieldKey: "guardian_signature", documentTemplateFieldId: "dtf-2", source: "template" })
+    })
+
+    it("every seeded field has source \"template\" and a null value", async () => {
+      documentTemplateFieldFindMany.mockImplementation(async () => [
+        { id: "dtf-1", fieldKey: "dob", name: "Date of Birth", fieldType: "date", pageNumber: 1, posX: 40, posY: 30, width: 180, height: 32, isRequired: false, sortOrder: 0 },
+      ])
+
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      const seeded = pdfFieldCreateMany.mock.calls[0][0].data
+      expect(seeded.every((f: any) => f.source === "template")).toBe(true)
+      expect(seeded.every((f: any) => f.value === null)).toBe(true)
+    })
+
+    it("a document template with no field definitions still creates the packet successfully", async () => {
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      expect(result.success).toBe(true)
+      expect(pdfFieldCreateMany).not.toHaveBeenCalled()
+    })
+
+    it("a packet template with zero mapped documents creates the packet successfully with no field seeding", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateWithDocs([]))
+      packetTemplateDocumentFindMany.mockResolvedValue([])
+
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).not.toHaveBeenCalled()
+      expect(pdfFieldCreateMany).not.toHaveBeenCalled()
+    })
+
+    it("seeds fields independently per mapped document", async () => {
+      const MAPPING_B = "mapping-b"
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateWithDocs([
+        { id: MAPPING_ID, documentTemplateId: "tpl-a", required: true, sortOrder: 0, documentTemplate: { id: "tpl-a", organizationId: ORG_ID } },
+        { id: MAPPING_B, documentTemplateId: "tpl-b", required: false, sortOrder: 1, documentTemplate: { id: "tpl-b", organizationId: ORG_ID } },
+      ]))
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({ id: MAPPING_ID, documentTemplateId: "tpl-a", documentTemplate: { id: "tpl-a", organizationId: ORG_ID, fields: [] } }),
+        mappingRow({ id: MAPPING_B, documentTemplateId: "tpl-b", required: false, sortOrder: 1, documentTemplate: { id: "tpl-b", organizationId: ORG_ID, fields: [] } }),
+      ])
+      documentTemplateFieldFindMany.mockImplementation(async ({ where }: any) => {
+        const id = typeof where.documentTemplateId === "string" ? where.documentTemplateId : null
+        return id === "tpl-a" ? [{ id: "dtf-a1", fieldKey: "a_field", name: "A Field", fieldType: "text", pageNumber: 1, posX: 0, posY: 0, width: 100, height: 20, isRequired: false, sortOrder: 0 }] : []
+      })
+
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).toHaveBeenCalledTimes(2)
+      expect(pdfFieldCreateMany).toHaveBeenCalledTimes(1)
+      expect(pdfFieldCreateMany.mock.calls[0][0].data[0]).toMatchObject({ templateFieldKey: "a_field" })
+    })
+  })
+
+  describe("ownership verification", () => {
+    it("rejects a cross-tenant client", async () => {
+      clientFindUnique.mockResolvedValue(clientRow({ organizationId: "org-OTHER" }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/not found/i)
+      expect(packetCreate).not.toHaveBeenCalled()
+    })
+
+    it("rejects a cross-tenant packet template", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ organizationId: "org-OTHER" }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/not found/i)
+      expect(packetCreate).not.toHaveBeenCalled()
+    })
+
+    it("rejects when a mapped document template belongs to a different organization", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateWithDocs([
+        { id: MAPPING_ID, documentTemplateId: DOC_TEMPLATE_ID, required: true, sortOrder: 0, documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: "org-OTHER" } },
+      ]))
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/different organization/i)
+      expect(packetCreate).not.toHaveBeenCalled()
+    })
+
+    it("rejects when the packet template's program belongs to a different organization", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ programId: "prog-1", program: { id: "prog-1", code: "cadi", organizationId: "org-OTHER" } }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/program mismatch/i)
+      expect(packetCreate).not.toHaveBeenCalled()
+    })
+
+    it("rejects a role not permitted to create packets", async () => {
+      getActiveRoleMock.mockReturnValue("DSP")
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      expect(clientFindUnique).not.toHaveBeenCalled()
+    })
+
+    it("rejects an unauthenticated caller", async () => {
+      authMock.mockResolvedValue(null)
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/unauthorized/i)
+    })
+  })
+
+  describe("condition validation gate", () => {
+    it("blocks creation when the packet template has broken condition definitions", async () => {
+      templateConditionGroupFindMany.mockResolvedValueOnce([
+        conditionGroupRow({ conditions: [{ id: "c1", sourceType: "TEMPLATE_FIELD", sourceFieldKey: "ghost", sourcePacketTemplateDocumentId: MAPPING_ID, operator: "EQUALS", comparisonValue: "x" }] }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(false)
+      if (result.success) return
+      expect(result.error).toMatch(/broken condition/i)
+      expect(packetCreate).not.toHaveBeenCalled()
+      // Safe error only — no comparison values, field values, or client data.
+      expect(result.error).not.toContain("ghost")
+    })
+  })
+
+  describe("snapshot attachment", () => {
+    it("creates and attaches an immutable condition snapshot, setting the packet to condition-aware mode", async () => {
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      expect(result.success).toBe(true)
+      expect(packetConditionSnapshotCreate).toHaveBeenCalledTimes(1)
+      const snapshotData = packetConditionSnapshotCreate.mock.calls[0][0].data
+      expect(snapshotData.organizationId).toBe(ORG_ID)
+      expect(snapshotData.packetTemplateId).toBe(PACKET_TEMPLATE_ID)
+      expect(snapshotData.definition.packetTemplateId).toBe(PACKET_TEMPLATE_ID)
+
+      const packetData = packetCreate.mock.calls[0][0].data
+      expect(packetData.conditionSnapshotId).toBe("snap-1")
+      expect(packetData.conditionRuntimeVersion).toBe(1)
+    })
+
+    it("contains no raw DOB or client field values in the snapshot definition", async () => {
+      clientFindUnique.mockResolvedValue(clientRow({ dateOfBirth: new Date("2010-05-01") }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      const snapshotData = packetConditionSnapshotCreate.mock.calls[0][0].data
+      expect(JSON.stringify(snapshotData.definition)).not.toContain("2010-05-01")
+      expect(snapshotData.definition).not.toHaveProperty("dateOfBirth")
+      expect(typeof snapshotData.clientIsMinor).toBe("boolean")
+    })
+  })
+
+  describe("initial inclusion policy", () => {
+    it("no DOCUMENT_INCLUSION condition — creates the document ACTIVE", async () => {
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ applicabilityStatus: "ACTIVE" }) })
+    })
+
+    it("pseudo-field condition resolves true — creates the document ACTIVE", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ programId: "prog-1", program: { id: "prog-1", code: "cadi", organizationId: ORG_ID } }))
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({ conditionGroups: [conditionGroupRow({ conditions: [{ id: "c1", sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "cadi", sortOrder: 0 }] })] }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ applicabilityStatus: "ACTIVE" }) })
+    })
+
+    it("pseudo-field condition resolves false — document is omitted", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ programId: "prog-1", program: { id: "prog-1", code: "other", organizationId: ORG_ID } }))
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({ conditionGroups: [conditionGroupRow({ conditions: [{ id: "c1", sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "cadi", sortOrder: 0 }] })] }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).not.toHaveBeenCalled()
+      if (!result.success) return
+      expect(result.data.pendingReconciliation).toEqual([])
+    })
+
+    it("unresolved TEMPLATE_FIELD-dependent condition — creates the document ACTIVE conservatively, marked pending reconciliation", async () => {
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({
+          documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: ORG_ID, fields: [{ id: "dtf-1", fieldKey: "some_field", fieldType: "checkbox", isRequired: false, conditionGroups: [] }] },
+          conditionGroups: [conditionGroupRow({ conditions: [{ id: "c1", sourceType: "TEMPLATE_FIELD", sourceFieldKey: "some_field", sourcePacketTemplateDocumentId: MAPPING_ID, operator: "CHECKED", comparisonValue: null, sortOrder: 0 }] })],
+        }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(result.success).toBe(true)
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ applicabilityStatus: "ACTIVE" }) })
+      if (!result.success) return
+      expect(result.data.pendingReconciliation).toEqual([MAPPING_ID])
+    })
+  })
+
+  describe("initial requiredness policy", () => {
+    it("no DOCUMENT_REQUIREDNESS condition — preserves the static mapping.required value", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateWithDocs([
+        { id: MAPPING_ID, documentTemplateId: DOC_TEMPLATE_ID, required: false, sortOrder: 0, documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: ORG_ID } },
+      ]))
+      packetTemplateDocumentFindMany.mockResolvedValue([mappingRow({ required: false })])
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ isRequired: false }) })
+    })
+
+    it("pseudo-field requiredness condition applies the evaluated result", async () => {
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({
+          required: false,
+          conditionGroups: [conditionGroupRow({ purpose: "DOCUMENT_REQUIREDNESS", conditions: [{ id: "c1", sourceType: "PACKET_TYPE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "initial_intake", sortOrder: 0 }] })],
+        }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ isRequired: true }) })
+    })
+
+    it("unresolved field-dependent requiredness preserves the conservative static value", async () => {
+      packetTemplateDocumentFindMany.mockResolvedValue([
+        mappingRow({
+          required: true,
+          documentTemplate: { id: DOC_TEMPLATE_ID, organizationId: ORG_ID, fields: [{ id: "dtf-1", fieldKey: "some_field", fieldType: "checkbox", isRequired: false, conditionGroups: [] }] },
+          conditionGroups: [conditionGroupRow({ purpose: "DOCUMENT_REQUIREDNESS", conditions: [{ id: "c1", sourceType: "TEMPLATE_FIELD", sourceFieldKey: "some_field", sourcePacketTemplateDocumentId: MAPPING_ID, operator: "CHECKED", comparisonValue: null, sortOrder: 0 }] })],
+        }),
+      ])
+      const { createPacket } = await import("@/lib/actions/templates")
+      const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ isRequired: true }) })
+      if (!result.success) return
+      expect(result.data.pendingReconciliation).toEqual([MAPPING_ID])
+    })
+  })
+
+  describe("program and context", () => {
+    it("sets Packet.programId from PacketTemplate.programId", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ programId: "prog-1", program: { id: "prog-1", code: "cadi", organizationId: ORG_ID } }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetCreate.mock.calls[0][0].data.programId).toBe("prog-1")
+    })
+
+    it("packetType is the packet template's canonical value", async () => {
+      packetTemplateFindUnique.mockResolvedValue(packetTemplateRow({ packetType: "45_day" }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetCreate.mock.calls[0][0].data.packetType).toBe("45_day")
+    })
+
+    it("freezes clientIsMinor as of packet creation time — clearly a minor", async () => {
+      const fiveYearsAgo = new Date(Date.now() - 5 * 365 * 24 * 60 * 60 * 1000)
+      clientFindUnique.mockResolvedValue(clientRow({ dateOfBirth: fiveYearsAgo }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetConditionSnapshotCreate.mock.calls[0][0].data.clientIsMinor).toBe(true)
+    })
+
+    it("freezes clientIsMinor as of packet creation time — clearly an adult", async () => {
+      const fortyYearsAgo = new Date(Date.now() - 40 * 365 * 24 * 60 * 60 * 1000)
+      clientFindUnique.mockResolvedValue(clientRow({ dateOfBirth: fortyYearsAgo }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetConditionSnapshotCreate.mock.calls[0][0].data.clientIsMinor).toBe(false)
+    })
+
+    it("a null date of birth is handled safely — never a minor", async () => {
+      clientFindUnique.mockResolvedValue(clientRow({ dateOfBirth: null }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+      expect(packetConditionSnapshotCreate.mock.calls[0][0].data.clientIsMinor).toBe(false)
+    })
+  })
+
+  describe("audit", () => {
+    it("records snapshot and initial-applicability audit events with safe metadata only", async () => {
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      const snapshotAudit = createAuditEventMock.mock.calls.find((c: any) => c[0].action === "PACKET_CONDITION_SNAPSHOT_CREATED")
+      expect(snapshotAudit).toBeDefined()
+      expect(snapshotAudit![0].metadata).toEqual({ packetId: PACKET_ID, packetTemplateId: PACKET_TEMPLATE_ID, snapshotId: "snap-1", runtimeVersion: 1, trigger: "packet_creation" })
+
+      const applicabilityAudit = createAuditEventMock.mock.calls.find((c: any) => c[0].action === "PACKET_DOCUMENT_INITIAL_APPLICABILITY_SET")
+      expect(applicabilityAudit).toBeDefined()
+      expect(applicabilityAudit![0].metadata).toMatchObject({ packetId: PACKET_ID, packetTemplateId: PACKET_TEMPLATE_ID, packetTemplateDocumentId: MAPPING_ID, applicabilityStatus: "ACTIVE", trigger: "packet_creation" })
+      expect(Object.keys(applicabilityAudit![0].metadata)).not.toContain("comparisonValue")
+
+      const createdAudit = createAuditEventMock.mock.calls.find((c: any) => c[0].action === "PACKET_CREATED")
+      expect(createdAudit).toBeDefined()
+    })
+
+    it("no audit metadata anywhere contains DOB, client name, or field values", async () => {
+      clientFindUnique.mockResolvedValue(clientRow({ dateOfBirth: new Date("2010-05-01"), firstName: "Jane", lastName: "Doe" }))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
+
+      for (const call of createAuditEventMock.mock.calls) {
+        const serialized = JSON.stringify(call[0].metadata)
+        expect(serialized).not.toContain("2010-05-01")
+        expect(serialized).not.toContain("Jane")
+        expect(serialized).not.toContain("Doe")
+      }
+    })
+  })
+
+  describe("transactionality", () => {
+    it("rolls back (rejects, creates nothing) if snapshot creation fails", async () => {
+      packetConditionSnapshotCreate.mockRejectedValue(new Error("snapshot write failed"))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await expect(createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })).rejects.toThrow("snapshot write failed")
+      expect(packetCreate).not.toHaveBeenCalled()
+      expect(packetDocumentCreate).not.toHaveBeenCalled()
+      expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_CREATED")).toBe(false)
+    })
+
+    it("rolls back if a PacketDocument create fails", async () => {
+      packetDocumentCreate.mockRejectedValue(new Error("packet document write failed"))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await expect(createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })).rejects.toThrow("packet document write failed")
+      expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_CREATED")).toBe(false)
+    })
+
+    it("rolls back if PdfField seeding fails", async () => {
+      documentTemplateFieldFindMany.mockImplementation(async () => [
+        { id: "dtf-1", fieldKey: "client_name", name: "Client Name", fieldType: "text", pageNumber: 1, posX: 0, posY: 0, width: 100, height: 20, isRequired: true, sortOrder: 0 },
+      ])
+      pdfFieldCreateMany.mockRejectedValue(new Error("field seeding failed"))
+      const { createPacket } = await import("@/lib/actions/templates")
+      await expect(createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })).rejects.toThrow("field seeding failed")
+      expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_CREATED")).toBe(false)
+    })
   })
 })
