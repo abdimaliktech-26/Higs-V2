@@ -25,6 +25,12 @@ export type TemplateFieldType = "text" | "date" | "checkbox" | "signature" | "te
 export interface EvaluationCondition {
   sourceType: ConditionSourceType
   sourceFieldKey: string | null
+  // Step 4b — set only on document-owned (DOCUMENT_INCLUSION/DOCUMENT_REQUIREDNESS)
+  // TEMPLATE_FIELD conditions, pointing at the PacketTemplateDocument.id the
+  // field lives on (the owner mapping itself, or a sibling in the same
+  // PacketTemplate). Always null for field-owned conditions, which resolve
+  // from `fieldValues` exactly as in Step 4a.
+  sourcePacketTemplateDocumentId: string | null
   operator: ConditionOperator
   comparisonValue: unknown
 }
@@ -48,11 +54,17 @@ export interface EvaluationContext {
   fieldValues: Record<string, unknown>
   client: ClientContext
   packet: PacketContext
+  // Step 4b — cross-document field values for document-owned conditions.
+  // First key: PacketTemplateDocument.id. Second key: fieldKey on that
+  // mapping's document. Optional and defaults to empty — Step 4a callers
+  // (field-owned, same-document conditions) never need to supply this.
+  documentFieldValues?: Record<string, Record<string, unknown>>
 }
 
 export interface ConditionEvaluationDetail {
   sourceType: ConditionSourceType
   sourceFieldKey: string | null
+  sourcePacketTemplateDocumentId: string | null
   operator: ConditionOperator
   resolvedValue: unknown
   comparisonValue: unknown

@@ -13,7 +13,7 @@ function ctx(overrides: Partial<EvaluationContext> = {}): EvaluationContext {
 }
 
 function fieldCondition(overrides: Partial<EvaluationCondition> = {}): EvaluationCondition {
-  return { sourceType: "TEMPLATE_FIELD", sourceFieldKey: "status", operator: "EQUALS", comparisonValue: "active", ...overrides }
+  return { sourceType: "TEMPLATE_FIELD", sourceFieldKey: "status", sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "active", ...overrides }
 }
 
 describe("evaluateCondition — every operator", () => {
@@ -161,22 +161,78 @@ describe("evaluateCondition — missing/null/empty/malformed values", () => {
 
 describe("evaluateCondition — pseudo-fields", () => {
   it("CLIENT_IS_MINOR resolves from client context", () => {
-    const r = evaluateCondition({ sourceType: "CLIENT_IS_MINOR", sourceFieldKey: null, operator: "EQUALS", comparisonValue: true }, ctx({ client: { isMinor: true } }))
+    const r = evaluateCondition({ sourceType: "CLIENT_IS_MINOR", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: true }, ctx({ client: { isMinor: true } }))
     expect(r.result).toBe(true)
   })
 
   it("PACKET_PROGRAM_CODE resolves from packet context", () => {
-    const r = evaluateCondition({ sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, operator: "EQUALS", comparisonValue: "CADI" }, ctx({ packet: { programCode: "cadi", packetType: "initial_intake" } }))
+    const r = evaluateCondition({ sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "CADI" }, ctx({ packet: { programCode: "cadi", packetType: "initial_intake" } }))
     expect(r.result).toBe(true)
   })
 
   it("PACKET_TYPE resolves from packet context", () => {
-    const r = evaluateCondition({ sourceType: "PACKET_TYPE", sourceFieldKey: null, operator: "EQUALS", comparisonValue: "45_day" }, ctx({ packet: { programCode: null, packetType: "45_day" } }))
+    const r = evaluateCondition({ sourceType: "PACKET_TYPE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "EQUALS", comparisonValue: "45_day" }, ctx({ packet: { programCode: null, packetType: "45_day" } }))
     expect(r.result).toBe(true)
   })
 
   it("PACKET_PROGRAM_CODE with IN operator against multiple codes", () => {
-    const r = evaluateCondition({ sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, operator: "IN", comparisonValue: ["CADI", "BI"] }, ctx({ packet: { programCode: "BI", packetType: "initial_intake" } }))
+    const r = evaluateCondition({ sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, sourcePacketTemplateDocumentId: null, operator: "IN", comparisonValue: ["CADI", "BI"] }, ctx({ packet: { programCode: "BI", packetType: "initial_intake" } }))
+    expect(r.result).toBe(true)
+  })
+})
+
+describe("evaluateCondition — cross-document (Step 4b)", () => {
+  function crossDocCondition(overrides: Partial<EvaluationCondition> = {}): EvaluationCondition {
+    return { sourceType: "TEMPLATE_FIELD", sourceFieldKey: "is_minor_flag", sourcePacketTemplateDocumentId: "ptd-sibling", operator: "CHECKED", comparisonValue: undefined, ...overrides }
+  }
+
+  it("resolves the value by mapping id + fieldKey, not from the same-document fieldValues bag", () => {
+    const r = evaluateCondition(
+      crossDocCondition(),
+      ctx({ fieldValues: { is_minor_flag: false }, documentFieldValues: { "ptd-sibling": { is_minor_flag: true } } })
+    )
+    expect(r.result).toBe(true)
+    expect(r.resolvedValue).toBe(true)
+    expect(r.sourcePacketTemplateDocumentId).toBe("ptd-sibling")
+  })
+
+  it("missing mapping in documentFieldValues resolves as empty (same missing-value semantics as same-document)", () => {
+    const r = evaluateCondition(crossDocCondition({ operator: "UNCHECKED" }), ctx({ documentFieldValues: {} }))
+    expect(r.result).toBe(true)
+  })
+
+  it("mapping present but field missing on it resolves as empty", () => {
+    const r = evaluateCondition(crossDocCondition({ operator: "UNCHECKED" }), ctx({ documentFieldValues: { "ptd-sibling": {} } }))
+    expect(r.result).toBe(true)
+  })
+
+  it("documentFieldValues entirely absent from context resolves as empty, never throws", () => {
+    const r = evaluateCondition(crossDocCondition({ operator: "EMPTY" }), ctx())
+    expect(r.result).toBe(true)
+  })
+
+  it("field-owned (same-document) resolution is unaffected by an unrelated documentFieldValues bag", () => {
+    const r = evaluateCondition(fieldCondition({ operator: "EQUALS" }), ctx({ fieldValues: { status: "active" }, documentFieldValues: { "ptd-sibling": { status: "closed" } } }))
+    expect(r.result).toBe(true)
+  })
+
+  it("AND group combines a same-document condition with a cross-document condition", () => {
+    const group: EvaluationGroup = {
+      logicOperator: "AND",
+      conditions: [fieldCondition({ operator: "EQUALS", comparisonValue: "active" }), crossDocCondition({ operator: "CHECKED" })],
+      childGroups: [],
+    }
+    const r = evaluateGroup(group, ctx({ fieldValues: { status: "active" }, documentFieldValues: { "ptd-sibling": { is_minor_flag: true } } }))
+    expect(r.result).toBe(true)
+  })
+
+  it("OR group: cross-document condition alone can satisfy the group", () => {
+    const group: EvaluationGroup = {
+      logicOperator: "OR",
+      conditions: [fieldCondition({ operator: "EQUALS", comparisonValue: "closed" }), crossDocCondition({ operator: "CHECKED" })],
+      childGroups: [],
+    }
+    const r = evaluateGroup(group, ctx({ fieldValues: { status: "active" }, documentFieldValues: { "ptd-sibling": { is_minor_flag: true } } }))
     expect(r.result).toBe(true)
   })
 })

@@ -72,6 +72,13 @@ function resolveSourceValue(condition: EvaluationCondition, context: EvaluationC
   switch (condition.sourceType) {
     case "TEMPLATE_FIELD":
       if (!condition.sourceFieldKey) return undefined
+      // Cross-document (Step 4b): resolve from the referenced mapping's
+      // field values. A missing mapping or a missing field on it both
+      // resolve to undefined — the same "missing means empty" rule as
+      // same-document resolution, no special-casing needed.
+      if (condition.sourcePacketTemplateDocumentId) {
+        return context.documentFieldValues?.[condition.sourcePacketTemplateDocumentId]?.[condition.sourceFieldKey]
+      }
       return context.fieldValues[condition.sourceFieldKey]
     case "CLIENT_IS_MINOR":
       return context.client.isMinor
@@ -144,6 +151,7 @@ export function evaluateCondition(condition: EvaluationCondition, context: Evalu
   return {
     sourceType: condition.sourceType,
     sourceFieldKey: condition.sourceFieldKey,
+    sourcePacketTemplateDocumentId: condition.sourcePacketTemplateDocumentId,
     operator: condition.operator,
     resolvedValue,
     comparisonValue: condition.comparisonValue,

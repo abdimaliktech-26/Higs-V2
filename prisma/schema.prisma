@@ -625,21 +625,33 @@ model TemplateConditionGroup {
 // version carryover without rewriting. Dependency protection (blocking a
 // delete/rename of a referenced fieldKey) is therefore an application-level
 // query, not a DB foreign-key constraint.
+//
+// sourcePacketTemplateDocumentId (Step 4b) disambiguates which document a
+// cross-document TEMPLATE_FIELD reference's sourceFieldKey belongs to — the
+// same fieldKey string can exist on multiple DocumentTemplates, so fieldKey
+// alone is ambiguous once a condition can point outside its owner's own
+// document. Only ever set on DOCUMENT_INCLUSION/DOCUMENT_REQUIREDNESS
+// (PacketTemplateDocument-owned) conditions; field-owned conditions remain
+// same-document-only and must leave this null (enforced in application code,
+// not a DB constraint, matching the rest of this feature's ownership rules).
 model TemplateCondition {
-  id              String              @id @default(cuid())
-  groupId         String              @map("group_id")
-  sourceType      ConditionSourceType @map("source_type")
-  sourceFieldKey  String?             @map("source_field_key")
-  operator        ConditionOperator
-  comparisonValue Json?               @map("comparison_value")
-  sortOrder       Int                 @default(0) @map("sort_order")
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  id                             String              @id @default(cuid())
+  groupId                        String              @map("group_id")
+  sourceType                     ConditionSourceType @map("source_type")
+  sourceFieldKey                 String?             @map("source_field_key")
+  sourcePacketTemplateDocumentId String?             @map("source_packet_template_document_id")
+  operator                       ConditionOperator
+  comparisonValue                Json?               @map("comparison_value")
+  sortOrder                      Int                 @default(0) @map("sort_order")
+  createdAt                      DateTime            @default(now())
+  updatedAt                      DateTime            @updatedAt
 
-  group TemplateConditionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group                        TemplateConditionGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sourcePacketTemplateDocument PacketTemplateDocument? @relation(fields: [sourcePacketTemplateDocumentId], references: [id], onDelete: Cascade)
 
   @@index([groupId])
   @@index([sourceFieldKey])
+  @@index([sourcePacketTemplateDocumentId])
   @@map("template_conditions")
 }
 
@@ -671,9 +683,13 @@ model PacketTemplateDocument {
   sortOrder          Int      @default(0) @map("sort_order")
   createdAt          DateTime @default(now())
 
-  packetTemplate   PacketTemplate           @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
-  documentTemplate DocumentTemplate         @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
-  conditionGroups  TemplateConditionGroup[]
+  packetTemplate         PacketTemplate           @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
+  documentTemplate       DocumentTemplate         @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  conditionGroups        TemplateConditionGroup[]
+  // Incoming cross-document references — conditions owned by OTHER mappings
+  // in the same PacketTemplate whose TEMPLATE_FIELD source points at this
+  // mapping's document (Step 4b).
+  referencedByConditions TemplateCondition[]
 
   @@unique([packetTemplateId, documentTemplateId])
   @@map("packet_template_documents")

@@ -252,7 +252,9 @@ describe("updateDocumentTemplateField", () => {
     documentTemplateFieldFindUnique.mockResolvedValueOnce(existingField()).mockResolvedValueOnce(null)
     documentTemplateFindUnique.mockResolvedValue(draftTemplate())
     documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
-    templateConditionFindMany.mockResolvedValue([{ id: "c1", group: { purpose: "FIELD_VISIBILITY" } }])
+    templateConditionFindMany.mockImplementation(async (args: any) =>
+      "sourcePacketTemplateDocumentId" in args.where ? [{ id: "c1", group: { purpose: "FIELD_VISIBILITY" } }] : []
+    )
 
     const { updateDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
     const result = await updateDocumentTemplateField(FIELD_ID, { fieldKey: "new_key" })
@@ -338,10 +340,14 @@ describe("deleteDocumentTemplateField", () => {
     documentTemplateFieldFindUnique.mockResolvedValue(existingField())
     documentTemplateFindUnique.mockResolvedValue(draftTemplate())
     documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
-    templateConditionFindMany.mockResolvedValue([
-      { id: "c1", group: { purpose: "FIELD_VISIBILITY" } },
-      { id: "c2", group: { purpose: "FIELD_REQUIREDNESS" } },
-    ])
+    templateConditionFindMany.mockImplementation(async (args: any) =>
+      "sourcePacketTemplateDocumentId" in args.where
+        ? [
+            { id: "c1", group: { purpose: "FIELD_VISIBILITY" } },
+            { id: "c2", group: { purpose: "FIELD_REQUIREDNESS" } },
+          ]
+        : []
+    )
 
     const { deleteDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
     const result = await deleteDocumentTemplateField(FIELD_ID)

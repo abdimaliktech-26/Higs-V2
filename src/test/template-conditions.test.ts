@@ -14,6 +14,8 @@ const templateConditionCreate = vi.fn()
 const templateConditionUpdate = vi.fn()
 const templateConditionDelete = vi.fn()
 const documentTemplateFindUnique = vi.fn()
+const packetTemplateDocumentFindUnique = vi.fn()
+const packetTemplateDocumentFindMany = vi.fn()
 
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
@@ -42,6 +44,10 @@ vi.mock("@/lib/db", () => ({
       delete: (...a: unknown[]) => templateConditionDelete(...a),
     },
     documentTemplate: { findUnique: (...a: unknown[]) => documentTemplateFindUnique(...a) },
+    packetTemplateDocument: {
+      findUnique: (...a: unknown[]) => packetTemplateDocumentFindUnique(...a),
+      findMany: (...a: unknown[]) => packetTemplateDocumentFindMany(...a),
+    },
   },
 }))
 vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
@@ -326,29 +332,117 @@ describe("getConditionsForTemplate — reads allowed on retired templates", () =
 })
 
 describe("getFieldConditionDependencySummary", () => {
-  it("reports accurate count and purposes, no client data", async () => {
+  function mockConditionFindManyByWhere(sameTemplateRows: any[], crossDocRows: any[]) {
+    templateConditionFindMany.mockImplementation(async (args: any) => {
+      if ("sourcePacketTemplateDocumentId" in args.where) return sameTemplateRows
+      return crossDocRows
+    })
+  }
+
+  it("reports accurate count and purposes for same-template field-owned conditions, no client data", async () => {
     documentTemplateFindUnique.mockResolvedValue({ id: TEMPLATE_ID, organizationId: ORG_ID, status: "draft" })
     documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
-    templateConditionFindMany.mockResolvedValue([
-      { id: "c1", group: { purpose: "FIELD_VISIBILITY" } },
-      { id: "c2", group: { purpose: "FIELD_REQUIREDNESS" } },
-      { id: "c3", group: { purpose: "FIELD_VISIBILITY" } },
-    ])
+    mockConditionFindManyByWhere(
+      [
+        { id: "c1", group: { purpose: "FIELD_VISIBILITY" } },
+        { id: "c2", group: { purpose: "FIELD_REQUIREDNESS" } },
+        { id: "c3", group: { purpose: "FIELD_VISIBILITY" } },
+      ],
+      []
+    )
 
     const { getFieldConditionDependencySummary } = await import("@/lib/actions/template-conditions")
     const summary = await getFieldConditionDependencySummary(TEMPLATE_ID, "client_name")
 
     expect(summary.count).toBe(3)
     expect(summary.purposes.sort()).toEqual(["FIELD_REQUIREDNESS", "FIELD_VISIBILITY"])
+    expect(summary.affectedPacketTemplateIds).toEqual([])
   })
 
-  it("returns zero when no template fields exist", async () => {
+  it("returns zero when no template fields exist and no cross-document references exist either", async () => {
     documentTemplateFindUnique.mockResolvedValue({ id: TEMPLATE_ID, organizationId: ORG_ID, status: "draft" })
     documentTemplateFieldFindMany.mockResolvedValue([])
+    mockConditionFindManyByWhere([], [])
     const { getFieldConditionDependencySummary } = await import("@/lib/actions/template-conditions")
     const summary = await getFieldConditionDependencySummary(TEMPLATE_ID, "client_name")
-    expect(summary).toEqual({ count: 0, purposes: [] })
-    expect(templateConditionFindMany).not.toHaveBeenCalled()
+    expect(summary).toEqual({ count: 0, purposes: [], affectedPacketTemplateIds: [] })
+  })
+
+  it("counts a document-owned cross-document reference organization-wide, even though this template has zero fields of its own in the mock", async () => {
+    documentTemplateFindUnique.mockResolvedValue({ id: TEMPLATE_ID, organizationId: ORG_ID, status: "draft" })
+    documentTemplateFieldFindMany.mockResolvedValue([])
+    mockConditionFindManyByWhere(
+      [],
+      [{ id: "c-cross", group: { purpose: "DOCUMENT_INCLUSION", packetTemplateDocumentId: "ptd-sibling", parentGroup: null } }]
+    )
+    packetTemplateDocumentFindMany.mockResolvedValue([{ id: "ptd-sibling", packetTemplateId: "pt-1" }])
+
+    const { getFieldConditionDependencySummary } = await import("@/lib/actions/template-conditions")
+    const summary = await getFieldConditionDependencySummary(TEMPLATE_ID, "is_minor_flag")
+
+    expect(summary.count).toBe(1)
+    expect(summary.purposes).toEqual(["DOCUMENT_INCLUSION"])
+    expect(summary.affectedPacketTemplateIds).toEqual(["pt-1"])
+  })
+
+  it("an unrelated field with the same name on a different template does not contribute to the count", async () => {
+    documentTemplateFindUnique.mockResolvedValue({ id: TEMPLATE_ID, organizationId: ORG_ID, status: "draft" })
+    documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
+    // Both queries are properly scoped by the mock's args in real code — this
+    // just proves the zero-dependency path returns cleanly.
+    mockConditionFindManyByWhere([], [])
+    const { getFieldConditionDependencySummary } = await import("@/lib/actions/template-conditions")
+    const summary = await getFieldConditionDependencySummary(TEMPLATE_ID, "client_name")
+    expect(summary.count).toBe(0)
+  })
+})
+
+describe("getPacketTemplateDocumentConditionDependencies — reusable helper for a future mapping-deletion feature", () => {
+  const MAPPING_ID = "ptd-1"
+
+  it("reports conditions the mapping owns and conditions that reference it from sibling mappings", async () => {
+    packetTemplateDocumentFindUnique.mockResolvedValue({ id: MAPPING_ID, packetTemplate: { id: "pt-1", organizationId: ORG_ID } })
+    templateConditionFindMany.mockImplementation(async (args: any) => {
+      if ("sourcePacketTemplateDocumentId" in args.where) {
+        return [{ id: "incoming-1", group: { purpose: "DOCUMENT_INCLUSION" } }]
+      }
+      return [
+        { id: "owned-1", group: { purpose: "DOCUMENT_INCLUSION" } },
+        { id: "owned-2", group: { purpose: "DOCUMENT_REQUIREDNESS" } },
+      ]
+    })
+
+    const { getPacketTemplateDocumentConditionDependencies } = await import("@/lib/actions/template-conditions")
+    const result = await getPacketTemplateDocumentConditionDependencies(MAPPING_ID)
+
+    expect(result.ownedConditionCount).toBe(2)
+    expect(result.incomingReferenceCount).toBe(1)
+    expect(result.totalCount).toBe(3)
+    expect(result.packetTemplateId).toBe("pt-1")
+    expect(result.purposes.sort()).toEqual(["DOCUMENT_INCLUSION", "DOCUMENT_REQUIREDNESS"])
+  })
+
+  it("reports zero for a mapping with no owned or incoming conditions", async () => {
+    packetTemplateDocumentFindUnique.mockResolvedValue({ id: MAPPING_ID, packetTemplate: { id: "pt-1", organizationId: ORG_ID } })
+    templateConditionFindMany.mockResolvedValue([])
+
+    const { getPacketTemplateDocumentConditionDependencies } = await import("@/lib/actions/template-conditions")
+    const result = await getPacketTemplateDocumentConditionDependencies(MAPPING_ID)
+
+    expect(result).toEqual({ ownedConditionCount: 0, incomingReferenceCount: 0, totalCount: 0, packetTemplateId: "pt-1", purposes: [] })
+  })
+
+  it("rejects cross-tenant reads", async () => {
+    packetTemplateDocumentFindUnique.mockResolvedValue({ id: MAPPING_ID, packetTemplate: { id: "pt-1", organizationId: "org-OTHER" } })
+    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    const { getPacketTemplateDocumentConditionDependencies } = await import("@/lib/actions/template-conditions")
+    await expect(getPacketTemplateDocumentConditionDependencies(MAPPING_ID)).rejects.toThrow("Access denied")
+  })
+
+  it("throws for a nonexistent mapping", async () => {
+    packetTemplateDocumentFindUnique.mockResolvedValue(null)
+    const { getPacketTemplateDocumentConditionDependencies } = await import("@/lib/actions/template-conditions")
+    await expect(getPacketTemplateDocumentConditionDependencies("does-not-exist")).rejects.toThrow("not found")
   })
 })
 

@@ -159,6 +159,11 @@ export const updateConditionGroupSchema = z.object({
 export const createConditionSchema = z.object({
   sourceType: z.enum(CONDITION_SOURCE_TYPES),
   sourceFieldKey: z.string().max(100).optional(),
+  // Step 4b — cross-document anchor, document-owned (DOCUMENT_INCLUSION /
+  // DOCUMENT_REQUIREDNESS) conditions only. Must stay absent for field-owned
+  // conditions; enforced in template-conditions.ts, not here (owner type is
+  // data-dependent, resolved from the target group).
+  sourcePacketTemplateDocumentId: z.string().max(50).optional(),
   operator: z.enum(CONDITION_OPERATORS),
   comparisonValue: z.unknown().optional(),
   sortOrder: z.number().int().min(0).default(0),
@@ -167,6 +172,7 @@ export const createConditionSchema = z.object({
 export const updateConditionSchema = z.object({
   sourceType: z.enum(CONDITION_SOURCE_TYPES).optional(),
   sourceFieldKey: z.string().max(100).optional(),
+  sourcePacketTemplateDocumentId: z.string().max(50).optional(),
   operator: z.enum(CONDITION_OPERATORS).optional(),
   comparisonValue: z.unknown().optional(),
   sortOrder: z.number().int().min(0).optional(),
