@@ -13,6 +13,8 @@ const packetTemplateDocumentUpdate = vi.fn()
 const packetCreate = vi.fn()
 const packetDocumentCreate = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
+const documentTemplateFieldFindFirst = vi.fn()
+const templateConditionGroupFindMany = vi.fn()
 const pdfFieldCreateMany = vi.fn()
 
 const authMock = vi.fn()
@@ -52,7 +54,11 @@ vi.mock("@/lib/db", () => ({
     },
     packet: { create: (...a: unknown[]) => packetCreate(...a) },
     packetDocument: { create: (...a: unknown[]) => packetDocumentCreate(...a) },
-    documentTemplateField: { findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a) },
+    documentTemplateField: {
+      findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a),
+      findFirst: (...a: unknown[]) => documentTemplateFieldFindFirst(...a),
+    },
+    templateConditionGroup: { findMany: (...a: unknown[]) => templateConditionGroupFindMany(...a) },
     pdfField: { createMany: (...a: unknown[]) => pdfFieldCreateMany(...a) },
     $transaction: (cb: any) => transactionMock(cb),
   },
@@ -77,6 +83,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   currentTx = makeTx()
   transactionMock.mockImplementation((cb: any) => cb(currentTx))
+  // Safe default for validateTemplateConditions (real, unmocked activation
+  // gate now run by updateTemplateStatus's "active" branch) — "no fields, no
+  // conditions, trivially valid" unless a specific test overrides this.
+  documentTemplateFieldFindMany.mockResolvedValue([])
+  templateConditionGroupFindMany.mockResolvedValue([])
 })
 
 const DOC_A = "doc-a"
@@ -209,6 +220,8 @@ describe("updateTemplateStatus — one active version per family", () => {
     getActiveRoleMock.mockReturnValue("ORG_ADMIN")
     // v2 (target) -> previousVersionId v1; v1 has no children besides v2.
     documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ id: "tpl-v2", previousVersionId: "tpl-v1" }))
+    // validateTemplateConditions's own template lookup (activation gate) — zero fields, trivially valid.
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ id: "tpl-v2", previousVersionId: "tpl-v1" }))
     // getVersionFamilyIds traversal: starts at tpl-v2, finds previous tpl-v1 + no children of tpl-v2;
     // then visits tpl-v1, finds no previous + no children besides itself.
     documentTemplateFindUnique
@@ -236,6 +249,8 @@ describe("updateTemplateStatus — one active version per family", () => {
     authMock.mockResolvedValue(staffSession())
     requireOrgAccessMock.mockResolvedValue({})
     getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
+    // validateTemplateConditions's own template lookup (activation gate) — zero fields, trivially valid.
     documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
     documentTemplateFindUnique.mockResolvedValueOnce({ previousVersionId: null })
     documentTemplateFindMany.mockResolvedValueOnce([])
@@ -286,6 +301,56 @@ describe("updateTemplateStatus — one active version per family", () => {
     expect(result.success).toBe(false)
     if (result.success) return
     expect(result.error).toMatch(/not found/i)
+  })
+
+  it("blocks activation when the template has broken field-owned conditions", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
+    // validateTemplateConditions's own lookup, then a real field + a broken condition group.
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
+    documentTemplateFieldFindMany.mockResolvedValueOnce([{ id: "field-1", fieldKey: "client_name", fieldType: "text" }])
+    templateConditionGroupFindMany.mockResolvedValueOnce([
+      {
+        id: "group-1", documentTemplateFieldId: "field-1", packetTemplateDocumentId: null, validationRuleId: null, parentGroupId: null,
+        conditions: [{ id: "c1", sourceType: "TEMPLATE_FIELD", sourceFieldKey: "ghost_field", operator: "EQUALS", comparisonValue: "x" }],
+        childGroups: [],
+      },
+    ])
+    documentTemplateFieldFindFirst.mockResolvedValueOnce(null)
+
+    const { updateTemplateStatus } = await import("@/lib/actions/templates")
+    const result = await updateTemplateStatus(TEMPLATE_ID, "active")
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/broken condition/i)
+    expect(documentTemplateUpdate).not.toHaveBeenCalled()
+  })
+
+  it("allows activation when the template's conditions are all valid", async () => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow({ previousVersionId: null }))
+    documentTemplateFieldFindMany.mockResolvedValueOnce([{ id: "field-1", fieldKey: "client_name", fieldType: "text" }])
+    templateConditionGroupFindMany.mockResolvedValueOnce([
+      {
+        id: "group-1", documentTemplateFieldId: "field-1", packetTemplateDocumentId: null, validationRuleId: null, parentGroupId: null,
+        conditions: [{ id: "c1", sourceType: "TEMPLATE_FIELD", sourceFieldKey: "client_name", operator: "EQUALS", comparisonValue: "x" }],
+        childGroups: [],
+      },
+    ])
+    documentTemplateFindUnique.mockResolvedValueOnce({ previousVersionId: null }) // getVersionFamilyIds neighbor lookup
+    documentTemplateFindMany.mockResolvedValueOnce([]) // getVersionFamilyIds children lookup
+
+    const { updateTemplateStatus } = await import("@/lib/actions/templates")
+    const result = await updateTemplateStatus(TEMPLATE_ID, "active")
+
+    expect(result.success).toBe(true)
+    expect(documentTemplateUpdate).toHaveBeenCalledWith({ where: { id: TEMPLATE_ID }, data: { status: "active" } })
   })
 })
 

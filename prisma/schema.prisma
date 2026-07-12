@@ -72,6 +72,9 @@ enum AuditAction {
   TEMPLATE_FIELD_UPDATED
   TEMPLATE_FIELD_DELETED
   VALIDATION_RULE_STATUS_CHANGED
+  TEMPLATE_CONDITION_CREATED
+  TEMPLATE_CONDITION_UPDATED
+  TEMPLATE_CONDITION_DELETED
   VALIDATION_RUN
   VALIDATION_ISSUE_CREATED
   VALIDATION_ISSUE_RESOLVED
@@ -184,27 +187,28 @@ model Organization {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
-  members                OrganizationMember[]
-  clients                Client[]
-  packets                Packet[]
-  programs               Program[]
-  packetTemplates        PacketTemplate[]
-  documentTemplates      DocumentTemplate[]
-  documentTemplateFields DocumentTemplateField[]
-  validationRules        ValidationRule[]
-  validationResults      ValidationResult[]
-  signatureRequests      SignatureRequest[]
-  approvalRequests       ApprovalRequest[]
-  supportingDocuments    SupportingDocument[]
-  aiExtractions          AiExtraction[]
-  aiRecommendations      AiRecommendation[]
-  notifications          Notification[]
-  auditEvents            AuditEvent[]
-  portalClientAccess     PortalClientAccess[]
-  portalInvitations      PortalInvitation[]
-  portalNotifications    PortalNotification[]
-  portalAuditEvents      PortalAuditEvent[]
-  portalDocumentRequests PortalDocumentRequest[]
+  members                 OrganizationMember[]
+  clients                 Client[]
+  packets                 Packet[]
+  programs                Program[]
+  packetTemplates         PacketTemplate[]
+  documentTemplates       DocumentTemplate[]
+  documentTemplateFields  DocumentTemplateField[]
+  templateConditionGroups TemplateConditionGroup[]
+  validationRules         ValidationRule[]
+  validationResults       ValidationResult[]
+  signatureRequests       SignatureRequest[]
+  approvalRequests        ApprovalRequest[]
+  supportingDocuments     SupportingDocument[]
+  aiExtractions           AiExtraction[]
+  aiRecommendations       AiRecommendation[]
+  notifications           Notification[]
+  auditEvents             AuditEvent[]
+  portalClientAccess      PortalClientAccess[]
+  portalInvitations       PortalInvitation[]
+  portalNotifications     PortalNotification[]
+  portalAuditEvents       PortalAuditEvent[]
+  portalDocumentRequests  PortalDocumentRequest[]
 
   @@map("organizations")
 }
@@ -531,11 +535,112 @@ model DocumentTemplateField {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  organization     Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate         @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  conditionGroups  TemplateConditionGroup[]
 
   @@unique([documentTemplateId, fieldKey])
   @@map("document_template_fields")
+}
+
+// ── Stage 5 Step 4a: Conditional Logic Foundation ──
+// Schema/CRUD/evaluator only in this step — no runtime hiding, no packet
+// seeding integration, no validation-engine integration yet. See
+// docs/UI_CORRECTION_STATUS.md for the full phased plan.
+
+enum ConditionPurpose {
+  FIELD_VISIBILITY
+  FIELD_REQUIREDNESS
+  DOCUMENT_INCLUSION
+  DOCUMENT_REQUIREDNESS
+  VALIDATION_RULE_APPLICABILITY
+}
+
+enum ConditionLogicOperator {
+  AND
+  OR
+}
+
+enum ConditionOperator {
+  EQUALS
+  NOT_EQUALS
+  CONTAINS
+  NOT_EMPTY
+  EMPTY
+  CHECKED
+  UNCHECKED
+  GREATER_THAN
+  LESS_THAN
+  BEFORE
+  AFTER
+  IN
+  NOT_IN
+}
+
+// TEMPLATE_FIELD references another DocumentTemplateField.fieldKey on the
+// same DocumentTemplate. The other three are fixed pseudo-fields — never a
+// real column lookup, never raw client PHI (CLIENT_IS_MINOR is a derived
+// boolean, never date of birth itself).
+enum ConditionSourceType {
+  TEMPLATE_FIELD
+  CLIENT_IS_MINOR
+  PACKET_PROGRAM_CODE
+  PACKET_TYPE
+}
+
+// A condition tree's root node. Exactly one owner FK is set on a root group
+// (enforced in application code, not a DB constraint, since Prisma/Postgres
+// can't express "exactly one of N nullable FKs" declaratively). A nested
+// group (parentGroupId set) has no owner of its own — it belongs to its root
+// ancestor's owner. Max depth is 2: a root group, optionally containing one
+// level of child groups — enforced in application code.
+model TemplateConditionGroup {
+  id                       String                 @id @default(cuid())
+  organizationId           String                 @map("organization_id")
+  purpose                  ConditionPurpose
+  logicOperator            ConditionLogicOperator @default(AND) @map("logic_operator")
+  parentGroupId            String?                @map("parent_group_id")
+  documentTemplateFieldId  String?                @map("document_template_field_id")
+  packetTemplateDocumentId String?                @map("packet_template_document_id")
+  validationRuleId         String?                @map("validation_rule_id")
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parentGroup            TemplateConditionGroup?  @relation("ConditionGroupChildren", fields: [parentGroupId], references: [id], onDelete: Cascade)
+  childGroups            TemplateConditionGroup[] @relation("ConditionGroupChildren")
+  documentTemplateField  DocumentTemplateField?   @relation(fields: [documentTemplateFieldId], references: [id], onDelete: Cascade)
+  packetTemplateDocument PacketTemplateDocument?  @relation(fields: [packetTemplateDocumentId], references: [id], onDelete: Cascade)
+  validationRule         ValidationRule?          @relation(fields: [validationRuleId], references: [id], onDelete: Cascade)
+  conditions             TemplateCondition[]
+
+  @@index([documentTemplateFieldId])
+  @@index([parentGroupId])
+  @@map("template_condition_groups")
+}
+
+// A single leaf comparison within a group. sourceFieldKey is a plain string
+// (not a FK) — the entire point of Step 2's stable fieldKey design is that
+// conditions reference fields by key, not database id, so they survive
+// version carryover without rewriting. Dependency protection (blocking a
+// delete/rename of a referenced fieldKey) is therefore an application-level
+// query, not a DB foreign-key constraint.
+model TemplateCondition {
+  id              String              @id @default(cuid())
+  groupId         String              @map("group_id")
+  sourceType      ConditionSourceType @map("source_type")
+  sourceFieldKey  String?             @map("source_field_key")
+  operator        ConditionOperator
+  comparisonValue Json?               @map("comparison_value")
+  sortOrder       Int                 @default(0) @map("sort_order")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  group TemplateConditionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([sourceFieldKey])
+  @@map("template_conditions")
 }
 
 model PacketTemplate {
@@ -566,8 +671,9 @@ model PacketTemplateDocument {
   sortOrder          Int      @default(0) @map("sort_order")
   createdAt          DateTime @default(now())
 
-  packetTemplate   PacketTemplate   @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
-  documentTemplate DocumentTemplate @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  packetTemplate   PacketTemplate           @relation(fields: [packetTemplateId], references: [id], onDelete: Cascade)
+  documentTemplate DocumentTemplate         @relation(fields: [documentTemplateId], references: [id], onDelete: Cascade)
+  conditionGroups  TemplateConditionGroup[]
 
   @@unique([packetTemplateId, documentTemplateId])
   @@map("packet_template_documents")
@@ -709,8 +815,9 @@ model ValidationRule {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  issues       ValidationIssue[]
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  issues          ValidationIssue[]
+  conditionGroups TemplateConditionGroup[]
 
   @@unique([organizationId, name])
   @@map("validation_rules")

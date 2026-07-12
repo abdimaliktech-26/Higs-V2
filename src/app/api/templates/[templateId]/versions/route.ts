@@ -8,7 +8,7 @@ import { auth } from "@/lib/auth"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { validateTemplatePdfUpload, sanitizeTemplateFileName } from "@/lib/document-template-upload"
-import { UserRole } from "@prisma/client"
+import { UserRole, Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
@@ -113,6 +113,74 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tem
             sortOrder: f.sortOrder,
           })),
         })
+
+        // Carry field-owned conditional logic forward too — fresh ids, owner
+        // remapped by fieldKey match onto the new version's fields, nested
+        // groups reattached under the newly created root's id. Old version's
+        // own groups/conditions are never touched. Packet-document-owned
+        // conditions are out of scope until cross-document conditions land.
+        const newFields = await tx.documentTemplateField.findMany({ where: { documentTemplateId: created.id } })
+        const newFieldIdByKey = new Map(newFields.map((f) => [f.fieldKey, f.id]))
+        const oldFieldKeyById = new Map(priorFields.map((f) => [f.id, f.fieldKey]))
+
+        const priorRootGroups = await tx.templateConditionGroup.findMany({
+          where: { documentTemplateFieldId: { in: priorFields.map((f) => f.id) }, parentGroupId: null },
+          include: { conditions: true, childGroups: { include: { conditions: true } } },
+        })
+
+        for (const rootGroup of priorRootGroups) {
+          const fieldKey = oldFieldKeyById.get(rootGroup.documentTemplateFieldId as string)
+          const newFieldId = fieldKey ? newFieldIdByKey.get(fieldKey) : undefined
+          if (!newFieldId) {
+            throw new Error(`Cannot carry forward conditions: no field with key "${fieldKey}" on the new version`)
+          }
+
+          const newRootGroup = await tx.templateConditionGroup.create({
+            data: {
+              organizationId: previous.organizationId,
+              purpose: rootGroup.purpose,
+              logicOperator: rootGroup.logicOperator,
+              documentTemplateFieldId: newFieldId,
+            },
+          })
+
+          if (rootGroup.conditions.length > 0) {
+            await tx.templateCondition.createMany({
+              data: rootGroup.conditions.map((c) => ({
+                groupId: newRootGroup.id,
+                sourceType: c.sourceType,
+                sourceFieldKey: c.sourceFieldKey,
+                operator: c.operator,
+                comparisonValue: (c.comparisonValue ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+                sortOrder: c.sortOrder,
+              })),
+            })
+          }
+
+          for (const childGroup of rootGroup.childGroups) {
+            const newChildGroup = await tx.templateConditionGroup.create({
+              data: {
+                organizationId: previous.organizationId,
+                purpose: childGroup.purpose,
+                logicOperator: childGroup.logicOperator,
+                parentGroupId: newRootGroup.id,
+              },
+            })
+
+            if (childGroup.conditions.length > 0) {
+              await tx.templateCondition.createMany({
+                data: childGroup.conditions.map((c) => ({
+                  groupId: newChildGroup.id,
+                  sourceType: c.sourceType,
+                  sourceFieldKey: c.sourceFieldKey,
+                  operator: c.operator,
+                  comparisonValue: (c.comparisonValue ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+                  sortOrder: c.sortOrder,
+                })),
+              })
+            }
+          }
+        }
       }
 
       return created

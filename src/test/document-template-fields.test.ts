@@ -6,6 +6,7 @@ const documentTemplateFieldFindMany = vi.fn()
 const documentTemplateFieldCreate = vi.fn()
 const documentTemplateFieldUpdate = vi.fn()
 const documentTemplateFieldDelete = vi.fn()
+const templateConditionFindMany = vi.fn()
 
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
@@ -22,6 +23,9 @@ vi.mock("@/lib/db", () => ({
       update: (...a: unknown[]) => documentTemplateFieldUpdate(...a),
       delete: (...a: unknown[]) => documentTemplateFieldDelete(...a),
     },
+    // Backs getFieldConditionDependencySummary (src/lib/actions/template-conditions.ts),
+    // called for real (not mocked away) by update/delete's dependency-protection check.
+    templateCondition: { findMany: (...a: unknown[]) => templateConditionFindMany(...a) },
   },
 }))
 vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
@@ -51,6 +55,11 @@ function validFieldInput(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Safe defaults for getFieldConditionDependencySummary (real, unmocked
+  // dependency-protection check now run by update/delete) — "0 dependencies"
+  // unless a specific test overrides these to exercise the guard itself.
+  documentTemplateFieldFindMany.mockResolvedValue([])
+  templateConditionFindMany.mockResolvedValue([])
 })
 
 describe("getDocumentTemplateFields", () => {
@@ -239,6 +248,35 @@ describe("updateDocumentTemplateField", () => {
     expect(documentTemplateFieldUpdate).not.toHaveBeenCalled()
   })
 
+  it("blocks renaming a fieldKey that a condition depends on", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValueOnce(existingField()).mockResolvedValueOnce(null)
+    documentTemplateFindUnique.mockResolvedValue(draftTemplate())
+    documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
+    templateConditionFindMany.mockResolvedValue([{ id: "c1", group: { purpose: "FIELD_VISIBILITY" } }])
+
+    const { updateDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
+    const result = await updateDocumentTemplateField(FIELD_ID, { fieldKey: "new_key" })
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/1 condition/i)
+    expect(documentTemplateFieldUpdate).not.toHaveBeenCalled()
+  })
+
+  it("still allows a display-name-only change even when the field has dependent conditions", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValue(existingField())
+    documentTemplateFieldUpdate.mockResolvedValue({ fieldKey: "client_name" })
+    // Dependencies exist, but fieldKey isn't changing — the guard should never even run.
+    documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
+    templateConditionFindMany.mockResolvedValue([{ id: "c1", group: { purpose: "FIELD_VISIBILITY" } }])
+
+    const { updateDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
+    const result = await updateDocumentTemplateField(FIELD_ID, { name: "New Display Name" })
+
+    expect(result.success).toBe(true)
+    expect(documentTemplateFieldUpdate).toHaveBeenCalledWith({ where: { id: FIELD_ID }, data: { name: "New Display Name" } })
+  })
+
   it("rejects a nonexistent field", async () => {
     documentTemplateFieldFindUnique.mockResolvedValue(null)
     const { updateDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
@@ -283,6 +321,7 @@ describe("deleteDocumentTemplateField", () => {
 
   it("deletes a field and records a TEMPLATE_FIELD_DELETED audit event", async () => {
     documentTemplateFieldFindUnique.mockResolvedValue(existingField())
+    documentTemplateFindUnique.mockResolvedValue(draftTemplate())
     documentTemplateFieldDelete.mockResolvedValue({})
 
     const { deleteDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
@@ -293,6 +332,24 @@ describe("deleteDocumentTemplateField", () => {
     const auditCall = createAuditEventMock.mock.calls[0][0]
     expect(auditCall.action).toBe("TEMPLATE_FIELD_DELETED")
     expect(auditCall.metadata).toEqual({ documentTemplateId: TEMPLATE_ID, templateFieldId: FIELD_ID, fieldKey: "client_name", action: "deleted" })
+  })
+
+  it("blocks deleting a field that a condition depends on, reporting an accurate dependency count", async () => {
+    documentTemplateFieldFindUnique.mockResolvedValue(existingField())
+    documentTemplateFindUnique.mockResolvedValue(draftTemplate())
+    documentTemplateFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
+    templateConditionFindMany.mockResolvedValue([
+      { id: "c1", group: { purpose: "FIELD_VISIBILITY" } },
+      { id: "c2", group: { purpose: "FIELD_REQUIREDNESS" } },
+    ])
+
+    const { deleteDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
+    const result = await deleteDocumentTemplateField(FIELD_ID)
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error).toMatch(/2 condition/i)
+    expect(documentTemplateFieldDelete).not.toHaveBeenCalled()
   })
 
   it("rejects a role not permitted to manage templates", async () => {

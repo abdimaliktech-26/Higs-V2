@@ -121,6 +121,57 @@ export const updateTemplateFieldSchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
 })
 
+// ── Template Condition (Stage 5 Step 4a: Conditional Logic Foundation) ──
+// Shape-level validation only — operator/type compatibility and
+// comparisonValue semantics are enforced in src/lib/actions/template-conditions.ts
+// (data-dependent: which operators are valid depends on the referenced
+// field's actual fieldType, not something a static zod schema alone can know).
+export const CONDITION_PURPOSES = [
+  "FIELD_VISIBILITY",
+  "FIELD_REQUIREDNESS",
+  "DOCUMENT_INCLUSION",
+  "DOCUMENT_REQUIREDNESS",
+  "VALIDATION_RULE_APPLICABILITY",
+] as const
+
+export const CONDITION_LOGIC_OPERATORS = ["AND", "OR"] as const
+
+export const CONDITION_OPERATORS = [
+  "EQUALS", "NOT_EQUALS", "CONTAINS", "NOT_EMPTY", "EMPTY",
+  "CHECKED", "UNCHECKED", "GREATER_THAN", "LESS_THAN", "BEFORE", "AFTER", "IN", "NOT_IN",
+] as const
+
+export const CONDITION_SOURCE_TYPES = ["TEMPLATE_FIELD", "CLIENT_IS_MINOR", "PACKET_PROGRAM_CODE", "PACKET_TYPE"] as const
+
+export const createRootConditionGroupSchema = z.object({
+  purpose: z.enum(CONDITION_PURPOSES),
+  logicOperator: z.enum(CONDITION_LOGIC_OPERATORS).default("AND"),
+})
+
+export const createNestedConditionGroupSchema = z.object({
+  logicOperator: z.enum(CONDITION_LOGIC_OPERATORS).default("AND"),
+})
+
+export const updateConditionGroupSchema = z.object({
+  logicOperator: z.enum(CONDITION_LOGIC_OPERATORS),
+})
+
+export const createConditionSchema = z.object({
+  sourceType: z.enum(CONDITION_SOURCE_TYPES),
+  sourceFieldKey: z.string().max(100).optional(),
+  operator: z.enum(CONDITION_OPERATORS),
+  comparisonValue: z.unknown().optional(),
+  sortOrder: z.number().int().min(0).default(0),
+})
+
+export const updateConditionSchema = z.object({
+  sourceType: z.enum(CONDITION_SOURCE_TYPES).optional(),
+  sourceFieldKey: z.string().max(100).optional(),
+  operator: z.enum(CONDITION_OPERATORS).optional(),
+  comparisonValue: z.unknown().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+})
+
 // ── PDF Document ──
 export const saveFieldsSchema = z.object({
   id: z.string().max(50).optional(),

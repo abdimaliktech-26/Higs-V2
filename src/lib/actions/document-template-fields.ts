@@ -6,6 +6,7 @@ import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { validate, createTemplateFieldSchema, updateTemplateFieldSchema } from "@/lib/validation"
+import { getFieldConditionDependencySummary } from "@/lib/actions/template-conditions"
 import { UserRole } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
@@ -102,6 +103,14 @@ export async function updateDocumentTemplateField(fieldId: string, raw: Record<s
       where: { documentTemplateId_fieldKey: { documentTemplateId: field.documentTemplateId, fieldKey: data.fieldKey } },
     })
     if (existing) return { success: false, error: "A field with this key already exists on this template" }
+
+    // Renaming a fieldKey that conditions depend on would silently break
+    // those conditions' stable references — block it rather than rewrite
+    // condition rows implicitly.
+    const dependencies = await getFieldConditionDependencySummary(field.documentTemplateId, field.fieldKey)
+    if (dependencies.count > 0) {
+      return { success: false, error: `Cannot rename: ${dependencies.count} condition(s) depend on this field key (${dependencies.purposes.join(", ")})` }
+    }
   }
 
   const updated = await prisma.documentTemplateField.update({
@@ -145,6 +154,11 @@ export async function deleteDocumentTemplateField(fieldId: string): Promise<Acti
   if (!field) return { success: false, error: "Field not found" }
   await requireOrgAccess(field.documentTemplate.organizationId)
   if (field.documentTemplate.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
+
+  const dependencies = await getFieldConditionDependencySummary(field.documentTemplateId, field.fieldKey)
+  if (dependencies.count > 0) {
+    return { success: false, error: `Cannot delete: ${dependencies.count} condition(s) depend on this field key (${dependencies.purposes.join(", ")})` }
+  }
 
   await prisma.documentTemplateField.delete({ where: { id: fieldId } })
 

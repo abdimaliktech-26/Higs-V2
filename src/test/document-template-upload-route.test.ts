@@ -12,6 +12,9 @@ const documentTemplateCreate = vi.fn()
 const documentTemplateFindUnique = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
 const documentTemplateFieldCreateMany = vi.fn()
+const templateConditionGroupFindMany = vi.fn()
+const templateConditionGroupCreate = vi.fn()
+const templateConditionCreateMany = vi.fn()
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
@@ -24,6 +27,13 @@ function makeTx() {
     documentTemplateField: {
       findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a),
       createMany: (...a: unknown[]) => documentTemplateFieldCreateMany(...a),
+    },
+    templateConditionGroup: {
+      findMany: (...a: unknown[]) => templateConditionGroupFindMany(...a),
+      create: (...a: unknown[]) => templateConditionGroupCreate(...a),
+    },
+    templateCondition: {
+      createMany: (...a: unknown[]) => templateConditionCreateMany(...a),
     },
   }
 }
@@ -114,6 +124,9 @@ beforeEach(() => {
   transactionMock.mockImplementation((cb: any) => cb(currentTx))
   storeFileMock.mockResolvedValue({ key: "templates/org-1/generated-uuid.pdf", url: "/api/files/x", signedUrl: "/api/files/x?sig=1", size: 500, mimeType: "application/pdf", originalName: "form.pdf" })
   documentTemplateFieldFindMany.mockResolvedValue([])
+  templateConditionGroupFindMany.mockResolvedValue([])
+  templateConditionGroupCreate.mockImplementation(async ({ data }: any) => ({ id: "new-grp", ...data }))
+  templateConditionCreateMany.mockResolvedValue({ count: 0 })
 })
 
 describe("POST /api/templates — initial document template upload", () => {
@@ -315,5 +328,152 @@ describe("POST /api/templates/[templateId]/versions — field definition carryov
     expect(status).toBe(200)
     expect(body.success).toBe(true)
     expect(documentTemplateFieldCreateMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("POST /api/templates/[templateId]/versions — field-owned condition carryover", () => {
+  const OLD_FIELD_ID = "dtf-old-1"
+  const NEW_FIELD_ID = "dtf-new-1"
+  const FIELD_KEY = "is_minor_flag"
+
+  function mockFieldsByTemplate(oldFields: any[], newFields: any[]) {
+    documentTemplateFieldFindMany.mockImplementation(async ({ where }: any) => {
+      if (where.documentTemplateId === TEMPLATE_ID) return oldFields
+      if (where.documentTemplateId === "tpl-2") return newFields
+      return []
+    })
+  }
+
+  beforeEach(() => {
+    authMock.mockResolvedValue(staffSession())
+    requireOrgAccessMock.mockResolvedValue({})
+    getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+    documentTemplateFindUnique.mockResolvedValue({
+      id: TEMPLATE_ID, organizationId: ORG_ID, name: "CSSP Addendum", description: null,
+      formType: "dhs", program: null, version: 1, fileUrl: "/api/files/old", fileKey: "templates/org-1/old.pdf",
+    })
+    documentTemplateCreate.mockImplementation(async ({ data }: any) => ({ id: "tpl-2", ...data }))
+    mockFieldsByTemplate(
+      [{ id: OLD_FIELD_ID, organizationId: ORG_ID, documentTemplateId: TEMPLATE_ID, fieldKey: FIELD_KEY, name: "Is Minor", fieldType: "checkbox", pageNumber: 1, posX: 1, posY: 1, width: 1, height: 1, isRequired: false, sortOrder: 0 }],
+      [{ id: NEW_FIELD_ID, organizationId: ORG_ID, documentTemplateId: "tpl-2", fieldKey: FIELD_KEY, name: "Is Minor", fieldType: "checkbox", pageNumber: 1, posX: 1, posY: 1, width: 1, height: 1, isRequired: false, sortOrder: 0 }]
+    )
+  })
+
+  it("copies a field-owned root group and its conditions forward with fresh ids, remapping the owner by fieldKey", async () => {
+    templateConditionGroupFindMany.mockResolvedValue([
+      {
+        id: "grp-old-1", documentTemplateFieldId: OLD_FIELD_ID, parentGroupId: null,
+        purpose: "FIELD_VISIBILITY", logicOperator: "AND",
+        conditions: [{ id: "cond-old-1", sourceType: "CLIENT_IS_MINOR", sourceFieldKey: null, operator: "EQUALS", comparisonValue: true, sortOrder: 0 }],
+        childGroups: [],
+      },
+    ])
+
+    const { status, body } = await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(templateConditionGroupCreate).toHaveBeenCalledTimes(1)
+    const groupData = templateConditionGroupCreate.mock.calls[0][0].data
+    expect(groupData).toMatchObject({ purpose: "FIELD_VISIBILITY", logicOperator: "AND", documentTemplateFieldId: NEW_FIELD_ID })
+    expect(groupData).not.toHaveProperty("id")
+
+    expect(templateConditionCreateMany).toHaveBeenCalledTimes(1)
+    const conditionData = templateConditionCreateMany.mock.calls[0][0].data
+    expect(conditionData).toEqual([
+      { groupId: "new-grp", sourceType: "CLIENT_IS_MINOR", sourceFieldKey: null, operator: "EQUALS", comparisonValue: true, sortOrder: 0 },
+    ])
+  })
+
+  it("preserves an IN-operator array comparisonValue exactly", async () => {
+    templateConditionGroupFindMany.mockResolvedValue([
+      {
+        id: "grp-old-1", documentTemplateFieldId: OLD_FIELD_ID, parentGroupId: null,
+        purpose: "DOCUMENT_INCLUSION", logicOperator: "OR",
+        conditions: [{ id: "cond-old-1", sourceType: "PACKET_PROGRAM_CODE", sourceFieldKey: null, operator: "IN", comparisonValue: ["cssp", "cadi"], sortOrder: 0 }],
+        childGroups: [],
+      },
+    ])
+
+    await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+
+    const conditionData = templateConditionCreateMany.mock.calls[0][0].data[0]
+    expect(conditionData.comparisonValue).toEqual(["cssp", "cadi"])
+  })
+
+  it("copies a nested child group, reattaching it under the newly created root group's id", async () => {
+    let callIndex = 0
+    templateConditionGroupCreate.mockImplementation(async ({ data }: any) => ({ id: `new-grp-${callIndex++}`, ...data }))
+    templateConditionGroupFindMany.mockResolvedValue([
+      {
+        id: "grp-old-1", documentTemplateFieldId: OLD_FIELD_ID, parentGroupId: null,
+        purpose: "FIELD_VISIBILITY", logicOperator: "AND",
+        conditions: [],
+        childGroups: [
+          {
+            id: "grp-old-child", documentTemplateFieldId: null, parentGroupId: "grp-old-1",
+            purpose: "FIELD_VISIBILITY", logicOperator: "OR",
+            conditions: [{ id: "cond-old-child", sourceType: "PACKET_TYPE", sourceFieldKey: null, operator: "NOT_EQUALS", comparisonValue: "intake", sortOrder: 0 }],
+          },
+        ],
+      },
+    ])
+
+    const { status } = await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+
+    expect(status).toBe(200)
+    expect(templateConditionGroupCreate).toHaveBeenCalledTimes(2)
+    const rootCallData = templateConditionGroupCreate.mock.calls[0][0].data
+    const childCallData = templateConditionGroupCreate.mock.calls[1][0].data
+    expect(rootCallData.documentTemplateFieldId).toBe(NEW_FIELD_ID)
+    expect(childCallData.parentGroupId).toBe("new-grp-0")
+    expect(childCallData).not.toHaveProperty("documentTemplateFieldId")
+
+    expect(templateConditionCreateMany).toHaveBeenCalledTimes(1)
+    expect(templateConditionCreateMany.mock.calls[0][0].data[0]).toMatchObject({ groupId: "new-grp-1", sourceType: "PACKET_TYPE", operator: "NOT_EQUALS", comparisonValue: "intake" })
+  })
+
+  it("never mutates the old version's condition groups — only reads them, scoped to the old version's field ids", async () => {
+    templateConditionGroupFindMany.mockResolvedValue([])
+    await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+
+    expect(templateConditionGroupFindMany).toHaveBeenCalledWith({
+      where: { documentTemplateFieldId: { in: [OLD_FIELD_ID] }, parentGroupId: null },
+      include: { conditions: true, childGroups: { include: { conditions: true } } },
+    })
+  })
+
+  it("fails the whole version transaction if the owner fieldKey cannot be mapped onto the new version", async () => {
+    // Simulate a new version whose field carryover somehow didn't produce a
+    // field with the referenced fieldKey — the condition carryover must not
+    // silently drop the group; it must abort the entire version creation.
+    mockFieldsByTemplate(
+      [{ id: OLD_FIELD_ID, organizationId: ORG_ID, documentTemplateId: TEMPLATE_ID, fieldKey: FIELD_KEY, name: "Is Minor", fieldType: "checkbox", pageNumber: 1, posX: 1, posY: 1, width: 1, height: 1, isRequired: false, sortOrder: 0 }],
+      [] // new version has no matching field
+    )
+    templateConditionGroupFindMany.mockResolvedValue([
+      {
+        id: "grp-old-1", documentTemplateFieldId: OLD_FIELD_ID, parentGroupId: null,
+        purpose: "FIELD_VISIBILITY", logicOperator: "AND",
+        conditions: [{ id: "cond-old-1", sourceType: "CLIENT_IS_MINOR", sourceFieldKey: null, operator: "EQUALS", comparisonValue: true, sortOrder: 0 }],
+        childGroups: [],
+      },
+    ])
+
+    const { status, body } = await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+
+    expect(status).toBe(500)
+    expect(body.success).toBe(false)
+    expect(body.error).toMatch(/failed to save new version/i)
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
+  })
+
+  it("a template version with no field-owned conditions still creates successfully, with no condition-group writes", async () => {
+    templateConditionGroupFindMany.mockResolvedValue([])
+    const { status, body } = await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
+    expect(templateConditionCreateMany).not.toHaveBeenCalled()
   })
 })

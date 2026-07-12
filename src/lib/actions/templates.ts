@@ -7,6 +7,7 @@ import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { signUrl } from "@/lib/storage"
+import { validateTemplateConditions } from "@/lib/actions/template-conditions"
 import { AuditAction, UserRole, type Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
@@ -105,6 +106,16 @@ export async function updateTemplateStatus(id: string, status: string) {
   await requireOrgAccess(tpl.organizationId)
 
   if (status === "active") {
+    const conditionCheck = await validateTemplateConditions(id)
+    if (!conditionCheck.valid) {
+      const typeCounts = conditionCheck.errors.reduce<Record<string, number>>((acc, e) => {
+        acc[e.type] = (acc[e.type] ?? 0) + 1
+        return acc
+      }, {})
+      const summary = Object.entries(typeCounts).map(([type, count]) => `${count} ${type}`).join(", ")
+      return { success: false as const, error: `Cannot activate: ${conditionCheck.errors.length} broken condition(s) (${summary})` }
+    }
+
     const familyIds = await getVersionFamilyIds(id)
     const siblingIds = familyIds.filter((familyId) => familyId !== id)
 
