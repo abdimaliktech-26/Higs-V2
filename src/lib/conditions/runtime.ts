@@ -533,3 +533,129 @@ export function determinePacketReconciliationNeeds(runtime: PacketConditionRunti
   }
   return needs
 }
+
+// ── Step 4c.2b — live document-inclusion reconciliation on field save ──
+//
+// Called from inside the SAME transaction that just wrote new field values
+// (saveDocumentFields in src/lib/actions/documents.ts), so it must read
+// through the transaction client (`tx`), never the global `prisma` — a
+// separate client would not see the just-written, still-uncommitted values.
+//
+// Only DOCUMENT_INCLUSION is reconciled here. DOCUMENT_REQUIREDNESS and
+// field-level visibility/requiredness are already fully solved by the live
+// evaluator (evaluatePdfFieldVisibility/Requiredness,
+// evaluatePacketDocumentRequiredness) — nothing about them is ever stored,
+// so nothing about them needs reconciling. Only PacketDocument.applicabilityStatus
+// is a materialized cache that can go stale, and inclusion is the only thing
+// that determines whether a document was ever created in the first place.
+//
+// Scope, deliberately: this only ever flips an EXISTING PacketDocument
+// between ACTIVE and CONDITIONALLY_INACTIVE. It never creates or deletes a
+// PacketDocument, never touches PdfField rows, and never touches
+// PacketDocument.isRequired or PdfField.isRequired (those stay the
+// creation-time static snapshot until a future step integrates effective
+// requiredness). A mapping that evaluates applicable but has no
+// materialized PacketDocument is an integrity error, not something to
+// silently create — Step 4c.2a's conservative creation-time policy means
+// this should never legitimately happen; if it does, something is broken
+// and the whole field save must abort rather than paper over it.
+export interface ReconciliationTransition {
+  packetDocumentId: string
+  packetTemplateDocumentId: string
+  previousApplicabilityStatus: "ACTIVE" | "CONDITIONALLY_INACTIVE"
+  nextApplicabilityStatus: "ACTIVE" | "CONDITIONALLY_INACTIVE"
+}
+
+export async function reconcilePacketDocumentApplicability(
+  tx: Prisma.TransactionClient,
+  packetId: string,
+  actorId: string
+): Promise<ReconciliationTransition[]> {
+  const packet = await tx.packet.findUnique({
+    where: { id: packetId },
+    include: {
+      program: { select: { code: true } },
+      conditionSnapshot: true,
+      documents: { include: { fields: true } },
+    },
+  })
+  if (!packet) throw new Error("Packet not found")
+
+  // Defensive — callers are expected to only invoke this for condition-aware
+  // packets, but never silently skip a real mismatch.
+  if (!packet.conditionSnapshotId || !packet.conditionRuntimeVersion) return []
+  if (!packet.conditionSnapshot || packet.conditionRuntimeVersion !== packet.conditionSnapshot.runtimeVersion) {
+    throw new Error("Packet condition runtime marker does not match its snapshot")
+  }
+  const definition = isDefinition(packet.conditionSnapshot.definition) ? packet.conditionSnapshot.definition : null
+  if (!definition) throw new Error("Condition snapshot definition is malformed")
+
+  // Trusted, persisted values only — rebuilt from PdfField.templateFieldKey/
+  // value exactly as buildPacketConditionContext does, just through `tx` so
+  // it sees this same transaction's own writes. Never derived from anything
+  // the client sent directly.
+  const documentByMappingId = new Map<string, (typeof packet.documents)[number]>()
+  const documentFieldValues: Record<string, Record<string, unknown>> = {}
+  for (const document of packet.documents) {
+    if (!document.packetTemplateDocumentId) continue
+    const mapping = definition.mappings.find((m) => m.id === document.packetTemplateDocumentId)
+    if (!mapping) throw new Error("Packet document cannot be resolved to its snapshot mapping")
+    if (mapping.documentTemplateId !== document.documentTemplateId) throw new Error("Packet document does not match its snapshot mapping")
+    documentByMappingId.set(mapping.id, document)
+    const fieldValues: Record<string, unknown> = Object.fromEntries(mapping.fields.map((f) => [f.fieldKey, null]))
+    for (const field of document.fields) {
+      if (!field.templateFieldKey) continue
+      if (!(field.templateFieldKey in fieldValues)) throw new Error("PDF field key is not present in the snapshot")
+      fieldValues[field.templateFieldKey] = field.value
+    }
+    documentFieldValues[mapping.id] = fieldValues
+  }
+  for (const m of definition.mappings) documentFieldValues[m.id] ??= Object.fromEntries(m.fields.map((f) => [f.fieldKey, null]))
+
+  const context: EvaluationContext = {
+    fieldValues: {},
+    documentFieldValues,
+    client: { isMinor: packet.conditionSnapshot.clientIsMinor },
+    packet: { programCode: packet.program?.code ?? null, packetType: packet.packetType },
+  }
+
+  const transitions: ReconciliationTransition[] = []
+  for (const mapping of definition.mappings) {
+    const inclusionGroup = mapping.conditionGroups.find((g) => g.purpose === "DOCUMENT_INCLUSION") ?? null
+    const included = inclusionGroup ? evaluateConditionTree(inclusionGroup, context).result : true
+
+    const document = documentByMappingId.get(mapping.id)
+    if (!document) {
+      if (included) throw new Error(`Applicable mapping "${mapping.id}" has no materialized PacketDocument`)
+      continue // permanently excluded at creation (pseudo-field-false) — nothing to reconcile
+    }
+
+    const desired: "ACTIVE" | "CONDITIONALLY_INACTIVE" = included ? "ACTIVE" : "CONDITIONALLY_INACTIVE"
+    if (document.applicabilityStatus === desired) continue // idempotent — no write, no audit
+
+    await tx.packetDocument.update({
+      where: { id: document.id },
+      data:
+        desired === "ACTIVE"
+          ? { applicabilityStatus: "ACTIVE", conditionallyInactiveAt: null, conditionallyInactiveReason: null }
+          : { applicabilityStatus: "CONDITIONALLY_INACTIVE", conditionallyInactiveAt: new Date(), conditionallyInactiveReason: "condition_false_after_field_save" },
+    })
+
+    transitions.push({ packetDocumentId: document.id, packetTemplateDocumentId: mapping.id, previousApplicabilityStatus: document.applicabilityStatus, nextApplicabilityStatus: desired })
+
+    await createAuditEvent({
+      organizationId: packet.organizationId,
+      actorId,
+      action: "PACKET_DOCUMENT_APPLICABILITY_RECONCILED",
+      targetType: "packet_document",
+      targetId: document.id,
+      metadata: {
+        packetId, packetDocumentId: document.id, packetTemplateDocumentId: mapping.id,
+        previousApplicabilityStatus: document.applicabilityStatus, nextApplicabilityStatus: desired,
+        trigger: "field_save", action: "applicability_reconciled",
+      },
+    }, tx)
+  }
+
+  return transitions
+}

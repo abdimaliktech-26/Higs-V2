@@ -8,6 +8,7 @@ import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { signUrl } from "@/lib/storage"
+import { reconcilePacketDocumentApplicability } from "@/lib/conditions/runtime"
 
 const EDIT_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 const READ_ROLES: UserRole[] = ["DSP", "NURSE"]
@@ -73,6 +74,14 @@ export async function getEditableDocument(documentId: string) {
   }
 }
 
+// ── Step 4c.2b: transactional save, field-ownership verified, condition
+// reconciliation wired for condition-aware packets. Field writes, the
+// edited document's status recalculation, applicability reconciliation, and
+// every audit event all commit together or not at all — a failure anywhere
+// (including a reconciliation integrity error) rolls back the whole save,
+// leaving prior field values and document states untouched. Legacy packets
+// (no condition snapshot) behave exactly as before: fields save, status
+// recalculates from static isRequired, no reconciliation, no new audit.
 export async function saveDocumentFields(
   documentId: string,
   fields: { id?: string; name: string; fieldType: string; value?: string; pageNumber: number; posX?: number; posY?: number; isRequired: boolean }[]
@@ -92,39 +101,60 @@ export async function saveDocumentFields(
     if (!(user.isSuperAdmin as boolean) && !EDIT_ROLES.includes(role))
       return { success: false, error: "Insufficient permissions" }
 
-    // Upsert fields
-    for (const f of fields) {
-      if (f.id) {
-        await prisma.pdfField.update({ where: { id: f.id }, data: { value: f.value, posX: f.posX, posY: f.posY } })
-      } else {
-        await prisma.pdfField.create({
-          data: {
-            packetDocumentId: documentId, name: f.name, fieldType: f.fieldType,
-            value: f.value, pageNumber: f.pageNumber, posX: f.posX, posY: f.posY,
-            isRequired: f.isRequired, source: "manual", confidence: 1.0,
-          },
-        })
+    const isConditionAware = Boolean(doc.packet.conditionSnapshotId && doc.packet.conditionRuntimeVersion)
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Field ownership — every submitted existing-field id must belong to
+      // THIS document. Rejects cross-document, cross-packet, and
+      // cross-tenant field ids in one pass (the document itself was already
+      // verified to belong to the caller's organization above).
+      const existingFields = await tx.pdfField.findMany({ where: { packetDocumentId: documentId }, select: { id: true } })
+      const existingFieldIds = new Set(existingFields.map((f) => f.id))
+      for (const f of fields) {
+        if (f.id && !existingFieldIds.has(f.id)) throw new Error("One or more fields do not belong to this document")
       }
-    }
 
-    // Update document status
-    const pendingRequired = await prisma.pdfField.count({
-      where: { packetDocumentId: documentId, isRequired: true, value: null },
-    })
-    const newStatus = pendingRequired === 0 ? "completed" : "in_progress"
-    await prisma.packetDocument.update({ where: { id: documentId }, data: { status: newStatus } })
+      for (const f of fields) {
+        if (f.id) {
+          await tx.pdfField.update({ where: { id: f.id }, data: { value: f.value, posX: f.posX, posY: f.posY } })
+        } else {
+          await tx.pdfField.create({
+            data: {
+              packetDocumentId: documentId, name: f.name, fieldType: f.fieldType,
+              value: f.value, pageNumber: f.pageNumber, posX: f.posX, posY: f.posY,
+              isRequired: f.isRequired, source: "manual", confidence: 1.0,
+            },
+          })
+        }
+      }
 
-    await createAuditEvent({
-      organizationId: doc.packet.organizationId,
-      actorId: user.id as string,
-      action: "DOCUMENT_SAVED",
-      targetType: "packet_document",
-      targetId: documentId,
-      metadata: { fieldCount: fields.length, status: newStatus },
+      // Static requiredness only — effective, condition-aware requiredness
+      // is not integrated here (deferred to a later step); this recompute
+      // is unchanged from before Step 4c.2b.
+      const pendingRequired = await tx.pdfField.count({
+        where: { packetDocumentId: documentId, isRequired: true, value: null },
+      })
+      const newStatus = pendingRequired === 0 ? "completed" : "in_progress"
+      await tx.packetDocument.update({ where: { id: documentId }, data: { status: newStatus } })
+
+      await createAuditEvent({
+        organizationId: doc.packet.organizationId,
+        actorId: user.id as string,
+        action: "DOCUMENT_SAVED",
+        targetType: "packet_document",
+        targetId: documentId,
+        metadata: { fieldCount: fields.length, status: newStatus },
+      }, tx)
+
+      if (isConditionAware) {
+        await reconcilePacketDocumentApplicability(tx, doc.packet.id, user.id as string)
+      }
+
+      return { status: newStatus }
     })
 
     revalidatePath(`/documents/${documentId}/edit`)
-    return { success: true, data: { status: newStatus } }
+    return { success: true, data: result }
   } catch (e) {
     return { success: false, error: (e as Error).message }
   }
