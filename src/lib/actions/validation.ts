@@ -8,6 +8,7 @@ import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { limiters, checkRateLimit } from "@/lib/rate-limit"
+import { buildPacketConditionContext, buildEditorDocumentConditionState } from "@/lib/conditions/runtime"
 
 const MANAGE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 const RUN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
@@ -86,6 +87,8 @@ export async function runPacketValidation(packetId: string) {
     },
   })
   if (!packet) return { success: false as const, error: "Packet not found" }
+  type PacketDocForValidation = (typeof packet.documents)[number]
+  type PacketFieldForValidation = PacketDocForValidation["fields"][number]
   await requireOrgAccess(packet.organizationId)
   const role = getActiveRole(user as any)
   if (!RUN_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
@@ -116,13 +119,97 @@ export async function runPacketValidation(packetId: string) {
     return rules.find((r) => r.category === category && ruleAppliesToPacket(r))
   }
 
+  const requiredFieldRule = findActiveRule("required_field")
+  const requiredSignatureRule = findActiveRule("required_signature")
+
+  // ── Step 4c.4b: field-level condition-aware required_field/required_signature ──
+  //
+  // Only built when at least one of those two rule categories is actually
+  // active for this packet — an org that doesn't use either rule pays no
+  // extra query/evaluation cost. Built once per validation run and reused
+  // across every document — never per-document, never per-field. Reuses
+  // buildPacketConditionContext + buildEditorDocumentConditionState exactly
+  // as the PDF editor already does (getEditableDocument/
+  // evaluateDocumentFieldConditions); no second evaluator implementation
+  // exists here.
+  //
+  // Packet validation is a compliance control, so a broken condition
+  // configuration must never make a potentially required field silently
+  // disappear from validation: a packet-level runtime build failure falls
+  // back to static field.isRequired validation for the WHOLE packet, and a
+  // document-level condition integrity error falls back to static
+  // field.isRequired validation for just that ONE document — every other,
+  // healthy document keeps full condition-aware validation. Failures are
+  // logged (matching the existing console.error convention already used for
+  // non-fatal internal failures elsewhere, e.g. src/lib/audit.ts) and never
+  // surface as a new validation issue in this step.
+  const docFieldConditionStates = new Map<string, { useStaticFallback: boolean; fieldsById: Record<string, { isVisible: boolean; effectiveRequired: boolean }> }>()
+  if (requiredFieldRule || requiredSignatureRule) {
+    let conditionRuntime: Awaited<ReturnType<typeof buildPacketConditionContext>> | null = null
+    try {
+      conditionRuntime = await buildPacketConditionContext(packetId)
+    } catch (error) {
+      console.error(`Packet validation: condition runtime unavailable for packet ${packetId}, falling back to static field validation for the whole packet`, error)
+    }
+
+    if (conditionRuntime) {
+      const runtime = conditionRuntime
+      // The evaluator treats runtime.integrityErrors as one flat, packet-wide
+      // list — an error recorded against a single document/field would
+      // otherwise cascade into "integrity_error" for every field of every
+      // document in the packet. Scoping a per-document VIEW of that same
+      // list (genuinely packet-wide errors, e.g. a malformed snapshot,
+      // always included; errors tagged with this document's own id or
+      // mapping id also included) restores true per-document isolation
+      // without touching the shared evaluator or runtime module itself —
+      // every other field of buildEditorDocumentConditionState's contract
+      // is used completely unmodified.
+      for (const doc of packet.documents) {
+        const scopedErrors = runtime.integrityErrors.filter((error) =>
+          (!error.packetDocumentId && !error.mappingId)
+          || error.packetDocumentId === doc.id
+          || (doc.packetTemplateDocumentId !== null && error.mappingId === doc.packetTemplateDocumentId)
+        )
+        const scopedRuntime = scopedErrors.length === runtime.integrityErrors.length ? runtime : { ...runtime, integrityErrors: scopedErrors }
+
+        const state = buildEditorDocumentConditionState(
+          scopedRuntime,
+          { id: doc.id, applicabilityStatus: doc.applicabilityStatus, packetTemplateDocumentId: doc.packetTemplateDocumentId },
+          doc.fields.map((f) => ({ id: f.id, templateFieldKey: f.templateFieldKey, isRequired: f.isRequired }))
+        )
+        if (state.hasConditionIntegrityError) {
+          console.error(`Packet validation: condition integrity error for document ${doc.id}, falling back to static field validation for this document`)
+        }
+        docFieldConditionStates.set(doc.id, { useStaticFallback: state.hasConditionIntegrityError, fieldsById: state.fieldsById })
+      }
+    }
+  }
+
+  // Single shared predicate for both required_field and required_signature —
+  // a field participates in required-field validation only when it is both
+  // visible and effectively required. Supports both directions: a statically
+  // required field that becomes effectively optional, and a statically
+  // optional field that becomes effectively required. A conditionally
+  // inactive document's fields never participate, regardless of condition
+  // state health, matching Step 4c.4a's document-level exclusion. Falls back
+  // to the pre-4c.4b static field.isRequired check whenever condition state
+  // is unavailable (packet-level failure) or integrity-broken (document-level
+  // failure) for that specific document.
+  function fieldParticipatesInRequiredValidation(doc: PacketDocForValidation, field: PacketFieldForValidation): boolean {
+    if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") return false
+    const docState = docFieldConditionStates.get(doc.id)
+    if (!docState || docState.useStaticFallback) return field.isRequired
+    const fieldState = docState.fieldsById[field.id]
+    if (!fieldState) return field.isRequired
+    return fieldState.isVisible && fieldState.effectiveRequired
+  }
+
   const issues: { severity: string; message: string; correction?: string; ruleId?: string; targetType?: string; targetId?: string; fieldName?: string }[] = []
 
   // Rule-driven: required fields — only enforced when an active, scope-matching "required_field" rule exists
-  const requiredFieldRule = findActiveRule("required_field")
   if (requiredFieldRule) {
     for (const doc of packet.documents) {
-      const requiredFields = doc.fields.filter((f) => f.isRequired)
+      const requiredFields = doc.fields.filter((f) => fieldParticipatesInRequiredValidation(doc, f))
       for (const field of requiredFields) {
         if (!field.value || field.value.trim() === "") {
           issues.push({
@@ -137,10 +224,9 @@ export async function runPacketValidation(packetId: string) {
   }
 
   // Rule-driven: required signature fields — only enforced when an active, scope-matching "required_signature" rule exists
-  const requiredSignatureRule = findActiveRule("required_signature")
   if (requiredSignatureRule) {
     for (const doc of packet.documents) {
-      const requiredSignatures = doc.fields.filter((f) => f.isRequired && f.fieldType === "signature")
+      const requiredSignatures = doc.fields.filter((f) => fieldParticipatesInRequiredValidation(doc, f) && f.fieldType === "signature")
       for (const field of requiredSignatures) {
         if (!field.value || field.value.trim() === "") {
           issues.push({
