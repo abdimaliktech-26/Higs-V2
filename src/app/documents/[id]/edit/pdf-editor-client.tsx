@@ -325,6 +325,11 @@ export function PDFEditorClient({ documentId }: Props) {
   // conditionally required field is counted as required exactly like a
   // static one.
   const visibleFields = computeVisibleFields(effectiveFields)
+  // Step 4c.3c.3 — the read-only hidden-values review panel's data source.
+  // Derived from the same effectiveFields as visibleFields so a field
+  // entering/leaving hidden state via a live evaluation moves between the
+  // two lists on the very next render, with no extra state of its own.
+  const hiddenFields = effectiveFields.filter((f: any) => !f.isVisible)
   const missingRequired = computeMissingRequired(visibleFields)
   const warningFields = computeWarningFields(visibleFields)
   const signatureFields = computeSignatureFields(visibleFields)
@@ -497,6 +502,7 @@ export function PDFEditorClient({ documentId }: Props) {
             tab={inspectorTab}
             onTabChange={setInspectorTab}
             fields={visibleFields}
+            hiddenFields={hiddenFields}
             selectedField={selectedField}
             onSelectField={setSelectedField}
             onFieldValueChange={handleFieldValueChange}
@@ -929,6 +935,7 @@ function RightInspector({
   tab,
   onTabChange,
   fields,
+  hiddenFields,
   selectedField,
   onSelectField,
   onFieldValueChange,
@@ -976,6 +983,7 @@ function RightInspector({
         {tab === "validation" && (
           <ValidationPanel
             fields={fields}
+            hiddenFields={hiddenFields}
             selectedField={selectedField}
             onSelectField={onSelectField}
             onFieldValueChange={onFieldValueChange}
@@ -1004,6 +1012,7 @@ function RightInspector({
 
 function ValidationPanel({
   fields,
+  hiddenFields,
   selectedField,
   onSelectField,
   onFieldValueChange,
@@ -1078,7 +1087,50 @@ function ValidationPanel({
         onFieldAdded={onFieldAdded}
         fieldListRef={fieldListRef}
       />
+
+      <HiddenValuesPanel fields={hiddenFields} />
     </div>
+  )
+}
+
+// Step 4c.3c.3 — read-only review panel for fields currently hidden by
+// packet conditions. Inspection only: no input, textarea, or button that
+// edits a value ever renders here. Collapsed by default; renders nothing at
+// all when there are no hidden fields, matching this file's existing
+// no-empty-state-clutter convention (see ValidationPanel's clear-state
+// block above). Values shown are the same ones already visible elsewhere on
+// this same authorized page when a field is shown — this panel only
+// relocates them while they're temporarily inapplicable, it does not expose
+// anything a role couldn't already see.
+function HiddenValuesPanel({ fields }: any) {
+  if (!fields || fields.length === 0) return null
+
+  return (
+    <details data-testid="hidden-values-panel" className="rounded-xl border border-surface-200 bg-surface-50 open:pb-2">
+      <summary className="cursor-pointer select-none rounded-xl px-4 py-3 text-sm font-semibold text-surface-900 outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
+        {fields.length} hidden field{fields.length === 1 ? "" : "s"} — click to review
+      </summary>
+      <div className="space-y-2 px-4 pb-2">
+        <p className="text-xs text-surface-500">
+          These fields are hidden based on current packet conditions. Their previously entered values are preserved and will reappear if conditions change.
+        </p>
+        <div className="space-y-1 rounded-lg border border-surface-200 bg-white p-1">
+          {fields.map((field: any) => (
+            <div key={field.id} className="rounded-lg px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate font-medium text-surface-900">{field.name}</span>
+                <span className="text-[10px] text-surface-400">Page {field.pageNumber}</span>
+              </div>
+              {field.value ? (
+                <div className="mt-1 rounded-lg border border-surface-200 bg-surface-50 px-2 py-1 text-xs text-surface-700">{field.value}</div>
+              ) : (
+                <p className="mt-1 text-xs italic text-surface-400">No value entered</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
   )
 }
 

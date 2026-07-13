@@ -97,6 +97,15 @@ async function waitForField(name: string) {
   await waitFor(() => expect(screen.getAllByText(name).length).toBeGreaterThan(0))
 }
 
+// Step 4c.3c.3 — a hidden field's name/value now legitimately renders inside
+// the read-only hidden-values panel, so "not present anywhere" assertions
+// from earlier steps must exclude that panel to still test what they were
+// written to test: that a hidden field is absent from the ACTIVE, editable
+// surfaces (canvas overlays, the normal field list, the no-PDF workspace).
+function activeOccurrences(name: string) {
+  return screen.queryAllByText(name).filter((el) => !el.closest('[data-testid="hidden-values-panel"]'))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   saveDocumentFieldsMock.mockResolvedValue({ success: true, data: { status: "in_progress", ignoredFieldIds: [] } })
@@ -115,7 +124,7 @@ describe("PDFEditorClient — visible-field filtering", () => {
     }))
     render(<PDFEditorClient documentId={DOC_ID} />)
     await waitForField("Visible Field")
-    expect(screen.queryAllByText("Hidden Field")).toHaveLength(0)
+    expect(activeOccurrences("Hidden Field")).toHaveLength(0)
   })
 
   it("excludes a hidden field from the per-page thumbnail count", async () => {
@@ -127,7 +136,11 @@ describe("PDFEditorClient — visible-field filtering", () => {
       ],
     }))
     render(<PDFEditorClient documentId={DOC_ID} />)
-    const pageLabel = await screen.findByText("Page 1")
+    // Step 4c.3c.3's hidden-values panel also renders a "Page N" label per
+    // hidden row, so "Page 1" is no longer unique on screen — scope to the
+    // occurrence outside the panel (the thumbnail rail's page label).
+    await waitFor(() => expect(activeOccurrences("Page 1").length).toBeGreaterThan(0))
+    const pageLabel = activeOccurrences("Page 1")[0]
     const badge = pageLabel.parentElement?.querySelector("span:last-child")
     expect(badge?.textContent).toBe("1")
   })
@@ -138,8 +151,8 @@ describe("PDFEditorClient — visible-field filtering", () => {
       fields: [baseField({ id: "h1", name: "Hidden Only", isVisible: false })],
     }))
     render(<PDFEditorClient documentId={DOC_ID} />)
-    await screen.findByText("Page 1")
-    expect(screen.queryAllByText("Hidden Only")).toHaveLength(0)
+    await waitFor(() => expect(activeOccurrences("Page 1").length).toBeGreaterThan(0))
+    expect(activeOccurrences("Hidden Only")).toHaveLength(0)
   })
 })
 
@@ -303,7 +316,7 @@ describe("PDFEditorClient — selection clearing", () => {
     // Trigger a reload the same way a save does.
     fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
     await waitFor(() => expect(getEditableDocumentMock).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.queryAllByText("Was Visible")).toHaveLength(0))
+    await waitFor(() => expect(activeOccurrences("Was Visible")).toHaveLength(0))
     // No crash, no stale selected-field detail panel left over.
     expect(screen.queryByText(/text - Page 1/i)).toBeNull()
   })
@@ -435,7 +448,7 @@ describe("PDFEditorClient — 4c.3c.2: real-time visibility and requiredness", (
     // onChange at all (its value-tracker suppresses it) — use a value that
     // actually differs from the current one to represent "unchecking".
     fireEvent.change(input, { target: { value: "false" } })
-    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    await waitFor(() => expect(activeOccurrences("Dependent")).toHaveLength(0), { timeout: 2000 })
     expect(saveDocumentFieldsMock).not.toHaveBeenCalled()
     expect(getEditableDocumentMock).toHaveBeenCalledTimes(1)
   })
@@ -450,10 +463,10 @@ describe("PDFEditorClient — 4c.3c.2: real-time visibility and requiredness", (
     evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: true, effectiveRequired: false, conditionallyRequired: false } } } })
     render(<PDFEditorClient documentId={DOC_ID} />)
     await waitForField("Trigger")
-    expect(screen.queryAllByText("Dependent")).toHaveLength(0)
+    expect(activeOccurrences("Dependent")).toHaveLength(0)
     const input = await selectAndGetInput("Trigger")
     fireEvent.change(input, { target: { value: "true" } })
-    await waitFor(() => expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0), { timeout: 2000 })
+    await waitFor(() => expect(activeOccurrences("Dependent").length).toBeGreaterThan(0), { timeout: 2000 })
     const depInput = await selectAndGetInput("Dependent")
     expect((depInput as HTMLInputElement).value).toBe("kept value")
   })
@@ -580,7 +593,7 @@ describe("PDFEditorClient — 4c.3c.2: save/reload interaction", () => {
     await waitForField("Trigger")
     const input = await selectAndGetInput("Trigger")
     fireEvent.change(input, { target: { value: "false" } })
-    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    await waitFor(() => expect(activeOccurrences("Dependent")).toHaveLength(0), { timeout: 2000 })
     fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
     await waitFor(() => expect(saveDocumentFieldsMock).toHaveBeenCalled())
     const submittedFields = saveDocumentFieldsMock.mock.calls[0][1] as any[]
@@ -598,11 +611,117 @@ describe("PDFEditorClient — 4c.3c.2: save/reload interaction", () => {
     await waitForField("Trigger")
     const input = await selectAndGetInput("Trigger")
     fireEvent.change(input, { target: { value: "false" } })
-    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    await waitFor(() => expect(activeOccurrences("Dependent")).toHaveLength(0), { timeout: 2000 })
     fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
     await waitFor(() => expect(getEditableDocumentMock).toHaveBeenCalledTimes(2))
     // The second load's server DTO says dependent is visible again — the
     // stale optimistic "hidden" overlay must not survive the reload.
     await waitFor(() => expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0), { timeout: 2000 })
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.3: hidden values panel", () => {
+  it("does not render the panel at all when no field is hidden", async () => {
+    getEditableDocumentMock.mockResolvedValue(buildDoc({
+      isConditionAware: true,
+      fields: [baseField({ id: "v1", name: "Visible", isVisible: true })],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Visible")
+    expect(screen.queryByTestId("hidden-values-panel")).toBeNull()
+  })
+
+  it("renders the panel, collapsed by default, when at least one field is hidden", async () => {
+    getEditableDocumentMock.mockResolvedValue(buildDoc({
+      isConditionAware: true,
+      fields: [
+        baseField({ id: "v1", name: "Visible", isVisible: true }),
+        baseField({ id: "h1", name: "Hidden One", isVisible: false, value: "stored value" }),
+      ],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Visible")
+    const panel = screen.getByTestId("hidden-values-panel")
+    expect(panel).toBeTruthy()
+    expect((panel as HTMLDetailsElement).open).toBe(false)
+    expect(screen.getByText("1 hidden field — click to review")).toBeTruthy()
+  })
+
+  it("shows each hidden field's name, page number, and stored value, with no edit control", async () => {
+    getEditableDocumentMock.mockResolvedValue(buildDoc({
+      isConditionAware: true,
+      fields: [
+        baseField({ id: "h1", name: "Hidden One", isVisible: false, pageNumber: 2, value: "stored value" }),
+      ],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await screen.findByText("Hidden One")
+    const panel = screen.getByTestId("hidden-values-panel")
+    expect(panel.textContent).toContain("Hidden One")
+    expect(panel.textContent).toContain("Page 2")
+    expect(panel.textContent).toContain("stored value")
+    expect(panel.querySelector("input")).toBeNull()
+    expect(panel.querySelector("textarea")).toBeNull()
+    expect(panel.querySelector("button")).toBeNull()
+  })
+
+  it("shows a placeholder for a hidden field with no stored value", async () => {
+    getEditableDocumentMock.mockResolvedValue(buildDoc({
+      isConditionAware: true,
+      fields: [baseField({ id: "h1", name: "Hidden Empty", isVisible: false, value: null })],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await screen.findByText("Hidden Empty")
+    const panel = screen.getByTestId("hidden-values-panel")
+    expect(panel.textContent).toContain("No value entered")
+  })
+
+  it("moves a field into the panel immediately when a live evaluation hides it, with its current value", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    expect(screen.queryByTestId("hidden-values-panel")).toBeNull()
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "false" } })
+    await waitFor(() => expect(screen.getByTestId("hidden-values-panel")).toBeTruthy(), { timeout: 2000 })
+    const panel = screen.getByTestId("hidden-values-panel")
+    expect(panel.textContent).toContain("Dependent")
+    expect(panel.textContent).toContain("existing")
+  })
+
+  it("removes a field from the panel and returns it to the normal list when a live evaluation reveals it again", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({
+      fields: [
+        baseField({ id: "trigger", name: "Trigger", fieldType: "checkbox", templateFieldKey: "trigger", isVisible: true, value: null }),
+        baseField({ id: "dependent", name: "Dependent", fieldType: "text", templateFieldKey: "dependent", isVisible: false, value: "kept value" }),
+      ],
+    }))
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: true, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    expect(screen.getByTestId("hidden-values-panel")).toBeTruthy()
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    await waitFor(() => expect(screen.queryByTestId("hidden-values-panel")).toBeNull(), { timeout: 2000 })
+    expect(activeOccurrences("Dependent").length).toBeGreaterThan(0)
+  })
+
+  it("shows an unsaved edit's current value for a field that becomes hidden after that edit", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({
+      fields: [
+        baseField({ id: "trigger", name: "Trigger", fieldType: "checkbox", templateFieldKey: "trigger", isVisible: true, value: null }),
+        baseField({ id: "dependent", name: "Dependent", fieldType: "text", templateFieldKey: "dependent", isVisible: true, value: null }),
+      ],
+    }))
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const depInput = await selectAndGetInput("Dependent")
+    fireEvent.change(depInput, { target: { value: "unsaved edit" } })
+    const triggerInput = await selectAndGetInput("Trigger")
+    fireEvent.change(triggerInput, { target: { value: "true" } })
+    await waitFor(() => expect(screen.getByTestId("hidden-values-panel")).toBeTruthy(), { timeout: 2000 })
+    expect(screen.getByTestId("hidden-values-panel").textContent).toContain("unsaved edit")
   })
 })
