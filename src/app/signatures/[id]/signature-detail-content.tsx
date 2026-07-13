@@ -3,7 +3,7 @@ import { getAuditSummary } from "@/lib/actions/audit"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { EmptyState, ErrorState } from "@/components/ui/states"
 import { Timeline } from "@/components/ui/timeline"
@@ -84,6 +84,22 @@ export async function SignatureDetailContent({ requestId }: Props) {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {/* Step 5a.2 — the real signing entry point, only for a
+                  currently-executable request. Never a form calling
+                  updateSignatureStatus(..., "signed") — that transition is
+                  no longer possible through the generic action at all.
+                  Styled via buttonVariants directly rather than
+                  `Button asChild` — that prop is broken in this shared
+                  component today (Slot receives two children, `{loading &&
+                  <svg/>}` and `{children}`, so React.Children.count is
+                  always 2 and Slot always throws — a pre-existing bug in
+                  button.tsx, out of scope to fix here; this sidesteps it
+                  without touching shared UI code). */}
+              {(req.status === "sent" || req.status === "viewed") && (
+                <Link href={`/signatures/${requestId}/sign`} className={buttonVariants({ variant: "primary", size: "sm" })}>
+                  <PenSquare className="h-4 w-4" /> Sign
+                </Link>
+              )}
               {actions.map((action) => (
                 <form key={action.status} action={async () => {
                   "use server"
