@@ -51,7 +51,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
         documentTemplate: { select: { name: true } },
       },
     })
-    if (!doc || !doc.portalVisible) return new NextResponse("Not found", { status: 404 })
+    // Step 4c.4c — portal availability is portalVisible AND applicable
+    // (persisted applicabilityStatus only, no condition-runtime evaluation).
+    // Same 404 as the pre-existing !portalVisible case, before any storage
+    // fetch, for both view and download — a previously issued, bookmarked,
+    // or still-unexpired signed URL cannot bypass this.
+    if (!doc || !doc.portalVisible || doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") return new NextResponse("Not found", { status: 404 })
     if (mode === "download" && doc.portalAccessLevel !== "VIEW_AND_DOWNLOAD") {
       return new NextResponse("Download not permitted for this document", { status: 403 })
     }

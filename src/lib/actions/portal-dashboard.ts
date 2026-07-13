@@ -52,7 +52,7 @@ export async function getPortalDashboard(clientId: string) {
     orderBy: { updatedAt: "desc" },
     select: {
       id: true, packetType: true, status: true, dueDate: true,
-      documents: { select: { status: true, isRequired: true } },
+      documents: { select: { status: true, isRequired: true, applicabilityStatus: true } },
     },
   })
 
@@ -67,7 +67,12 @@ export async function getPortalDashboard(clientId: string) {
   } | null = null
 
   if (packet) {
-    const required = packet.documents.filter((d) => d.isRequired)
+    // Step 4c.4c — a conditionally inactive document is not currently
+    // applicable to this packet and must not count toward the client's own
+    // completion summary, matching the persisted-column-only predicate
+    // already shipped for the staff-facing packet overview in Step 4c.4a. No
+    // condition-runtime evaluation is invoked here.
+    const required = packet.documents.filter((d) => d.isRequired && d.applicabilityStatus !== "CONDITIONALLY_INACTIVE")
     const requiredCompleted = required.filter((d) => d.status === "completed").length
     const completionPct = required.length ? Math.round((requiredCompleted / required.length) * 100) : 0
     packetSummary = {
@@ -129,8 +134,14 @@ export async function getPortalDocuments(clientId: string): Promise<PortalDocume
   await requirePortalPermission(clientId, "canViewDocuments")
 
   const [packetDocs, supportingDocs] = await Promise.all([
+    // Step 4c.4c — portal availability is portalVisible AND applicable
+    // (persisted applicabilityStatus column only, no condition-runtime
+    // evaluation) AND the existing permission/access checks above. Enforced
+    // in the where clause rather than filtered in memory. Supporting
+    // documents have no applicabilityStatus and are unaffected — they never
+    // participate in the packet condition system.
     prisma.packetDocument.findMany({
-      where: { portalVisible: true, packet: { clientId } },
+      where: { portalVisible: true, applicabilityStatus: { not: "CONDITIONALLY_INACTIVE" }, packet: { clientId } },
       select: {
         id: true, status: true, updatedAt: true, portalAccessLevel: true,
         documentTemplate: { select: { name: true } },

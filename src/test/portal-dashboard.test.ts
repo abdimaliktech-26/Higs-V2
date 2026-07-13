@@ -114,6 +114,121 @@ describe("getPortalDocuments — visibility enforcement", () => {
   })
 })
 
+// Step 4c.4c — the applicability guard is enforced in the Prisma where
+// clause, not by filtering an already-fetched list in application memory
+// (per the approved requirement), so these tests assert on the where
+// clause shape itself — the same convention this file already uses above
+// for portalVisible ("query itself scopes on portalVisible: true").
+describe("getPortalDocuments — Step 4c.4c: portal applicability enforcement", () => {
+  it("1. returns an active, portal-visible packet document", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([
+      { id: "pd-active", status: "completed", updatedAt: new Date(), portalAccessLevel: "VIEW", documentTemplate: { name: "ISP" } },
+    ])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    const docs = await getPortalDocuments(CLIENT_ID)
+
+    expect(docs.some((d) => d.id === "pd-active")).toBe(true)
+  })
+
+  it("2. excludes conditionally inactive packet documents via the where clause, never an in-memory filter", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    await getPortalDocuments(CLIENT_ID)
+
+    const packetWhere = packetDocumentFindMany.mock.calls[0][0].where
+    expect(packetWhere.applicabilityStatus).toEqual({ not: "CONDITIONALLY_INACTIVE" })
+  })
+
+  it("3. the applicability constraint is present even when permission and client access are fully valid", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess({ canViewDocuments: true }))
+    packetDocumentFindMany.mockResolvedValue([])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    await getPortalDocuments(CLIENT_ID)
+
+    const packetWhere = packetDocumentFindMany.mock.calls[0][0].where
+    expect(packetWhere.portalVisible).toBe(true)
+    expect(packetWhere.applicabilityStatus).toEqual({ not: "CONDITIONALLY_INACTIVE" })
+  })
+
+  it("4. a non-portal-visible active packet document remains excluded (existing behavior, unchanged)", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    await getPortalDocuments(CLIENT_ID)
+
+    expect(packetDocumentFindMany.mock.calls[0][0].where.portalVisible).toBe(true)
+  })
+
+  it("5. supporting documents are unaffected — no applicabilityStatus constraint on their query", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([])
+    supportingDocumentFindMany.mockResolvedValue([
+      { id: "sd-1", title: "ID Card", category: "identity", status: "active", updatedAt: new Date(), portalAccessLevel: "VIEW" },
+    ])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    const docs = await getPortalDocuments(CLIENT_ID)
+
+    const supportingWhere = supportingDocumentFindMany.mock.calls[0][0].where
+    expect(supportingWhere.applicabilityStatus).toBeUndefined()
+    expect(docs.some((d) => d.id === "sd-1")).toBe(true)
+  })
+
+  it("6. legacy/default-active packet documents retain existing behavior", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    // A legacy document never touched by the condition system always carries
+    // the schema's ACTIVE default — the where clause's { not: "CONDITIONALLY_INACTIVE" }
+    // constraint is satisfied by ACTIVE identically to before this step.
+    packetDocumentFindMany.mockResolvedValue([
+      { id: "pd-legacy", status: "in_progress", updatedAt: new Date(), portalAccessLevel: "VIEW", documentTemplate: { name: "Legacy Form" } },
+    ])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    const docs = await getPortalDocuments(CLIENT_ID)
+
+    expect(docs.some((d) => d.id === "pd-legacy")).toBe(true)
+  })
+
+  it("7. client scoping and portal-access-level behavior remain unchanged alongside the new constraint", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    await getPortalDocuments(CLIENT_ID)
+
+    const packetWhere = packetDocumentFindMany.mock.calls[0][0].where
+    expect(packetWhere.packet.clientId).toBe(CLIENT_ID)
+    expect(packetWhere.portalVisible).toBe(true)
+    expect(packetWhere.applicabilityStatus).toEqual({ not: "CONDITIONALLY_INACTIVE" })
+  })
+
+  it("8. generates a download URL only for a returned, applicable, VIEW_AND_DOWNLOAD document", async () => {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    packetDocumentFindMany.mockResolvedValue([
+      { id: "pd-applicable-download", status: "completed", updatedAt: new Date(), portalAccessLevel: "VIEW_AND_DOWNLOAD", documentTemplate: { name: "ISP" } },
+    ])
+    supportingDocumentFindMany.mockResolvedValue([])
+
+    const { getPortalDocuments } = await import("@/lib/actions/portal-dashboard")
+    const docs = await getPortalDocuments(CLIENT_ID)
+
+    const doc = docs.find((d) => d.id === "pd-applicable-download")!
+    expect(doc.downloadUrl).toBeTruthy()
+  })
+})
+
 describe("getPortalCareTeam", () => {
   it("returns only client-facing fields, scoped to the requested client's own assignments", async () => {
     portalClientAccessFindFirst.mockResolvedValue(activeAccess())
@@ -172,6 +287,126 @@ describe("getPortalDashboard — recent activity scoping", () => {
     // The select clause itself never asks for metadata/ipAddress/userAgent/targetId.
     const selectFields = portalAuditEventFindMany.mock.calls[0][0].select
     expect(selectFields).toEqual({ id: true, action: true, createdAt: true })
+  })
+})
+
+// Step 4c.4c — the portal dashboard's own completion summary must exclude
+// conditionally inactive required documents, using the identical persisted-
+// column predicate already shipped for the staff-facing packet overview in
+// Step 4c.4a (isRequired && applicabilityStatus !== "CONDITIONALLY_INACTIVE").
+// No condition-runtime evaluation is invoked.
+describe("getPortalDashboard — Step 4c.4c: portal completion metrics", () => {
+  function mockClientAndActivity() {
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    clientFindUnique.mockImplementation(async (args: any) => {
+      if (args.select?.firstName) return { firstName: "Ayaan", lastName: "Mohamed", program: "Waiver", organization: { name: "North Star" } }
+      return { organizationId: "org-1" }
+    })
+    portalAuditEventFindMany.mockResolvedValue([])
+  }
+
+  it("1. an active required incomplete document lowers portal completion", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [{ status: "in_progress", isRequired: true, applicabilityStatus: "ACTIVE" }],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    expect(dashboard.packet!.completionPct).toBeLessThan(100)
+    expect(dashboard.packet!.requiredTotal).toBe(1)
+    expect(dashboard.packet!.requiredCompleted).toBe(0)
+  })
+
+  it("2. a conditionally inactive required incomplete document does not lower portal completion", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [{ status: "in_progress", isRequired: true, applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    // Existing zero-applicable-required-documents convention for this
+    // function is 0%, not 100% — preserved exactly, unchanged by this step.
+    expect(dashboard.packet!.requiredTotal).toBe(0)
+    expect(dashboard.packet!.completionPct).toBe(0)
+  })
+
+  it("3. a conditionally inactive required document does not count in the denominator", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [
+        { status: "completed", isRequired: true, applicabilityStatus: "ACTIVE" },
+        { status: "not_started", isRequired: true, applicabilityStatus: "CONDITIONALLY_INACTIVE" },
+      ],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    expect(dashboard.packet!.requiredTotal).toBe(1)
+    expect(dashboard.packet!.completionPct).toBe(100)
+  })
+
+  it("4. a mixed packet of active/inactive, required/optional, complete/incomplete documents produces the correct percentage", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [
+        { status: "completed", isRequired: true, applicabilityStatus: "ACTIVE" },
+        { status: "in_progress", isRequired: true, applicabilityStatus: "ACTIVE" },
+        { status: "not_started", isRequired: true, applicabilityStatus: "CONDITIONALLY_INACTIVE" },
+        { status: "not_started", isRequired: false, applicabilityStatus: "ACTIVE" },
+      ],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    // Only the two ACTIVE required docs count: 1 of 2 complete -> 50%.
+    expect(dashboard.packet!.requiredTotal).toBe(2)
+    expect(dashboard.packet!.requiredCompleted).toBe(1)
+    expect(dashboard.packet!.completionPct).toBe(50)
+  })
+
+  it("5. a packet whose required documents are all conditionally inactive follows the existing zero-applicable-required-documents convention", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [
+        { status: "not_started", isRequired: true, applicabilityStatus: "CONDITIONALLY_INACTIVE" },
+        { status: "not_started", isRequired: true, applicabilityStatus: "CONDITIONALLY_INACTIVE" },
+      ],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    expect(dashboard.packet!.requiredTotal).toBe(0)
+    expect(dashboard.packet!.completionPct).toBe(0)
+  })
+
+  it("6. legacy/default-active behavior remains unchanged", async () => {
+    mockClientAndActivity()
+    packetFindFirst.mockResolvedValue({
+      id: "pkt-1", packetType: "initial_intake", status: "in_progress", dueDate: null,
+      documents: [
+        { status: "completed", isRequired: true, applicabilityStatus: "ACTIVE" },
+        { status: "in_progress", isRequired: true, applicabilityStatus: "ACTIVE" },
+      ],
+    })
+
+    const { getPortalDashboard } = await import("@/lib/actions/portal-dashboard")
+    const dashboard = await getPortalDashboard(CLIENT_ID)
+
+    expect(dashboard.packet!.requiredTotal).toBe(2)
+    expect(dashboard.packet!.requiredCompleted).toBe(1)
+    expect(dashboard.packet!.completionPct).toBe(50)
   })
 })
 
