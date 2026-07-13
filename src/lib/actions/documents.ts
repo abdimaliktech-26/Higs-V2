@@ -8,12 +8,47 @@ import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { signUrl } from "@/lib/storage"
-import { reconcilePacketDocumentApplicability, buildPacketConditionContext, buildEditorDocumentConditionState } from "@/lib/conditions/runtime"
+import {
+  reconcilePacketDocumentApplicability,
+  buildPacketConditionContext,
+  buildPacketConditionContextTx,
+  buildEditorDocumentConditionState,
+  evaluatePdfFieldVisibility,
+  evaluatePdfFieldRequiredness,
+} from "@/lib/conditions/runtime"
 
 const EDIT_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 const READ_ROLES: UserRole[] = ["DSP", "NURSE"]
 
+const CONFIGURATION_ERROR_MESSAGE = "This document has a compliance configuration error and cannot be edited until it is resolved."
+
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
+
+// hasFieldValue mirrors the client's own fieldHasValue truthiness rule
+// (pdf-editor-client.tsx) so "no meaningful value" means the same thing on
+// both sides — an empty/whitespace-only string does not count as answered.
+// Legacy status recalculation intentionally keeps its own, older SQL-level
+// `value: null` check unchanged rather than adopting this (see below).
+function hasFieldValue(value: string | null | undefined): boolean {
+  return typeof value === "string" ? value.trim().length > 0 : Boolean(value)
+}
+
+// Step 4c.3b (clear-value fix): Prisma silently omits an `undefined` value
+// from an UPDATE's data object, leaving the row's previous value untouched —
+// so a submitted `undefined` (representing "cleared") would evaluate as
+// empty for THIS request's visibility/requiredness/status decisions but
+// never actually clear the stored value in the database, letting evaluation
+// and persistence disagree. Normalizing every submitted value through this
+// function before it is used for evaluation OR persistence closes that gap
+// at the one place it can originate — everything downstream (the prospective
+// overlay, the write itself, and every later read of the persisted value by
+// status recalculation and reconciliation) then sees the same, correct
+// value. An empty string is preserved as an empty string (not further
+// coerced to null) — hasFieldValue already treats it, and any
+// whitespace-only string, as "no meaningful value" for completion purposes.
+function normalizeFieldValue(value: string | null | undefined): string | null {
+  return value === undefined ? null : value
+}
 
 // ── Step 4c.3a: server-authoritative visibility/requiredness in the editor
 // DTO. Condition evaluation is read-only here — no writes, no reconciliation,
@@ -151,14 +186,22 @@ export async function getEditableDocument(documentId: string) {
   }
 }
 
-// ── Step 4c.2b: transactional save, field-ownership verified, condition
-// reconciliation wired for condition-aware packets. Field writes, the
-// edited document's status recalculation, applicability reconciliation, and
-// every audit event all commit together or not at all — a failure anywhere
-// (including a reconciliation integrity error) rolls back the whole save,
-// leaving prior field values and document states untouched. Legacy packets
-// (no condition snapshot) behave exactly as before: fields save, status
-// recalculates from static isRequired, no reconciliation, no new audit.
+// ── Step 4c.3b: transactional save enforcement and condition-aware status
+// recalculation. Field writes, prospective visibility/requiredness
+// evaluation, the edited document's status recalculation, applicability
+// reconciliation, and the audit event all commit together or not at all —
+// a failure anywhere (including a condition integrity error) rolls back the
+// whole save, leaving prior field values, document status, and applicability
+// completely untouched. A submitted write to a field that evaluates hidden
+// in the PROSPECTIVE state (persisted values overlaid with this same
+// submission) is silently excluded from the write set rather than failing
+// the whole save — the current editor client always resubmits every field's
+// current value, including untouched hidden ones, so rejecting the batch
+// outright would make it impossible to save a condition-aware document at
+// all before a later step ships client-side filtering. Legacy packets (no
+// condition snapshot) are entirely unaffected: every submitted field is
+// accepted and status recalculates from static isRequired, exactly as
+// before this step.
 export async function saveDocumentFields(
   documentId: string,
   fields: { id?: string; name: string; fieldType: string; value?: string; pageNumber: number; posX?: number; posY?: number; isRequired: boolean }[]
@@ -178,40 +221,125 @@ export async function saveDocumentFields(
     if (!(user.isSuperAdmin as boolean) && !EDIT_ROLES.includes(role))
       return { success: false, error: "Insufficient permissions" }
 
+    // Server-side read-only enforcement — never rely on the client disabling
+    // its Save button. Checked before the transaction even opens, since
+    // these reject the entire save regardless of what was submitted.
+    if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") {
+      return { success: false, error: "This document is currently not applicable based on packet conditions and cannot be edited." }
+    }
+    if (doc.packet.status === "approved" || doc.packet.status === "archived") {
+      return { success: false, error: "This document is approved and locked for editing." }
+    }
+
     const isConditionAware = Boolean(doc.packet.conditionSnapshotId && doc.packet.conditionRuntimeVersion)
 
     const result = await prisma.$transaction(async (tx) => {
       // Field ownership — every submitted existing-field id must belong to
       // THIS document. Rejects cross-document, cross-packet, and
       // cross-tenant field ids in one pass (the document itself was already
-      // verified to belong to the caller's organization above).
-      const existingFields = await tx.pdfField.findMany({ where: { packetDocumentId: documentId }, select: { id: true } })
-      const existingFieldIds = new Set(existingFields.map((f) => f.id))
+      // verified to belong to the caller's organization above). Fetches the
+      // fields' own persisted templateFieldKey/value/isRequired/source too —
+      // needed to build the prospective overlay below; never taken from
+      // anything the client submitted.
+      const existingFields = await tx.pdfField.findMany({
+        where: { packetDocumentId: documentId },
+        select: { id: true, templateFieldKey: true, value: true, isRequired: true, source: true },
+      })
+      const existingFieldsById = new Map(existingFields.map((f) => [f.id, f]))
       for (const f of fields) {
-        if (f.id && !existingFieldIds.has(f.id)) throw new Error("One or more fields do not belong to this document")
+        if (f.id && !existingFieldsById.has(f.id)) throw new Error("One or more fields do not belong to this document")
       }
 
-      for (const f of fields) {
+      let acceptedFields = fields
+      const ignoredFieldIds: string[] = []
+
+      if (isConditionAware) {
+        // Prospective state: persisted values overlaid with this submission,
+        // keyed strictly by the field's own trusted (ownership-verified) id
+        // — the fieldKey each value lands on on is always resolved from the
+        // field's own persisted templateFieldKey, never from anything the
+        // client claims. A packet-wide integrity error rejects the entire
+        // save immediately — before any field is written — rather than
+        // letting individual fields silently fall back to visible/optional.
+        const overlayValues: Record<string, string | null> = {}
+        for (const f of fields) {
+          if (f.id) overlayValues[f.id] = normalizeFieldValue(f.value)
+        }
+        const prospectiveRuntime = await buildPacketConditionContextTx(tx, doc.packetId, {
+          packetDocumentId: documentId,
+          fieldValues: overlayValues,
+        })
+        if (prospectiveRuntime.integrityErrors.length > 0) throw new Error(CONFIGURATION_ERROR_MESSAGE)
+
+        acceptedFields = fields.filter((f) => {
+          if (!f.id) return true // new manual field — always visible, no template identity
+          const visibility = evaluatePdfFieldVisibility(prospectiveRuntime, documentId, f.id)
+          const isVisible = visibility.status === "evaluated" ? visibility.result : false
+          if (!isVisible) {
+            ignoredFieldIds.push(f.id)
+            return false
+          }
+          return true
+        })
+      }
+
+      // Accepted writes only — existing fields may only ever have value/
+      // posX/posY changed here; templateFieldKey, documentTemplateFieldId,
+      // static isRequired, source, and ownership links are never touched by
+      // this path (unchanged from before this step). New manual fields keep
+      // their existing shape: source "manual", no template identity, always
+      // visible, and their submitted isRequired becomes their static
+      // requirement.
+      for (const f of acceptedFields) {
         if (f.id) {
-          await tx.pdfField.update({ where: { id: f.id }, data: { value: f.value, posX: f.posX, posY: f.posY } })
+          // normalizeFieldValue ensures an explicitly-cleared (undefined)
+          // submission is actually persisted as null — Prisma would
+          // otherwise silently omit the column from the UPDATE and leave
+          // the previous value in place.
+          await tx.pdfField.update({ where: { id: f.id }, data: { value: normalizeFieldValue(f.value), posX: f.posX, posY: f.posY } })
         } else {
           await tx.pdfField.create({
             data: {
               packetDocumentId: documentId, name: f.name, fieldType: f.fieldType,
-              value: f.value, pageNumber: f.pageNumber, posX: f.posX, posY: f.posY,
+              value: normalizeFieldValue(f.value), pageNumber: f.pageNumber, posX: f.posX, posY: f.posY,
               isRequired: f.isRequired, source: "manual", confidence: 1.0,
             },
           })
         }
       }
 
-      // Static requiredness only — effective, condition-aware requiredness
-      // is not integrated here (deferred to a later step); this recompute
-      // is unchanged from before Step 4c.2b.
-      const pendingRequired = await tx.pdfField.count({
-        where: { packetDocumentId: documentId, isRequired: true, value: null },
-      })
-      const newStatus = pendingRequired === 0 ? "completed" : "in_progress"
+      let newStatus: string
+      if (isConditionAware) {
+        // Re-evaluate from the now-committed (within this same transaction)
+        // accepted state — ignored fields kept their prior, already-correct
+        // stored values, so no overlay is needed here. A hidden field or a
+        // conditionally-optional field never counts as pending; zero
+        // visible-and-effectively-required fields means completed.
+        const finalRuntime = await buildPacketConditionContextTx(tx, doc.packetId)
+        if (finalRuntime.integrityErrors.length > 0) throw new Error(CONFIGURATION_ERROR_MESSAGE)
+
+        // Read the mapping id from the freshly tx-fetched runtime, not the
+        // outer pre-transaction `doc` — this document's own trusted identity
+        // as of right now, inside this same transaction.
+        const mappingId = finalRuntime.packetDocumentsById[documentId]?.packetTemplateDocumentId
+        const documentEntry = mappingId ? finalRuntime.packetDocumentsByMappingId[mappingId] : undefined
+        if (!documentEntry) throw new Error("Packet document cannot be resolved to the snapshot")
+
+        const pendingRequired = Object.values(documentEntry.fieldsById).filter((field) => {
+          const visibility = evaluatePdfFieldVisibility(finalRuntime, documentId, field.id)
+          const requiredness = evaluatePdfFieldRequiredness(finalRuntime, documentId, field.id)
+          const isVisible = visibility.status === "evaluated" ? visibility.result : false
+          const effectiveRequired = requiredness.status === "evaluated" ? requiredness.result : false
+          return isVisible && effectiveRequired && !hasFieldValue(field.value)
+        }).length
+        newStatus = pendingRequired === 0 ? "completed" : "in_progress"
+      } else {
+        // Static requiredness only — unchanged from before Step 4c.2b.
+        const pendingRequired = await tx.pdfField.count({
+          where: { packetDocumentId: documentId, isRequired: true, value: null },
+        })
+        newStatus = pendingRequired === 0 ? "completed" : "in_progress"
+      }
       await tx.packetDocument.update({ where: { id: documentId }, data: { status: newStatus } })
 
       await createAuditEvent({
@@ -220,14 +348,14 @@ export async function saveDocumentFields(
         action: "DOCUMENT_SAVED",
         targetType: "packet_document",
         targetId: documentId,
-        metadata: { fieldCount: fields.length, status: newStatus },
+        metadata: { acceptedFieldCount: acceptedFields.length, ignoredFieldCount: ignoredFieldIds.length, status: newStatus },
       }, tx)
 
       if (isConditionAware) {
         await reconcilePacketDocumentApplicability(tx, doc.packet.id, user.id as string)
       }
 
-      return { status: newStatus }
+      return { status: newStatus, ignoredFieldIds }
     })
 
     revalidatePath(`/documents/${documentId}/edit`)

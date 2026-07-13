@@ -176,18 +176,73 @@ export async function createPacketConditionSnapshot(packetId: string) {
   })
 }
 
-export async function buildPacketConditionContext(packetId: string): Promise<PacketConditionRuntime> {
-  await requireAuthorizedPacket(packetId)
-  const packet = await prisma.packet.findUnique({
-    where: { id: packetId },
-    include: {
-      program: { select: { code: true } },
-      conditionSnapshot: true,
-      documents: { include: { fields: true } },
-    },
-  })
-  if (!packet) throw new Error("Packet not found")
+const PACKET_CONTEXT_INCLUDE = {
+  program: { select: { code: true } },
+  conditionSnapshot: true,
+  documents: { include: { fields: true } },
+} as const
 
+interface RawPacketForContext {
+  id: string
+  organizationId: string
+  createdAt: Date
+  packetType: string
+  program: { code: string } | null
+  conditionSnapshotId: string | null
+  conditionRuntimeVersion: number | null
+  conditionSnapshot: {
+    id: string
+    organizationId: string
+    packetTemplateId: string
+    runtimeVersion: number
+    clientIsMinor: boolean
+    definition: unknown
+  } | null
+  documents: {
+    id: string
+    documentTemplateId: string
+    packetTemplateDocumentId: string | null
+    isRequired: boolean
+    applicabilityStatus: "ACTIVE" | "CONDITIONALLY_INACTIVE"
+    fields: {
+      id: string
+      templateFieldKey: string | null
+      documentTemplateFieldId: string | null
+      value: string | null
+      isRequired: boolean
+    }[]
+  }[]
+}
+
+/**
+ * A prospective, not-yet-persisted field-value overlay for exactly one
+ * PacketDocument — used by saveDocumentFields to evaluate visibility and
+ * effective requiredness against a submitted-but-unwritten batch of field
+ * values before deciding what to actually write. Values are keyed by the
+ * PdfField's own database id (never a client-supplied fieldKey) — the
+ * assembler below only ever resolves a fieldKey from the field's own
+ * persisted `templateFieldKey`, so the overlay can never redirect a value
+ * onto a different field than the one the caller already verified ownership
+ * of.
+ */
+export interface PacketConditionContextOverlay {
+  packetDocumentId: string
+  fieldValues: Record<string, string | null>
+}
+
+/**
+ * Shared, DB-agnostic assembly step behind both buildPacketConditionContext
+ * (global prisma + auth, for reads) and buildPacketConditionContextTx
+ * (transaction client, no auth, for writes) — the two callers differ only in
+ * how they fetch `packet`, never in how a PacketConditionRuntime is derived
+ * from it. Extracted so the mapping/field-resolution/integrity-error rules
+ * can never drift apart between the read path and the write path.
+ */
+function assemblePacketConditionRuntime(
+  packet: RawPacketForContext,
+  packetId: string,
+  overlay?: PacketConditionContextOverlay
+): PacketConditionRuntime {
   // Mode-independent direct indexes by the row's own id — the only stable
   // identity legacy PacketDocument/PdfField rows have. Legacy requiredness
   // evaluation reads exclusively from these (never packetDocumentsByMappingId,
@@ -252,14 +307,16 @@ export async function buildPacketConditionContext(packetId: string): Promise<Pac
     }
     const fieldValues: Record<string, unknown> = Object.fromEntries(mapping.fields.map((field) => [field.fieldKey, null]))
     const fieldsById: Record<string, any> = {}
+    const useOverlay = Boolean(overlay && overlay.packetDocumentId === document.id)
     for (const field of document.fields) {
+      const prospectiveValue = useOverlay && field.id in overlay!.fieldValues ? overlay!.fieldValues[field.id] : field.value
       if (field.templateFieldKey) {
         const source = mapping.fields.find((entry) => entry.fieldKey === field.templateFieldKey)
         if (!source) errors.push({ type: "missing_field_key", message: "PDF field key is not present in the snapshot", mappingId: mapping.id, packetDocumentId: document.id, fieldId: field.id })
         else if (field.documentTemplateFieldId && field.documentTemplateFieldId !== source.id) errors.push({ type: "field_parent_mismatch", message: "PDF field source identity is inconsistent", mappingId: mapping.id, packetDocumentId: document.id, fieldId: field.id })
-        fieldValues[field.templateFieldKey] = field.value
+        fieldValues[field.templateFieldKey] = prospectiveValue
       }
-      fieldsById[field.id] = { id: field.id, templateFieldKey: field.templateFieldKey, documentTemplateFieldId: field.documentTemplateFieldId, value: field.value, staticRequired: field.isRequired }
+      fieldsById[field.id] = { id: field.id, templateFieldKey: field.templateFieldKey, documentTemplateFieldId: field.documentTemplateFieldId, value: prospectiveValue, staticRequired: field.isRequired }
     }
     documentFieldValues[mapping.id] = fieldValues
     packetDocumentsByMappingId[mapping.id] = {
@@ -277,6 +334,34 @@ export async function buildPacketConditionContext(packetId: string): Promise<Pac
     runtimeVersion: packet.conditionRuntimeVersion, definition, packetDocumentsByMappingId,
     packetDocumentsById, pdfFieldsById, documentFieldValues, integrityErrors: errors,
   }
+}
+
+export async function buildPacketConditionContext(packetId: string): Promise<PacketConditionRuntime> {
+  await requireAuthorizedPacket(packetId)
+  const packet = await prisma.packet.findUnique({ where: { id: packetId }, include: PACKET_CONTEXT_INCLUDE })
+  if (!packet) throw new Error("Packet not found")
+  return assemblePacketConditionRuntime(packet, packetId)
+}
+
+/**
+ * Transaction-scoped variant for callers that are already inside a write
+ * transaction and already authorized (saveDocumentFields,
+ * reconcilePacketDocumentApplicability) — reads exclusively through `tx` so
+ * it sees this same transaction's own uncommitted writes, and never calls
+ * auth()/requireOrgAccess() itself (a transaction callback has no request
+ * scope, and re-authorizing mid-transaction would be redundant with the
+ * caller's own pre-transaction check). Accepts an optional prospective
+ * field-value overlay for exactly one PacketDocument; omit it to read purely
+ * persisted (already-committed-within-this-tx) state.
+ */
+export async function buildPacketConditionContextTx(
+  tx: Prisma.TransactionClient,
+  packetId: string,
+  overlay?: PacketConditionContextOverlay
+): Promise<PacketConditionRuntime> {
+  const packet = await tx.packet.findUnique({ where: { id: packetId }, include: PACKET_CONTEXT_INCLUDE })
+  if (!packet) throw new Error("Packet not found")
+  return assemblePacketConditionRuntime(packet, packetId, overlay)
 }
 
 function knownEmptyInputs(detail: GroupEvaluationDetail): string[] {
@@ -573,87 +658,46 @@ export async function reconcilePacketDocumentApplicability(
   packetId: string,
   actorId: string
 ): Promise<ReconciliationTransition[]> {
-  const packet = await tx.packet.findUnique({
-    where: { id: packetId },
-    include: {
-      program: { select: { code: true } },
-      conditionSnapshot: true,
-      documents: { include: { fields: true } },
-    },
-  })
-  if (!packet) throw new Error("Packet not found")
-
   // Defensive — callers are expected to only invoke this for condition-aware
   // packets, but never silently skip a real mismatch.
-  if (!packet.conditionSnapshotId || !packet.conditionRuntimeVersion) return []
-  if (!packet.conditionSnapshot || packet.conditionRuntimeVersion !== packet.conditionSnapshot.runtimeVersion) {
-    throw new Error("Packet condition runtime marker does not match its snapshot")
-  }
-  const definition = isDefinition(packet.conditionSnapshot.definition) ? packet.conditionSnapshot.definition : null
-  if (!definition) throw new Error("Condition snapshot definition is malformed")
-
-  // Trusted, persisted values only — rebuilt from PdfField.templateFieldKey/
-  // value exactly as buildPacketConditionContext does, just through `tx` so
-  // it sees this same transaction's own writes. Never derived from anything
-  // the client sent directly.
-  const documentByMappingId = new Map<string, (typeof packet.documents)[number]>()
-  const documentFieldValues: Record<string, Record<string, unknown>> = {}
-  for (const document of packet.documents) {
-    if (!document.packetTemplateDocumentId) continue
-    const mapping = definition.mappings.find((m) => m.id === document.packetTemplateDocumentId)
-    if (!mapping) throw new Error("Packet document cannot be resolved to its snapshot mapping")
-    if (mapping.documentTemplateId !== document.documentTemplateId) throw new Error("Packet document does not match its snapshot mapping")
-    documentByMappingId.set(mapping.id, document)
-    const fieldValues: Record<string, unknown> = Object.fromEntries(mapping.fields.map((f) => [f.fieldKey, null]))
-    for (const field of document.fields) {
-      if (!field.templateFieldKey) continue
-      if (!(field.templateFieldKey in fieldValues)) throw new Error("PDF field key is not present in the snapshot")
-      fieldValues[field.templateFieldKey] = field.value
-    }
-    documentFieldValues[mapping.id] = fieldValues
-  }
-  for (const m of definition.mappings) documentFieldValues[m.id] ??= Object.fromEntries(m.fields.map((f) => [f.fieldKey, null]))
-
-  const context: EvaluationContext = {
-    fieldValues: {},
-    documentFieldValues,
-    client: { isMinor: packet.conditionSnapshot.clientIsMinor },
-    packet: { programCode: packet.program?.code ?? null, packetType: packet.packetType },
-  }
+  const runtime = await buildPacketConditionContextTx(tx, packetId)
+  if (runtime.mode === "legacy") return []
+  if (runtime.integrityErrors.length > 0) throw new Error(runtime.integrityErrors[0].message)
+  const definition = runtime.definition!
 
   const transitions: ReconciliationTransition[] = []
   for (const mapping of definition.mappings) {
-    const inclusionGroup = mapping.conditionGroups.find((g) => g.purpose === "DOCUMENT_INCLUSION") ?? null
-    const included = inclusionGroup ? evaluateConditionTree(inclusionGroup, context).result : true
+    const inclusionResult = evaluatePacketDocumentInclusion(runtime, mapping.id)
+    const included = inclusionResult.status === "evaluated" ? inclusionResult.result : true
 
-    const document = documentByMappingId.get(mapping.id)
-    if (!document) {
+    const documentEntry = runtime.packetDocumentsByMappingId[mapping.id]
+    if (!documentEntry) {
       if (included) throw new Error(`Applicable mapping "${mapping.id}" has no materialized PacketDocument`)
       continue // permanently excluded at creation (pseudo-field-false) — nothing to reconcile
     }
 
     const desired: "ACTIVE" | "CONDITIONALLY_INACTIVE" = included ? "ACTIVE" : "CONDITIONALLY_INACTIVE"
-    if (document.applicabilityStatus === desired) continue // idempotent — no write, no audit
+    if (documentEntry.applicabilityStatus === desired) continue // idempotent — no write, no audit
 
     await tx.packetDocument.update({
-      where: { id: document.id },
+      where: { id: documentEntry.id },
       data:
         desired === "ACTIVE"
           ? { applicabilityStatus: "ACTIVE", conditionallyInactiveAt: null, conditionallyInactiveReason: null }
           : { applicabilityStatus: "CONDITIONALLY_INACTIVE", conditionallyInactiveAt: new Date(), conditionallyInactiveReason: "condition_false_after_field_save" },
     })
 
-    transitions.push({ packetDocumentId: document.id, packetTemplateDocumentId: mapping.id, previousApplicabilityStatus: document.applicabilityStatus, nextApplicabilityStatus: desired })
+    transitions.push({ packetDocumentId: documentEntry.id, packetTemplateDocumentId: mapping.id, previousApplicabilityStatus: documentEntry.applicabilityStatus, nextApplicabilityStatus: desired })
 
     await createAuditEvent({
-      organizationId: packet.organizationId,
+      organizationId: runtime.organizationId,
       actorId,
       action: "PACKET_DOCUMENT_APPLICABILITY_RECONCILED",
       targetType: "packet_document",
-      targetId: document.id,
+      targetId: documentEntry.id,
       metadata: {
-        packetId, packetDocumentId: document.id, packetTemplateDocumentId: mapping.id,
-        previousApplicabilityStatus: document.applicabilityStatus, nextApplicabilityStatus: desired,
+        packetId, packetDocumentId: documentEntry.id, packetTemplateDocumentId: mapping.id,
+        previousApplicabilityStatus: documentEntry.applicabilityStatus, nextApplicabilityStatus: desired,
         trigger: "field_save", action: "applicability_reconciled",
       },
     }, tx)
