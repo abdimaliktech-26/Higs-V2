@@ -285,6 +285,134 @@ describe("runPacketValidation — always-on structural checks are unaffected by 
   })
 })
 
+// ── Step 4c.4a — conditionally inactive PacketDocuments (applicabilityStatus
+// persisted by the packet condition system, reconciled on every field save)
+// are excluded from the document-level missing/incomplete checks only.
+// No condition evaluation happens in validation.ts itself — the predicate
+// reads the already-persisted column exactly as it comes back from Prisma.
+describe("runPacketValidation — Step 4c.4a: conditionally inactive documents excluded from document-level rules", () => {
+  it("still flags an active required incomplete document (unchanged from before this step)", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "in_progress", applicabilityStatus: "ACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes('Required document "ISP" is in progress'))).toBe(true)
+  })
+
+  it("does not flag a conditionally inactive required incomplete document", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "in_progress", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes("Required document"))).toBe(false)
+  })
+
+  it("does not flag a conditionally inactive required missing (never-started) document", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "not_started", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes("Required document"))).toBe(false)
+  })
+
+  it("an active required missing_document (fully absent) still produces the missing-document issue when the rule is active", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      packetTemplate: { requiredDocs: [{ documentTemplateId: "dt-1" }] },
+      documents: [],
+    }))
+    validationRuleFindMany.mockResolvedValue([ruleRow({ id: "rule-missing", category: "missing_document" })])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const issue = validationIssueCreate.mock.calls.find((c: any) => c[0].data.message.includes("missing from packet"))
+    expect(issue).toBeTruthy()
+  })
+
+  it("a conditionally inactive document that already exists for a required documentTemplateId produces no missing-document issue", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      packetTemplate: { requiredDocs: [{ documentTemplateId: "dt-1" }] },
+      documents: [{ id: "doc-1", documentTemplateId: "dt-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "not_started", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([ruleRow({ id: "rule-missing", category: "missing_document" })])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes("missing from packet"))).toBe(false)
+  })
+
+  it("condition-aware filtering does not suppress unrelated validation issues (overdue due date still fires)", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      dueDate: new Date("2020-01-01"), status: "in_progress",
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "in_progress", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([ruleRow({ id: "rule-overdue", category: "overdue_due_date", severity: "info" })])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes("has passed"))).toBe(true)
+    expect(messages.some((m: string) => m.includes("Required document"))).toBe(false)
+  })
+
+  it("field-level required_field checks remain unchanged — a conditionally inactive document's empty required field is still flagged", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [requiredTextField()], isRequired: true, status: "completed", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([ruleRow({ category: "required_field" })])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes("Required field"))).toBe(true)
+  })
+
+  it("field-level required_signature checks remain unchanged — a conditionally inactive document's missing signature is still flagged", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "Consent" }, fields: [{ id: "sig-1", name: "Guardian Signature", fieldType: "signature", value: null, isRequired: true }], isRequired: true, status: "completed", applicabilityStatus: "CONDITIONALLY_INACTIVE" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([ruleRow({ id: "rule-sig", category: "required_signature" })])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const sigIssue = validationIssueCreate.mock.calls.find((c: any) => c[0].data.message.includes("Required signature"))
+    expect(sigIssue).toBeTruthy()
+  })
+
+  it("legacy documents without an applicabilityStatus field behave exactly as before this step", async () => {
+    packetFindUnique.mockResolvedValue(basePacket({
+      documents: [{ id: "doc-1", documentTemplate: { name: "ISP" }, fields: [], isRequired: true, status: "in_progress" }],
+    }))
+    validationRuleFindMany.mockResolvedValue([])
+
+    const { runPacketValidation } = await import("@/lib/actions/validation")
+    await runPacketValidation(PACKET_ID)
+
+    const messages = validationIssueCreate.mock.calls.map((c: any) => c[0].data.message)
+    expect(messages.some((m: string) => m.includes('Required document "ISP" is in progress'))).toBe(true)
+  })
+})
+
 describe("updateValidationRuleActive", () => {
   it("deactivates a rule and records a VALIDATION_RULE_STATUS_CHANGED audit event", async () => {
     validationRuleFindUnique.mockResolvedValue({ id: "rule-1", organizationId: ORG_ID, active: true })

@@ -2,7 +2,19 @@ export interface PacketDocLike {
   id: string
   status: string
   isRequired: boolean
+  applicabilityStatus: string
   documentTemplate: { name: string }
+}
+
+// A document only counts toward required-document totals when it is both
+// statically required AND currently applicable per the packet condition
+// system. applicabilityStatus is a persisted PacketDocument column kept
+// current by reconcilePacketDocumentApplicability on every field save — no
+// runtime condition evaluation happens here. Legacy documents (condition
+// system never touched them) always carry the default "ACTIVE" status, so
+// this predicate is a no-op for them.
+function isApplicableRequiredDoc(d: PacketDocLike): boolean {
+  return d.isRequired && d.applicabilityStatus !== "CONDITIONALLY_INACTIVE"
 }
 
 export interface ValidationLike {
@@ -41,7 +53,7 @@ export interface Readiness {
  * mistaken for a stored/authoritative metric.
  */
 export function deriveReadiness(docs: PacketDocLike[], validation: ValidationLike | null, signatures: SignatureLike[], approval: ApprovalLike | null): Readiness {
-  const requiredDocs = docs.filter((d) => d.isRequired)
+  const requiredDocs = docs.filter(isApplicableRequiredDoc)
   const completedRequiredDocs = requiredDocs.filter((d) => d.status === "completed")
   const docsPct = requiredDocs.length > 0 ? Math.round((completedRequiredDocs.length / requiredDocs.length) * 100) : 100
 
@@ -102,7 +114,7 @@ export function derivePriorityItem(
     }
   }
 
-  const incompleteRequired = docs.find((d) => d.isRequired && d.status !== "completed")
+  const incompleteRequired = docs.find((d) => isApplicableRequiredDoc(d) && d.status !== "completed")
   if (incompleteRequired) {
     return {
       kind: "document",

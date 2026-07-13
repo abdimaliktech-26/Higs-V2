@@ -171,9 +171,14 @@ export async function runPacketValidation(packetId: string) {
     }
   }
 
-  // Always-on structural check (not rule-gated): incomplete packet documents
+  // Always-on structural check (not rule-gated): incomplete packet documents.
+  // A conditionally inactive document (applicabilityStatus set by the
+  // packet condition system, persisted on PacketDocument — no runtime
+  // evaluation performed here) is not currently applicable to this packet
+  // and is silently excluded, matching the same predicate used in
+  // packet-overview-metrics.ts.
   for (const doc of packet.documents) {
-    if (doc.isRequired && doc.status !== "completed") {
+    if (doc.isRequired && doc.applicabilityStatus !== "CONDITIONALLY_INACTIVE" && doc.status !== "completed") {
       issues.push({
         severity: doc.status === "in_progress" ? "warning" : "critical",
         message: `Required document "${doc.documentTemplate.name}" is ${doc.status.replace(/_/g, " ")}`,
