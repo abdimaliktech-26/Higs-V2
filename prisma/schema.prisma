@@ -111,6 +111,9 @@ enum AuditAction {
   PACKET_CONDITION_SNAPSHOT_CREATED
   PACKET_DOCUMENT_INITIAL_APPLICABILITY_SET
   PACKET_DOCUMENT_APPLICABILITY_RECONCILED
+  PORTAL_ACCESS_AUTHORIZATION_CREATED
+  PORTAL_ACCESS_AUTHORIZATION_REVOKED
+  PORTAL_ACCESS_SIGN_PERMISSION_CHANGED
 }
 
 enum PacketDocumentApplicabilityStatus {
@@ -1332,6 +1335,8 @@ model PortalAccessAuthorization {
   consentText          String              @map("consent_text")
   consentVersion       String              @map("consent_version")
   acceptedAt           DateTime?           @map("accepted_at")
+  acceptedIp           String?             @map("accepted_ip")
+  acceptedUserAgent    String?             @map("accepted_user_agent")
   revokedAt            DateTime?           @map("revoked_at")
   revokedByUserId      String?             @map("revoked_by_user_id")
   createdAt            DateTime            @default(now())

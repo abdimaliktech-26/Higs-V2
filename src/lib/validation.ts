@@ -323,6 +323,20 @@ export const portalInvitationQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 })
 
+// ── Portal Signing Authorization Foundation (Stage 5 Step 5b.1) ──
+// Staff-supplied input only — organization, client, portal user, staff
+// verifier, and the client-wide scope representation are all derived
+// server-side from the access grant itself, never accepted here.
+export const createPortalAccessAuthorizationSchema = z.object({
+  accessGrantId: cuid,
+  authorityType: z.enum(["LEGAL_GUARDIAN", "PARENT_OF_MINOR", "POWER_OF_ATTORNEY", "CONSERVATOR", "SELF", "ORG_DESIGNATED"]),
+  consentText: z.string().min(1, "Consent text is required").max(10000),
+  consentVersion: z.string().min(1, "Consent version is required").max(50),
+  effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Effective date is required"),
+  expirationDate: dateStr,
+  supportingDocumentId: z.string().max(50).optional().or(z.literal("")),
+})
+
 export const activatePortalAccountSchema = z.object({
   token: z.string().min(32).max(200),
   password: z.string().min(10, "Password must be at least 10 characters").max(200),
