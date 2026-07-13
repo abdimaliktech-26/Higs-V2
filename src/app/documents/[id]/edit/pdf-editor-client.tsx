@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import Link from "next/link"
 import {
   addDocumentComment,
@@ -9,6 +9,18 @@ import {
   getEditableDocument,
   saveDocumentFields,
 } from "@/lib/actions/documents"
+import {
+  computeVisibleFields,
+  computeCompletionPercent,
+  computeMissingRequired,
+  computeWarningFields,
+  computeSignatureFields,
+  signatureType,
+  fieldHasMeaningfulValue,
+  getRequiredMarkerKind,
+  determineReadOnlyBanner,
+  ignoredFieldsNoticeText,
+} from "./editor-metrics"
 import { AiCopilotPanel } from "@/components/ai/copilot-panel"
 import { FieldOverlays } from "@/components/pdf/field-overlays"
 import { PDFRenderer } from "@/components/pdf/pdf-renderer"
@@ -87,9 +99,11 @@ export function PDFEditorClient({ documentId }: Props) {
 
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [ignoredNotice, setIgnoredNotice] = useState<string | null>(null)
 
   const [fields, setFields] = useState<any[]>([])
   const [selectedField, setSelectedField] = useState<string | null>(null)
+  const fieldListRef = useRef<HTMLDivElement | null>(null)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("validation")
   const [commentText, setCommentText] = useState("")
   const [totalPages, setTotalPages] = useState(0)
@@ -118,6 +132,19 @@ export function PDFEditorClient({ documentId }: Props) {
     loadDoc()
   }, [loadDoc])
 
+  // Step 4c.3c.1 — defensive: if the currently-selected field is no longer
+  // visible after a server reload (e.g. a sibling save changed a condition),
+  // clear the stale selection rather than leaving the inspector pointed at
+  // a field that's no longer rendered. Real-time, typing-driven hiding is
+  // deferred to Step 4c.3c.2 — this only reacts to a fresh `fields` array
+  // from loadDoc.
+  useEffect(() => {
+    if (selectedField && !fields.some((f: any) => f.id === selectedField && f.isVisible)) {
+      setSelectedField(null)
+      fieldListRef.current?.focus()
+    }
+  }, [fields, selectedField])
+
   async function handleSave() {
     setSaving(true)
     const result = await saveDocumentFields(documentId, fields.map((f: any) => ({
@@ -133,6 +160,9 @@ export function PDFEditorClient({ documentId }: Props) {
     if (result.success) {
       setSaveMsg("Saved at " + new Date().toLocaleTimeString())
       setTimeout(() => setSaveMsg(null), 3000)
+      const notice = ignoredFieldsNoticeText((result.data as Record<string, unknown> | undefined)?.ignoredFieldIds)
+      setIgnoredNotice(notice)
+      if (notice) setTimeout(() => setIgnoredNotice(null), 6000)
       await createPdfVersion(documentId, `Auto-save v${(doc?.versions?.length || 0) + 1}`)
       loadDoc()
     }
@@ -157,14 +187,19 @@ export function PDFEditorClient({ documentId }: Props) {
   const isReadOnly = doc?.isReadOnly ?? false
   const isLockedByApproval = doc?.isLockedByApproval ?? false
   const readOnly = isReadOnly || isLockedByApproval
+  const readOnlyBanner = determineReadOnlyBanner(doc)
 
-  const requiredFields = fields.filter((f: any) => f.isRequired)
-  const completedFields = fields.filter(fieldHasValue)
-  const missingRequired = requiredFields.filter((f: any) => !fieldHasValue(f))
-  const signatureFields = fields.filter((f: any) => signatureType(f.fieldType))
+  // Step 4c.3c.1 — every count/percentage below is derived from
+  // server-authoritative isVisible/effectiveRequired only; a hidden field
+  // never reduces completion or appears as missing, and a conditionally
+  // required field is counted as required exactly like a static one.
+  const visibleFields = computeVisibleFields(fields)
+  const missingRequired = computeMissingRequired(visibleFields)
+  const warningFields = computeWarningFields(visibleFields)
+  const signatureFields = computeSignatureFields(visibleFields)
   const completedSignatures = signatureFields.filter(fieldHasValue)
-  const warningFields = fields.filter((f: any) => !f.isRequired && !fieldHasValue(f))
-  const completionPct = fields.length ? Math.round((completedFields.length / fields.length) * 100) : 0
+  const completedVisibleFields = visibleFields.filter(fieldHasValue)
+  const completionPct = computeCompletionPercent(visibleFields)
   const signatureRemaining = Math.max(signatureFields.length - completedSignatures.length, 0)
   const validationStatus = missingRequired.length > 0 ? "Needs Review" : warningFields.length > 0 ? "Warnings" : "Clear"
   const assignedStaff = packet.assignedTo?.name || "Unassigned"
@@ -205,11 +240,28 @@ export function PDFEditorClient({ documentId }: Props) {
         onInspectorTab={setInspectorTab}
       />
 
-      {isLockedByApproval && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-success-200 bg-success-50 px-5 py-2 text-sm text-success-800">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span className="font-medium">Document approved and locked</span>
-          <span className="text-success-700">- editing disabled</span>
+      {readOnlyBanner && (
+        <div
+          role={readOnlyBanner.role}
+          className={cn(
+            "flex shrink-0 items-center gap-2 border-b px-5 py-2 text-sm",
+            readOnlyBanner.kind === "configuration_error" && "border-danger-200 bg-danger-50 text-danger-800",
+            readOnlyBanner.kind === "inactive" && "border-warning-200 bg-warning-50 text-warning-800",
+            readOnlyBanner.kind === "approval_locked" && "border-success-200 bg-success-50 text-success-800",
+            readOnlyBanner.kind === "role_locked" && "border-surface-200 bg-surface-50 text-surface-700"
+          )}
+        >
+          {readOnlyBanner.kind === "configuration_error" && <AlertTriangle className="h-4 w-4 shrink-0" />}
+          {readOnlyBanner.kind === "approval_locked" && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+          {(readOnlyBanner.kind === "inactive" || readOnlyBanner.kind === "role_locked") && <EyeOff className="h-4 w-4 shrink-0" />}
+          <span className="font-medium">{readOnlyBanner.message}</span>
+        </div>
+      )}
+
+      {ignoredNotice && (
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-warning-200 bg-warning-50 px-5 py-2 text-sm text-warning-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{ignoredNotice}</span>
         </div>
       )}
 
@@ -234,7 +286,7 @@ export function PDFEditorClient({ documentId }: Props) {
             <ThumbnailRail
               totalPages={pageCount}
               currentPage={currentPage}
-              fields={fields}
+              fields={visibleFields}
               onPageChange={setCurrentPage}
             />
           </>
@@ -270,7 +322,7 @@ export function PDFEditorClient({ documentId }: Props) {
                 className="h-full"
               >
                 <FieldOverlays
-                  fields={fields}
+                  fields={visibleFields}
                   currentPage={currentPage}
                   scale={scale}
                   onFieldClick={(fieldId) => {
@@ -283,7 +335,7 @@ export function PDFEditorClient({ documentId }: Props) {
               <FloatingPageToolbar onInspectorTab={setInspectorTab} />
             </div>
           ) : (
-            <NoPdfWorkspace fields={fields} />
+            <NoPdfWorkspace fields={visibleFields} />
           )}
         </main>
 
@@ -291,7 +343,7 @@ export function PDFEditorClient({ documentId }: Props) {
           <RightInspector
             tab={inspectorTab}
             onTabChange={setInspectorTab}
-            fields={fields}
+            fields={visibleFields}
             selectedField={selectedField}
             onSelectField={setSelectedField}
             onFieldsChange={setFields}
@@ -304,6 +356,7 @@ export function PDFEditorClient({ documentId }: Props) {
             onCommentChange={setCommentText}
             onAddComment={handleAddComment}
             versions={doc.versions || []}
+            fieldListRef={fieldListRef}
           />
         )}
       </div>
@@ -314,8 +367,8 @@ export function PDFEditorClient({ documentId }: Props) {
         currentPage={currentPage}
         totalPages={pageCount}
         scale={scale}
-        completedFields={completedFields.length}
-        remainingFields={Math.max(fields.length - completedFields.length, 0)}
+        completedFields={completedVisibleFields.length}
+        remainingFields={Math.max(visibleFields.length - completedVisibleFields.length, 0)}
         missingRequired={missingRequired.length}
         completionPct={completionPct}
       />
@@ -731,9 +784,10 @@ function RightInspector({
   onCommentChange,
   onAddComment,
   versions,
+  fieldListRef,
 }: any) {
   const tabs: { value: InspectorTab; label: string; count?: number }[] = [
-    { value: "validation", label: "Validation", count: fields.filter((f: any) => f.isRequired && !fieldHasValue(f)).length },
+    { value: "validation", label: "Validation", count: computeMissingRequired(fields).length },
     { value: "ai", label: "AI" },
     { value: "comments", label: "Comments", count: comments.length },
     { value: "versions", label: "Versions", count: versions.length },
@@ -772,6 +826,7 @@ function RightInspector({
             isReadOnly={isReadOnly}
             documentId={documentId}
             onFieldAdded={onFieldAdded}
+            fieldListRef={fieldListRef}
           />
         )}
         {tab === "ai" && <AiInspectorPanel documentId={documentId} fields={fields} />}
@@ -799,12 +854,13 @@ function ValidationPanel({
   isReadOnly,
   documentId,
   onFieldAdded,
+  fieldListRef,
 }: any) {
-  const requiredFields = fields.filter((f: any) => f.isRequired)
-  const missingFields = requiredFields.filter((f: any) => !fieldHasValue(f))
-  const warningFields = fields.filter((f: any) => !f.isRequired && !fieldHasValue(f))
-  const completedFields = fields.filter(fieldHasValue)
-  const completionRate = fields.length ? Math.round((completedFields.length / fields.length) * 100) : 0
+  // `fields` here is already the parent's visibleFields — hidden fields
+  // never reach this panel at all in this step.
+  const missingFields = computeMissingRequired(fields)
+  const warningFields = computeWarningFields(fields)
+  const completionRate = computeCompletionPercent(fields)
 
   return (
     <div className="space-y-4">
@@ -863,6 +919,7 @@ function ValidationPanel({
         isReadOnly={isReadOnly}
         documentId={documentId}
         onFieldAdded={onFieldAdded}
+        fieldListRef={fieldListRef}
       />
     </div>
   )
@@ -910,6 +967,7 @@ function FieldPanel({
   isReadOnly,
   documentId,
   onFieldAdded,
+  fieldListRef,
 }: any) {
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState("")
@@ -935,7 +993,7 @@ function FieldPanel({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-semibold text-surface-900">Missing Fields</p>
-          <p className="text-xs text-surface-500">{fields.length} total field{fields.length === 1 ? "" : "s"}</p>
+          <p className="text-xs text-surface-500">{fields.length} visible field{fields.length === 1 ? "" : "s"}</p>
         </div>
         {!isReadOnly && (
           <Button variant="secondary" size="sm" onClick={() => setAdding(!adding)}>
@@ -967,7 +1025,7 @@ function FieldPanel({
         </div>
       )}
 
-      <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-surface-200 bg-white p-1">
+      <div ref={fieldListRef} tabIndex={-1} className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-surface-200 bg-white p-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
         {fields.map((field: any) => (
           <button
             key={field.id}
@@ -992,7 +1050,18 @@ function FieldPanel({
               <p className="truncate text-sm font-semibold text-surface-900">{selected.name}</p>
               <p className="text-xs capitalize text-surface-500">{selected.fieldType} - Page {selected.pageNumber}</p>
             </div>
-            {selected.isRequired && <Badge variant="warning" size="sm">Required</Badge>}
+            {(() => {
+              const markerKind = getRequiredMarkerKind(selected)
+              if (markerKind === "static") return <Badge variant="warning" size="sm" aria-label="Required">Required</Badge>
+              if (markerKind === "conditional") {
+                return (
+                  <Badge variant="outline" size="sm" className="border-warning-300 text-warning-700" aria-label="Conditionally required" title="Required based on packet conditions">
+                    Conditionally Required
+                  </Badge>
+                )
+              }
+              return null
+            })()}
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs text-surface-500">
             <span>Source: <strong className="capitalize text-surface-700">{selected.source}</strong></span>
@@ -1019,7 +1088,9 @@ function FieldPanel({
 }
 
 function AiInspectorPanel({ documentId, fields }: { documentId: string; fields: any[] }) {
-  const missing = fields.filter((f: any) => f.isRequired && !fieldHasValue(f))
+  // `fields` is already the parent's visibleFields — hidden fields never
+  // appear in AI suggestions either.
+  const missing = computeMissingRequired(fields)
   const completed = fields.filter(fieldHasValue)
   const confidence = fields.length ? Math.round((completed.length / fields.length) * 100) : 0
 
@@ -1198,12 +1269,7 @@ function StatusDot({ label, value, tone }: { label: string; value: string; tone:
 }
 
 function fieldHasValue(field: any) {
-  return typeof field.value === "string" ? field.value.trim().length > 0 : Boolean(field.value)
-}
-
-function signatureType(type: string | null | undefined) {
-  const value = (type || "").toLowerCase()
-  return value.includes("signature") || value.includes("initial")
+  return fieldHasMeaningfulValue(field.value)
 }
 
 function labelize(value: string | null | undefined) {

@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, Circle } from "lucide-react"
+import { getRequiredMarkerKind } from "@/app/documents/[id]/edit/editor-metrics"
 
 type FieldOverlay = {
   id: string
@@ -16,6 +17,9 @@ type FieldOverlay = {
   height: number | null
   isRequired: boolean
   confidence: number | null
+  // Step 4c.3c.1 — server-authoritative, condition-aware requiredness.
+  effectiveRequired: boolean
+  requirednessConditionPresent: boolean
 }
 
 interface FieldOverlayProps {
@@ -37,6 +41,7 @@ export function FieldOverlays({ fields, currentPage, scale, onFieldClick, select
       {pageFields.map((field) => {
         const hasValue = !!field.value && field.value.trim().length > 0
         const isSelected = field.id === selectedFieldId
+        const markerKind = getRequiredMarkerKind(field)
 
         // Default position spread if no coords stored
         const idx = pageFields.indexOf(field)
@@ -71,7 +76,15 @@ export function FieldOverlays({ fields, currentPage, scale, onFieldClick, select
               <Circle className="h-3.5 w-3.5 text-warning-400 shrink-0" />
             )}
             <span className="text-xs font-medium text-surface-800 truncate flex-1">{field.name}</span>
-            {field.isRequired && <span className="text-[10px] text-danger-500">*</span>}
+            {markerKind !== "none" && (
+              <span
+                className={cn("text-[10px] font-semibold", markerKind === "static" ? "text-danger-500" : "text-warning-600")}
+                aria-label={markerKind === "static" ? "Required" : "Conditionally required"}
+                title={markerKind === "conditional" ? "Required based on packet conditions" : undefined}
+              >
+                *
+              </span>
+            )}
           </button>
         )
       })}
