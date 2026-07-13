@@ -1,4 +1,4 @@
-import { getSignatureDetail, updateSignatureStatus } from "@/lib/actions/signatures"
+import { getSignatureDetail, updateSignatureStatus, type NonSigningStatus } from "@/lib/actions/signatures"
 import { getAuditSummary } from "@/lib/actions/audit"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
@@ -32,18 +32,21 @@ export async function SignatureDetailContent({ requestId }: Props) {
 
   const activity = await getAuditSummary("signature_request", requestId)
 
-  const statusActions: Record<string, { label: string; status: string; variant?: "primary" | "secondary" | "danger"; icon: React.ReactNode }[]> = {
+  // Step 5a.1 — "Complete Signature" is deliberately removed from here.
+  // updateSignatureStatus can no longer set "signed" at all (that's now
+  // executeStaffSignature's sole responsibility), and the real signing
+  // entry point (a link into /signatures/[id]/sign) is Step 5a.2's job, not
+  // this step's. Every other transition below is unchanged.
+  const statusActions: Record<string, { label: string; status: NonSigningStatus; variant?: "primary" | "secondary" | "danger"; icon: React.ReactNode }[]> = {
     pending: [
       { label: "Send Request", status: "sent", icon: <Send className="h-4 w-4" /> },
       { label: "Cancel", status: "cancelled", variant: "danger", icon: <XCircle className="h-4 w-4" /> },
     ],
     sent: [
       { label: "Mark Viewed", status: "viewed", icon: <Eye className="h-4 w-4" /> },
-      { label: "Complete Signature", status: "signed", variant: "primary", icon: <CheckCircle2 className="h-4 w-4" /> },
       { label: "Decline", status: "declined", variant: "danger", icon: <XCircle className="h-4 w-4" /> },
     ],
     viewed: [
-      { label: "Complete Signature", status: "signed", icon: <CheckCircle2 className="h-4 w-4" /> },
       { label: "Decline", status: "declined", variant: "danger", icon: <XCircle className="h-4 w-4" /> },
     ],
   }
