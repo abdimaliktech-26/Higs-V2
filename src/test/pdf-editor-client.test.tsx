@@ -20,6 +20,7 @@ const saveDocumentFieldsMock = vi.fn()
 const createPdfVersionMock = vi.fn()
 const addDocumentCommentMock = vi.fn()
 const addPdfFieldMock = vi.fn()
+const evaluateDocumentFieldConditionsMock = vi.fn()
 
 vi.mock("@/lib/actions/documents", () => ({
   getEditableDocument: (...a: unknown[]) => getEditableDocumentMock(...a),
@@ -27,6 +28,7 @@ vi.mock("@/lib/actions/documents", () => ({
   createPdfVersion: (...a: unknown[]) => createPdfVersionMock(...a),
   addDocumentComment: (...a: unknown[]) => addDocumentCommentMock(...a),
   addPdfField: (...a: unknown[]) => addPdfFieldMock(...a),
+  evaluateDocumentFieldConditions: (...a: unknown[]) => evaluateDocumentFieldConditionsMock(...a),
 }))
 
 // Real PDFRenderer pulls in pdfjs-dist and does canvas rendering — stub it
@@ -99,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   saveDocumentFieldsMock.mockResolvedValue({ success: true, data: { status: "in_progress", ignoredFieldIds: [] } })
   createPdfVersionMock.mockResolvedValue({ success: true, data: { version: 1 } })
+  evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: {} } })
 })
 
 describe("PDFEditorClient — visible-field filtering", () => {
@@ -323,5 +326,283 @@ describe("PDFEditorClient — legacy document compatibility", () => {
 
     clickField("Legacy Required")
     expect(await screen.findByLabelText("Required")).toBeTruthy()
+  })
+})
+
+// ── Step 4c.3c.2 — debounced, read-only, real-time condition evaluation ──
+//
+// Real timers throughout (no vi.useFakeTimers()) — deliberately, since
+// mixing fake timers with React state updates and testing-library's async
+// queries is a well-known source of flakiness. The debounce/slow-threshold
+// constants in pdf-editor-client.tsx are 350ms/500ms; waits below use a
+// comfortable margin above that. Stale-response ordering is made
+// deterministic via manually-controlled promises rather than real timing
+// races.
+function conditionAwareDoc(overrides: Record<string, unknown> = {}) {
+  return buildDoc({
+    isConditionAware: true, conditionMode: "snapshot",
+    fields: [
+      baseField({ id: "trigger", name: "Trigger", fieldType: "checkbox", templateFieldKey: "trigger", isVisible: true, value: null }),
+      baseField({ id: "dependent", name: "Dependent", fieldType: "text", templateFieldKey: "dependent", isVisible: true, value: "existing" }),
+    ],
+    ...overrides,
+  })
+}
+
+async function selectAndGetInput(name: string) {
+  clickField(name)
+  return screen.findByLabelText("Value")
+}
+
+describe("PDFEditorClient — 4c.3c.2: debounce triggering", () => {
+  it("schedules exactly one evaluation request after editing a field with a template identity", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    expect(evaluateDocumentFieldConditionsMock).not.toHaveBeenCalled()
+    await new Promise((r) => setTimeout(r, 450))
+    expect(evaluateDocumentFieldConditionsMock).toHaveBeenCalledTimes(1)
+    const [calledDocId, calledFields] = evaluateDocumentFieldConditionsMock.mock.calls[0]
+    expect(calledDocId).toBe(DOC_ID)
+    expect(calledFields).toContainEqual({ id: "trigger", value: "true" })
+  })
+
+  it("collapses multiple rapid edits into one effective request, using the latest value", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const depInput = await selectAndGetInput("Dependent")
+    fireEvent.change(depInput, { target: { value: "a" } })
+    await new Promise((r) => setTimeout(r, 100))
+    fireEvent.change(depInput, { target: { value: "ab" } })
+    await new Promise((r) => setTimeout(r, 100))
+    fireEvent.change(depInput, { target: { value: "abc" } })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(evaluateDocumentFieldConditionsMock).toHaveBeenCalledTimes(1)
+    const [, calledFields] = evaluateDocumentFieldConditionsMock.mock.calls[0]
+    expect(calledFields).toContainEqual({ id: "dependent", value: "abc" })
+  })
+
+  it("never triggers an evaluation request for a legacy document", async () => {
+    getEditableDocumentMock.mockResolvedValue(buildDoc({
+      isConditionAware: false,
+      fields: [baseField({ id: "f1", name: "Legacy Field", templateFieldKey: "whatever", isVisible: true })],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Legacy Field")
+    const input = await selectAndGetInput("Legacy Field")
+    fireEvent.change(input, { target: { value: "x" } })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(evaluateDocumentFieldConditionsMock).not.toHaveBeenCalled()
+  })
+
+  it("never triggers an evaluation request for a manual field with no template identity", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({
+      fields: [baseField({ id: "m1", name: "Manual Field", templateFieldKey: null, isVisible: true })],
+    }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Manual Field")
+    const input = await selectAndGetInput("Manual Field")
+    fireEvent.change(input, { target: { value: "x" } })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(evaluateDocumentFieldConditionsMock).not.toHaveBeenCalled()
+  })
+
+  it("has no editable input at all for a read-only document, so no request can ever be triggered", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({ isReadOnly: true, readOnlyReason: "Your role has view-only access to this document." }))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    clickField("Trigger")
+    // Read-only fields render a static value display, never an <Input>.
+    expect(screen.queryByLabelText("Value")).toBeNull()
+    await new Promise((r) => setTimeout(r, 450))
+    expect(evaluateDocumentFieldConditionsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.2: real-time visibility and requiredness", () => {
+  it("hides a dependent field immediately after a controller edit, without saving or reloading", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0)
+    const input = await selectAndGetInput("Trigger")
+    // fireEvent.change to the SAME value the controlled input already holds
+    // ("" here, since trigger's initial value is null) never fires React's
+    // onChange at all (its value-tracker suppresses it) — use a value that
+    // actually differs from the current one to represent "unchecking".
+    fireEvent.change(input, { target: { value: "false" } })
+    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    expect(saveDocumentFieldsMock).not.toHaveBeenCalled()
+    expect(getEditableDocumentMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("reveals a previously-hidden field again, preserving its prior local value", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({
+      fields: [
+        baseField({ id: "trigger", name: "Trigger", fieldType: "checkbox", templateFieldKey: "trigger", isVisible: true, value: null }),
+        baseField({ id: "dependent", name: "Dependent", fieldType: "text", templateFieldKey: "dependent", isVisible: false, value: "kept value" }),
+      ],
+    }))
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: true, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    expect(screen.queryAllByText("Dependent")).toHaveLength(0)
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    await waitFor(() => expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0), { timeout: 2000 })
+    const depInput = await selectAndGetInput("Dependent")
+    expect((depInput as HTMLInputElement).value).toBe("kept value")
+  })
+
+  it("updates the required marker immediately when evaluation reports a conditionally-required transition", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc({
+      fields: [
+        baseField({ id: "trigger", name: "Trigger", fieldType: "checkbox", templateFieldKey: "trigger", isVisible: true, value: null }),
+        baseField({ id: "reqd", name: "Reqd Field", fieldType: "text", templateFieldKey: "reqd_field", isVisible: true, value: null, effectiveRequired: false, requirednessConditionPresent: true }),
+      ],
+    }))
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { reqd: { isVisible: true, effectiveRequired: true, conditionallyRequired: true } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    await new Promise((r) => setTimeout(r, 500))
+    const reqdInput = await selectAndGetInput("Reqd Field")
+    expect(reqdInput).toBeTruthy()
+    expect(await screen.findByLabelText("Conditionally required")).toBeTruthy()
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.2: stale-response protection", () => {
+  it("a slower earlier response can never overwrite a later response", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    let resolveFirst: (v: unknown) => void = () => {}
+    let resolveSecond: (v: unknown) => void = () => {}
+    const firstPromise = new Promise((r) => { resolveFirst = r })
+    const secondPromise = new Promise((r) => { resolveSecond = r })
+    evaluateDocumentFieldConditionsMock.mockImplementationOnce(() => firstPromise).mockImplementationOnce(() => secondPromise)
+
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+
+    fireEvent.change(input, { target: { value: "true" } })
+    await new Promise((r) => setTimeout(r, 420)) // first debounce fires; first request now in flight
+    expect(evaluateDocumentFieldConditionsMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(input, { target: { value: "false" } })
+    await new Promise((r) => setTimeout(r, 420)) // second debounce fires; second request now also in flight
+    expect(evaluateDocumentFieldConditionsMock).toHaveBeenCalledTimes(2)
+
+    // Resolve out of order: the newer (second) request resolves first with
+    // "visible", then the stale (first) request resolves with "hidden".
+    resolveSecond({ success: true, data: { fields: { dependent: { isVisible: true, effectiveRequired: false, conditionallyRequired: false } } } })
+    await new Promise((r) => setTimeout(r, 50))
+    resolveFirst({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    await new Promise((r) => setTimeout(r, 50))
+
+    // The latest (second) request's result must win — dependent stays visible.
+    expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0)
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.2: selection, focus, and accessibility", () => {
+  it("clears the selection and shows a non-blocking notice when the evaluation reports the selected field as hidden", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { trigger: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "x" } })
+    await waitFor(() => expect(screen.getByText("This field is no longer applicable.")).toBeTruthy(), { timeout: 2000 })
+  })
+
+  it("announces a visible-to-hidden transition in the polite live region, using the field's display name only", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "false" } })
+    await waitFor(() => {
+      const region = document.querySelector('[aria-live="polite"]')
+      expect(region?.textContent).toBe("Dependent is no longer applicable.")
+    }, { timeout: 2000 })
+  })
+
+  it("does not announce anything on initial load, before any edit", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const region = document.querySelector('[aria-live="polite"]')
+    expect(region?.textContent).toBe("")
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.2: evaluation failure handling", () => {
+  it("keeps the last known state and shows a fallback warning when evaluation fails, without crashing", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: false, error: "boom" })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    await waitFor(() => expect(screen.getByText(/Live condition updates are temporarily unavailable/)).toBeTruthy(), { timeout: 2000 })
+    // Dependent's state is unchanged (still visible, per the base DTO) —
+    // the failed evaluation never guessed hidden/optional.
+    expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0)
+  })
+
+  it("keeps the editor and Save usable after an evaluation failure", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockRejectedValue(new Error("network error"))
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "true" } })
+    await waitFor(() => expect(screen.getByText(/Live condition updates are temporarily unavailable/)).toBeTruthy(), { timeout: 2000 })
+    const saveButton = screen.getByRole("button", { name: /^Save$/ })
+    expect(saveButton).not.toBeDisabled()
+    fireEvent.click(saveButton)
+    await waitFor(() => expect(saveDocumentFieldsMock).toHaveBeenCalled())
+  })
+})
+
+describe("PDFEditorClient — 4c.3c.2: save/reload interaction", () => {
+  it("never includes client-computed condition results in the save payload", async () => {
+    getEditableDocumentMock.mockResolvedValue(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "false" } })
+    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
+    await waitFor(() => expect(saveDocumentFieldsMock).toHaveBeenCalled())
+    const submittedFields = saveDocumentFieldsMock.mock.calls[0][1] as any[]
+    for (const f of submittedFields) {
+      expect(Object.keys(f).sort()).toEqual(["fieldType", "id", "isRequired", "name", "pageNumber", "posX", "posY", "value"].sort())
+    }
+  })
+
+  it("replaces optimistic state with fresh server data after a save/reload", async () => {
+    getEditableDocumentMock
+      .mockResolvedValueOnce(conditionAwareDoc())
+      .mockResolvedValueOnce(conditionAwareDoc())
+    evaluateDocumentFieldConditionsMock.mockResolvedValue({ success: true, data: { fields: { dependent: { isVisible: false, effectiveRequired: false, conditionallyRequired: false } } } })
+    render(<PDFEditorClient documentId={DOC_ID} />)
+    await waitForField("Trigger")
+    const input = await selectAndGetInput("Trigger")
+    fireEvent.change(input, { target: { value: "false" } })
+    await waitFor(() => expect(screen.queryAllByText("Dependent")).toHaveLength(0), { timeout: 2000 })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
+    await waitFor(() => expect(getEditableDocumentMock).toHaveBeenCalledTimes(2))
+    // The second load's server DTO says dependent is visible again — the
+    // stale optimistic "hidden" overlay must not survive the reload.
+    await waitFor(() => expect(screen.getAllByText("Dependent").length).toBeGreaterThan(0), { timeout: 2000 })
   })
 })

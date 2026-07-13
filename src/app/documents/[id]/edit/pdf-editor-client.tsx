@@ -6,6 +6,7 @@ import {
   addDocumentComment,
   addPdfField,
   createPdfVersion,
+  evaluateDocumentFieldConditions,
   getEditableDocument,
   saveDocumentFields,
 } from "@/lib/actions/documents"
@@ -21,6 +22,7 @@ import {
   determineReadOnlyBanner,
   ignoredFieldsNoticeText,
 } from "./editor-metrics"
+import { mergeFieldsWithOverlay, diffOverlayForAnnouncements, type ConditionOverlay } from "./condition-overlay"
 import { AiCopilotPanel } from "@/components/ai/copilot-panel"
 import { FieldOverlays } from "@/components/pdf/field-overlays"
 import { PDFRenderer } from "@/components/pdf/pdf-renderer"
@@ -82,6 +84,15 @@ const DOCUMENT_TABS = [
   "Risk Assessment",
 ]
 
+// Step 4c.3c.2 — debounce/slow-response thresholds for the live condition
+// evaluator. Correctness over micro-tuning: the whole document is
+// re-evaluated on each triggering edit rather than maintaining a
+// reverse-dependency index.
+const EVALUATION_DEBOUNCE_MS = 350
+const EVALUATION_SLOW_THRESHOLD_MS = 500
+const EVALUATION_FAILURE_NOTICE = "Live condition updates are temporarily unavailable. Your changes will be checked when you save."
+const SELECTION_CLEARED_NOTICE = "This field is no longer applicable."
+
 const PACKET_SECTIONS = [
   { name: "INTAKE", rows: ["Admission Form", "Rights", "Risk Assessment"] },
   { name: "CARE PLAN", rows: ["Support Plan", "ISP", "Emergency Plan"] },
@@ -104,6 +115,24 @@ export function PDFEditorClient({ documentId }: Props) {
   const [fields, setFields] = useState<any[]>([])
   const [selectedField, setSelectedField] = useState<string | null>(null)
   const fieldListRef = useRef<HTMLDivElement | null>(null)
+
+  // Step 4c.3c.2 — optimistic condition overlay: display-only, never sent
+  // to saveDocumentFields. Refs mirror the corresponding state so the
+  // debounced evaluation callback (which fires after the render that
+  // scheduled it) always reads the freshest values rather than a stale
+  // closure.
+  const [conditionOverlay, setConditionOverlay] = useState<ConditionOverlay>({})
+  const [evaluationSlow, setEvaluationSlow] = useState(false)
+  const [evaluationFailedNotice, setEvaluationFailedNotice] = useState<string | null>(null)
+  const [selectionClearedNotice, setSelectionClearedNotice] = useState<string | null>(null)
+  const [liveAnnouncement, setLiveAnnouncement] = useState("")
+  const fieldsRef = useRef<any[]>([])
+  const overlayRef = useRef<ConditionOverlay>({})
+  const selectedFieldRef = useRef<string | null>(null)
+  const evalSeqRef = useRef(0)
+  const unmountedRef = useRef(false)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("validation")
   const [commentText, setCommentText] = useState("")
   const [totalPages, setTotalPages] = useState(0)
@@ -120,6 +149,17 @@ export function PDFEditorClient({ documentId }: Props) {
       const data = await getEditableDocument(documentId)
       setDoc(data)
       setFields(data.fields || [])
+      // Step 4c.3c.2 — a reload's server data is authoritative for every
+      // field; any optimistic overlay computed before this reload is now
+      // stale and must not survive it. Bumping the sequence number also
+      // guarantees any evaluation request still in flight from before the
+      // reload is discarded as stale when it eventually resolves.
+      setConditionOverlay({})
+      setEvaluationSlow(false)
+      setEvaluationFailedNotice(null)
+      evalSeqRef.current++
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
     } catch (e: any) {
       if (e.message?.includes("denied") || e.message?.includes("permission")) setAccessDenied(true)
       else setError(e.message)
@@ -135,15 +175,99 @@ export function PDFEditorClient({ documentId }: Props) {
   // Step 4c.3c.1 — defensive: if the currently-selected field is no longer
   // visible after a server reload (e.g. a sibling save changed a condition),
   // clear the stale selection rather than leaving the inspector pointed at
-  // a field that's no longer rendered. Real-time, typing-driven hiding is
-  // deferred to Step 4c.3c.2 — this only reacts to a fresh `fields` array
-  // from loadDoc.
+  // a field that's no longer rendered. Step 4c.3c.2: this must consult the
+  // optimistic overlay, not just the raw DTO's isVisible — a field that
+  // just became visible via live evaluation (and hasn't been confirmed by
+  // a reload yet) would otherwise be immediately deselected right after
+  // being selected, since its base DTO isVisible is still stale.
   useEffect(() => {
-    if (selectedField && !fields.some((f: any) => f.id === selectedField && f.isVisible)) {
+    if (!selectedField) return
+    const field = fields.find((f: any) => f.id === selectedField)
+    const isVisible = field ? (conditionOverlay[selectedField]?.isVisible ?? field.isVisible) : false
+    if (!isVisible) {
       setSelectedField(null)
       fieldListRef.current?.focus()
     }
-  }, [fields, selectedField])
+  }, [fields, selectedField, conditionOverlay])
+
+  useEffect(() => { fieldsRef.current = fields }, [fields])
+  useEffect(() => { overlayRef.current = conditionOverlay }, [conditionOverlay])
+  useEffect(() => { selectedFieldRef.current = selectedField }, [selectedField])
+
+  // Step 4c.3c.2 — the debounce/slow-threshold timers are plain JS timers,
+  // not React effects, so nothing cancels them automatically on unmount;
+  // clear them, and mark unmounted so a fireEvaluation already in flight at
+  // unmount time discards its result instead of updating state that no
+  // longer has a mounted component behind it.
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
+    }
+  }, [])
+
+  // Step 4c.3c.2 — applies one evaluation response: merges it into the
+  // overlay, announces what changed (screen-reader-only, deduplicated,
+  // only for fields whose state actually moved), and clears the current
+  // selection with a brief visible notice if the selected field just
+  // became hidden. Pure diffing lives in condition-overlay.ts so this stays
+  // a thin React wiring layer.
+  const applyEvaluationResult = useCallback((nextOverlay: ConditionOverlay) => {
+    const { messages, newlyHiddenFieldIds } = diffOverlayForAnnouncements(fieldsRef.current, overlayRef.current, nextOverlay)
+    setConditionOverlay(nextOverlay)
+    if (messages.length > 0) setLiveAnnouncement(messages.join(" "))
+    if (selectedFieldRef.current && newlyHiddenFieldIds.includes(selectedFieldRef.current)) {
+      setSelectedField(null)
+      setSelectionClearedNotice(SELECTION_CLEARED_NOTICE)
+      setTimeout(() => setSelectionClearedNotice(null), 4000)
+      fieldListRef.current?.focus()
+    }
+  }, [])
+
+  const fireEvaluation = useCallback(async () => {
+    const seq = ++evalSeqRef.current
+    const prospectiveFields = fieldsRef.current.map((f: any) => ({ id: f.id, value: f.value }))
+    slowTimerRef.current = setTimeout(() => {
+      if (evalSeqRef.current === seq) setEvaluationSlow(true)
+    }, EVALUATION_SLOW_THRESHOLD_MS)
+
+    try {
+      const result = await evaluateDocumentFieldConditions(documentId, prospectiveFields)
+      // Discard silently if a newer edit superseded this request, or the
+      // component unmounted while the request was in flight.
+      if (unmountedRef.current || evalSeqRef.current !== seq) return
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
+      setEvaluationSlow(false)
+      if (result.success) {
+        setEvaluationFailedNotice(null)
+        applyEvaluationResult(((result.data as Record<string, unknown>)?.fields as ConditionOverlay) || {})
+      } else {
+        // Retain the last known overlay/server state — never guess, never
+        // clear, never treat fields as optional just because the network
+        // call failed.
+        setEvaluationFailedNotice(EVALUATION_FAILURE_NOTICE)
+      }
+    } catch {
+      if (unmountedRef.current || evalSeqRef.current !== seq) return
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
+      setEvaluationSlow(false)
+      setEvaluationFailedNotice(EVALUATION_FAILURE_NOTICE)
+    }
+  }, [documentId, applyEvaluationResult])
+
+  // Only a genuine value edit on a field with a persisted template identity
+  // can possibly influence any condition — page changes, zoom, selection,
+  // comments, and manual (template-identity-less) fields never schedule a
+  // request at all.
+  function handleFieldValueChange(fieldId: string, value: string) {
+    setFields((prev: any[]) => prev.map((f: any) => (f.id === fieldId ? { ...f, value } : f)))
+    if (!doc?.isConditionAware || doc?.isReadOnly || doc?.isLockedByApproval) return
+    const editedField = fieldsRef.current.find((f: any) => f.id === fieldId)
+    if (!editedField?.templateFieldKey) return
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+    debounceTimerRef.current = setTimeout(fireEvaluation, EVALUATION_DEBOUNCE_MS)
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -189,11 +313,18 @@ export function PDFEditorClient({ documentId }: Props) {
   const readOnly = isReadOnly || isLockedByApproval
   const readOnlyBanner = determineReadOnlyBanner(doc)
 
-  // Step 4c.3c.1 — every count/percentage below is derived from
-  // server-authoritative isVisible/effectiveRequired only; a hidden field
-  // never reduces completion or appears as missing, and a conditionally
-  // required field is counted as required exactly like a static one.
-  const visibleFields = computeVisibleFields(fields)
+  // Step 4c.3c.2 — the optimistic overlay only ever overrides isVisible/
+  // effectiveRequired/conditionallyRequired, and only for fields the latest
+  // evaluation actually reported on; everything else (including the raw
+  // `fields` state used for the save payload) is untouched by it.
+  const effectiveFields = mergeFieldsWithOverlay(fields, conditionOverlay)
+
+  // Step 4c.3c.1/4c.3c.2 — every count/percentage below is derived from the
+  // merged (server + optimistic) isVisible/effectiveRequired only; a hidden
+  // field never reduces completion or appears as missing, and a
+  // conditionally required field is counted as required exactly like a
+  // static one.
+  const visibleFields = computeVisibleFields(effectiveFields)
   const missingRequired = computeMissingRequired(visibleFields)
   const warningFields = computeWarningFields(visibleFields)
   const signatureFields = computeSignatureFields(visibleFields)
@@ -228,6 +359,7 @@ export function PDFEditorClient({ documentId }: Props) {
         lastSaved={lastSaved}
         saveMsg={saveMsg}
         saving={saving}
+        evaluationSlow={evaluationSlow}
         readOnly={readOnly}
         isReadOnly={isReadOnly}
         isLockedByApproval={isLockedByApproval}
@@ -262,6 +394,27 @@ export function PDFEditorClient({ documentId }: Props) {
         <div role="status" className="flex shrink-0 items-center gap-2 border-b border-warning-200 bg-warning-50 px-5 py-2 text-sm text-warning-800">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{ignoredNotice}</span>
+        </div>
+      )}
+
+      {/* Step 4c.3c.2 — screen-reader-only announcement of visibility/
+          requiredness changes caused by the current user's own edit.
+          Visually hidden; the visible feedback is the field list/overlay
+          re-rendering itself, plus the two notices below for the cases
+          that need an explicit, sighted-and-unsighted message. */}
+      <div aria-live="polite" role="status" className="sr-only">{liveAnnouncement}</div>
+
+      {selectionClearedNotice && (
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-surface-200 bg-surface-50 px-5 py-2 text-sm text-surface-700">
+          <EyeOff className="h-4 w-4 shrink-0" />
+          <span>{selectionClearedNotice}</span>
+        </div>
+      )}
+
+      {evaluationFailedNotice && (
+        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-warning-200 bg-warning-50 px-5 py-2 text-sm text-warning-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{evaluationFailedNotice}</span>
         </div>
       )}
 
@@ -346,7 +499,7 @@ export function PDFEditorClient({ documentId }: Props) {
             fields={visibleFields}
             selectedField={selectedField}
             onSelectField={setSelectedField}
-            onFieldsChange={setFields}
+            onFieldValueChange={handleFieldValueChange}
             onJumpToField={jumpToField}
             isReadOnly={readOnly}
             documentId={documentId}
@@ -390,6 +543,7 @@ function PacketDocumentHeader({
   lastSaved,
   saveMsg,
   saving,
+  evaluationSlow,
   readOnly,
   isReadOnly,
   isLockedByApproval,
@@ -457,6 +611,9 @@ function PacketDocumentHeader({
               <Save className="h-4 w-4" />
               {saving ? "Saving..." : "Save"}
             </Button>
+            {evaluationSlow && (
+              <span role="status" className="text-xs text-surface-500">Checking conditions…</span>
+            )}
             <Button variant="secondary" size="sm" onClick={() => onInspectorTab("validation")}>
               <CheckCircle2 className="h-4 w-4" />
               Validate
@@ -774,7 +931,7 @@ function RightInspector({
   fields,
   selectedField,
   onSelectField,
-  onFieldsChange,
+  onFieldValueChange,
   onJumpToField,
   isReadOnly,
   documentId,
@@ -821,7 +978,7 @@ function RightInspector({
             fields={fields}
             selectedField={selectedField}
             onSelectField={onSelectField}
-            onFieldsChange={onFieldsChange}
+            onFieldValueChange={onFieldValueChange}
             onJumpToField={onJumpToField}
             isReadOnly={isReadOnly}
             documentId={documentId}
@@ -849,7 +1006,7 @@ function ValidationPanel({
   fields,
   selectedField,
   onSelectField,
-  onFieldsChange,
+  onFieldValueChange,
   onJumpToField,
   isReadOnly,
   documentId,
@@ -915,7 +1072,7 @@ function ValidationPanel({
         fields={fields}
         selectedField={selectedField}
         onSelectField={onSelectField}
-        onFieldsChange={onFieldsChange}
+        onFieldValueChange={onFieldValueChange}
         isReadOnly={isReadOnly}
         documentId={documentId}
         onFieldAdded={onFieldAdded}
@@ -963,7 +1120,7 @@ function FieldPanel({
   fields,
   selectedField,
   onSelectField,
-  onFieldsChange,
+  onFieldValueChange,
   isReadOnly,
   documentId,
   onFieldAdded,
@@ -985,7 +1142,7 @@ function FieldPanel({
   }
 
   function handleFieldValue(fieldId: string, value: string) {
-    onFieldsChange((prev: any[]) => prev.map((f: any) => f.id === fieldId ? { ...f, value } : f))
+    onFieldValueChange(fieldId, value)
   }
 
   return (

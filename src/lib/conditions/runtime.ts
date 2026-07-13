@@ -336,11 +336,18 @@ function assemblePacketConditionRuntime(
   }
 }
 
-export async function buildPacketConditionContext(packetId: string): Promise<PacketConditionRuntime> {
+// Step 4c.3c.2: optional overlay lets an authenticated, already-authorized
+// read-only caller (evaluateDocumentFieldConditions) evaluate a prospective,
+// not-yet-persisted field-value batch for exactly one PacketDocument without
+// writing anything — the same overlay mechanism buildPacketConditionContextTx
+// already uses for the transactional save path, just over the global prisma
+// client for a plain read. Omitting it preserves every existing caller's
+// behavior exactly (evaluates purely persisted state, as before this step).
+export async function buildPacketConditionContext(packetId: string, overlay?: PacketConditionContextOverlay): Promise<PacketConditionRuntime> {
   await requireAuthorizedPacket(packetId)
   const packet = await prisma.packet.findUnique({ where: { id: packetId }, include: PACKET_CONTEXT_INCLUDE })
   if (!packet) throw new Error("Packet not found")
-  return assemblePacketConditionRuntime(packet, packetId)
+  return assemblePacketConditionRuntime(packet, packetId, overlay)
 }
 
 /**

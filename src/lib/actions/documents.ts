@@ -365,6 +365,92 @@ export async function saveDocumentFields(
   }
 }
 
+// ── Step 4c.3c.2: debounced, read-only condition evaluation for the editor's
+// real-time hide/show and conditional-requiredness feedback. Deliberately
+// NOT a variant of saveDocumentFields — no field ownership write path, no
+// status recalculation, no reconciliation, no audit event, no database
+// mutation of any kind. Reuses the exact same trusted building blocks the
+// save path already uses (normalizeFieldValue, buildPacketConditionContext
+// with an overlay, buildEditorDocumentConditionState) so evaluation semantics
+// can never drift between "what the client sees while typing" and "what the
+// server actually enforces on save." The response is deliberately narrow —
+// only isVisible/effectiveRequired/conditionallyRequired per field id, never
+// the condition trees, field keys, operators, comparison values, or any
+// snapshot/runtime detail those booleans were derived from.
+export async function evaluateDocumentFieldConditions(
+  documentId: string,
+  fields: { id: string; value?: string | null }[]
+): Promise<ActionResult> {
+  try {
+    const session = await auth()
+    if (!session?.user) return { success: false, error: "Unauthorized" }
+    const user = session.user as Record<string, unknown>
+
+    const doc = await prisma.packetDocument.findUnique({
+      where: { id: documentId },
+      include: { packet: true },
+    })
+    if (!doc) return { success: false, error: "Document not found" }
+    await requireOrgAccess(doc.packet.organizationId)
+    const role = getActiveRole(user as any)
+    const isSuperAdmin = user.isSuperAdmin as boolean
+    const hasAccess = isSuperAdmin || EDIT_ROLES.includes(role) || READ_ROLES.includes(role)
+    if (!hasAccess) return { success: false, error: "Access denied: insufficient permissions" }
+
+    // Same read-only gate as saveDocumentFields — a document the editor
+    // wouldn't let anyone type into shouldn't be evaluated either.
+    if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") {
+      return { success: false, error: "This document is currently not applicable based on packet conditions and cannot be edited." }
+    }
+    if (doc.packet.status === "approved" || doc.packet.status === "archived") {
+      return { success: false, error: "This document is approved and locked for editing." }
+    }
+
+    const isConditionAware = Boolean(doc.packet.conditionSnapshotId && doc.packet.conditionRuntimeVersion)
+    if (!isConditionAware) {
+      // Legacy documents have nothing to evaluate — every field is already
+      // visible with its static requiredness, unchanged. The client is not
+      // expected to call this for a legacy document at all, but a defensive
+      // call still returns a safe, empty, correct result rather than an error.
+      return { success: true, data: { fields: {} } }
+    }
+
+    // Field ownership — every submitted id must belong to THIS document.
+    // Fetched with the exact fields buildEditorDocumentConditionState needs,
+    // so this single query also serves as the evaluation input.
+    const existingFields = await prisma.pdfField.findMany({
+      where: { packetDocumentId: documentId },
+      select: { id: true, templateFieldKey: true, isRequired: true },
+    })
+    const existingFieldIds = new Set(existingFields.map((f) => f.id))
+    for (const f of fields) {
+      if (!existingFieldIds.has(f.id)) return { success: false, error: "One or more fields do not belong to this document" }
+    }
+
+    const overlayValues: Record<string, string | null> = {}
+    for (const f of fields) overlayValues[f.id] = normalizeFieldValue(f.value)
+
+    const runtime = await buildPacketConditionContext(doc.packetId, { packetDocumentId: documentId, fieldValues: overlayValues })
+    if (runtime.integrityErrors.length > 0) return { success: false, error: CONFIGURATION_ERROR_MESSAGE }
+
+    const conditionState = buildEditorDocumentConditionState(
+      runtime,
+      { id: documentId, applicabilityStatus: doc.applicabilityStatus, packetTemplateDocumentId: doc.packetTemplateDocumentId },
+      existingFields.map((f) => ({ id: f.id, templateFieldKey: f.templateFieldKey, isRequired: f.isRequired }))
+    )
+    if (conditionState.hasConditionIntegrityError) return { success: false, error: CONFIGURATION_ERROR_MESSAGE }
+
+    const result: Record<string, { isVisible: boolean; effectiveRequired: boolean; conditionallyRequired: boolean }> = {}
+    for (const [fieldId, view] of Object.entries(conditionState.fieldsById)) {
+      result[fieldId] = { isVisible: view.isVisible, effectiveRequired: view.effectiveRequired, conditionallyRequired: view.conditionallyRequired }
+    }
+
+    return { success: true, data: { fields: result } }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
+  }
+}
+
 export async function addPdfField(data: {
   packetDocumentId: string; name: string; fieldType: string; pageNumber: number
 }): Promise<ActionResult> {
