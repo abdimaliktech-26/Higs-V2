@@ -264,4 +264,12 @@ Platform-wide Super Admin data reads no longer trust `session.user.isSuperAdmin`
 
 Migration `20260714210000_add_staff_session_version` was applied successfully to the real local Postgres database and migration status is current. Ten new tests cover token refresh, deleted identities, version mismatch, sign-in version adoption, no-active-membership revocation, stale organization selection, version increments, explicit audited revocation, explicit platform-read reasons, and live Super Admin demotion. Focused authorization/session tests passed 63/63; the full suite passed 1,280/1,280 tests across 65 files.
 
+## PR-4 — Security Configuration and Compliance-Claim Integrity
+
+Production security configuration now fails closed when either `AUTH_SECRET` or `FILE_SIGNING_KEY` is missing, shorter than 32 characters, or still contains a documented placeholder marker. Development and tests may retain the existing ephemeral file-signing fallback, but a production process can no longer silently start with a random signing key that invalidates URLs across restarts or instances. Four focused tests cover non-production behavior, missing values, short/placeholders, and valid independent secrets.
+
+Unsupported HIPAA-readiness claims were removed from the public staff login, portal login/invitation/activation/shell, client profile, organization settings, security-center, and existing billing presentation. Copy now describes secure access, protected information, or configured compliance controls without claiming that the accepted PHI no-go baseline has been superseded. This is truth-in-posture hardening only: no billing, MFA, SSO, storage, or compliance-certification feature was started.
+
+PR-4 does **not** make local filesystem storage, in-memory rate limits, database/file backups, malware scanning, MFA, legal consent text, deployment/vendor BAAs, incident response, or disaster recovery production-ready. Those remain explicit controlled-PHI blockers or external operational controls.
+
 Before a controlled PHI pilot, the remaining Production Readiness Audit findings and deferred Super Admin governance controls must be closed and re-verified.

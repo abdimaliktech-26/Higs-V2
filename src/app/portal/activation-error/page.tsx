@@ -32,7 +32,7 @@ export default async function PortalActivationErrorPage({ searchParams }: { sear
           </Card>
           <div className="mt-8 flex items-center gap-2 text-xs text-navy-400">
             <Lock className="h-3 w-3" />
-            HIPAA-compliant & secure access
+            Secure portal access
           </div>
         </div>
       </div>

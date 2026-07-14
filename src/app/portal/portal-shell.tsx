@@ -124,7 +124,7 @@ export function PortalShell({ clients, currentClientId, children }: Props) {
           </button>
           <div className="mt-3 flex items-center gap-1.5 px-3 text-xs text-surface-400">
             <Lock className="h-3 w-3" />
-            HIPAA-compliant & secure
+            Secure portal access
           </div>
         </div>
       </aside>

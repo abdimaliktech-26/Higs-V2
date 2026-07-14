@@ -4,8 +4,10 @@ import crypto from "crypto"
 import { pipeline } from "stream/promises"
 import { createReadStream, createWriteStream } from "fs"
 import { Readable } from "stream"
+import { assertProductionSecurityEnvironment } from "./security-environment"
 
 const STORAGE_ROOT = path.join(process.cwd(), "private", "data")
+assertProductionSecurityEnvironment()
 const SIGNING_KEY = process.env.FILE_SIGNING_KEY || crypto.randomBytes(32).toString("hex")
 const SIGNED_URL_TTL_MS = 5 * 60 * 1000 // 5 minutes
 

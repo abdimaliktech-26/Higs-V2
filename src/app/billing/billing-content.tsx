@@ -270,7 +270,7 @@ function CurrentSubscription({ subscription, members }: { subscription: ReturnTy
         <div className="mt-4 rounded-xl border border-surface-200 bg-[#fbfdff] p-4">
           <p className="mb-3 text-xs font-bold text-navy-900">Included Features</p>
           <div className="grid grid-cols-1 gap-2 text-xs font-semibold text-navy-800 sm:grid-cols-2">
-            {["HIPAA Compliance", "Single Sign-On (SSO)", "AI Document Intelligence", "Advanced Workflows", "Custom Reports", "API Access", "Audit Center", "Priority Support"].map((feature) => (
+            {["Compliance controls", "Single Sign-On (SSO)", "AI Document Intelligence", "Advanced Workflows", "Custom Reports", "API Access", "Audit Center", "Priority Support"].map((feature) => (
               <span key={feature} className="flex items-center gap-2">
                 <Check className="h-3.5 w-3.5 text-success-600" />
                 {feature}
@@ -302,7 +302,7 @@ function PlanComparison({ currentPlan }: { currentPlan: string }) {
       price: "$1,499",
       cadence: "/mo",
       caption: "Billed annually",
-      features: ["Unlimited users", "Unlimited clients", "Advanced AI", "HIPAA compliant", "SSO & MFA", "Custom branding", "API access", "Priority support"],
+      features: ["Unlimited users", "Unlimited clients", "Advanced AI", "Compliance controls", "SSO & MFA", "Custom branding", "API access", "Priority support"],
       current: normalizePlan(currentPlan) === "enterprise" || !["professional", "enterprise_plus"].includes(normalizePlan(currentPlan)),
     },
     {
@@ -747,7 +747,7 @@ function BottomDashboard({
         <h2 className="text-sm font-bold text-navy-950">Security &amp; Compliance</h2>
         <div className="mt-4 space-y-3">
           <ComplianceRow label="PCI Compliant" value="Coming Soon" />
-          <ComplianceRow label="HIPAA Secure Billing" value={hipaaVerified ? "Verified" : "Not configured"} verified={hipaaVerified} />
+          <ComplianceRow label="Compliance configuration" value={hipaaVerified ? "Enabled" : "Not configured"} verified={hipaaVerified} />
           <ComplianceRow label="Encrypted Payment Processing" value="AES-256" presentation />
           <ComplianceRow label="Tax Compliance" value="Up to date" presentation />
           <ComplianceRow label="Invoice Retention Policy" value={`${auditReadinessScore ?? 0}% readiness`} />

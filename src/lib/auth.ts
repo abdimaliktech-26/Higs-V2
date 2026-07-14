@@ -5,6 +5,9 @@ import bcrypt from "bcryptjs"
 import { prisma } from "./db"
 import { limiters, getClientIp } from "./rate-limit"
 import { refreshStaffSessionToken } from "./staff-session"
+import { assertProductionSecurityEnvironment } from "./security-environment"
+
+assertProductionSecurityEnvironment()
 
 export class TooManyAttemptsError extends CredentialsSignin {
   code = "too_many_attempts"

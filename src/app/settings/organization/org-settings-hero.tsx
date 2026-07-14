@@ -82,9 +82,9 @@ function OrganizationOverviewCard({ orgName, orgStatus, plan, hipaaVerified, met
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <StatusChip status={orgStatus.toLowerCase()} size="sm" />
               {hipaaVerified ? (
-                <Badge variant="success" size="sm"><ShieldCheck className="mr-1 h-3 w-3" /> HIPAA Verified</Badge>
+                <Badge variant="success" size="sm"><ShieldCheck className="mr-1 h-3 w-3" /> Compliance setting enabled</Badge>
               ) : (
-                <Badge variant="secondary" size="sm">Not HIPAA Verified</Badge>
+                <Badge variant="secondary" size="sm">Compliance not configured</Badge>
               )}
             </div>
           </div>

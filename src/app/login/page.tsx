@@ -129,7 +129,7 @@ export default function LoginPage() {
 
           <div className="mt-8 flex items-center gap-2 text-xs text-navy-400">
             <Lock className="h-3 w-3" />
-            HIPAA-compliant & secure access
+            Secure staff access
           </div>
 
           {process.env.NODE_ENV === "development" && (

@@ -286,7 +286,7 @@ function ClientHeader({
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="truncate text-3xl font-semibold tracking-tight text-surface-950">{fullName}</h1>
                     <StatusChip status={client.status} size="md" />
-                    <Badge variant="info" size="sm">HIPAA Protected</Badge>
+                    <Badge variant="info" size="sm">Protected information</Badge>
                     <Badge variant={highRisk ? "danger" : "warning"} size="sm">High Risk</Badge>
                     <Badge variant="success" size="sm">Audit Ready</Badge>
                   </div>

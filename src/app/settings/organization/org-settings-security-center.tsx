@@ -9,7 +9,7 @@ const modules = [
   { label: "MFA Adoption", icon: Fingerprint },
   { label: "Password Policy", icon: KeyRound },
   { label: "Encryption", icon: Lock },
-  { label: "HIPAA Security", icon: ShieldCheck },
+  { label: "Security Controls", icon: ShieldCheck },
   { label: "Browser Security", icon: Globe2 },
 ]
 
