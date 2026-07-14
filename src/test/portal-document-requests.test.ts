@@ -20,6 +20,8 @@ const packetDocumentUpdateTx = vi.fn()
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requireClientAccessMock = vi.fn()
+const requireOrganizationRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
 const notifyActiveMock = vi.fn()
 
@@ -71,6 +73,11 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
+vi.mock("@/lib/live-authorization", () => ({
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  requireClientAccess: (...a: unknown[]) => requireClientAccessMock(...a),
+  requireOrganizationRole: (...a: unknown[]) => requireOrganizationRoleMock(...a),
+}))
 vi.mock("@/lib/portal/auth", () => ({ requirePortalClientAccess: vi.fn() }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/portal/notifications", () => ({ notifyActivePortalUsersForClient: (...a: unknown[]) => notifyActiveMock(...a) }))
@@ -98,6 +105,19 @@ function validRequestInput(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+  requireClientAccessMock.mockImplementation(async (_clientId: string, capability: string) => {
+    const role = getActiveRoleMock() || "ORG_ADMIN"
+    if (capability === "manage" && !["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"].includes(role)) {
+      throw new Error("Insufficient permissions")
+    }
+    return { userId: STAFF_ID, organizationId: ORG_ID, role }
+  })
+  requireOrganizationRoleMock.mockImplementation(async (organizationId: string, allowedRoles: string[]) => {
+    const role = getActiveRoleMock() || "ORG_ADMIN"
+    if (!allowedRoles.includes(role)) throw new Error("Insufficient permissions")
+    return { userId: STAFF_ID, organizationId, role }
+  })
   currentTx = makeTx()
   transactionMock.mockImplementation((cb: any) => cb(currentTx))
   portalDocumentRequestFindFirst.mockResolvedValue(null)
@@ -152,13 +172,14 @@ describe("createPortalDocumentRequest", () => {
     requireOrgAccessMock.mockResolvedValue({})
     getActiveRoleMock.mockReturnValue("ORG_ADMIN")
     clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: "org-OTHER" })
+    requireClientAccessMock.mockRejectedValueOnce(new Error("Access denied"))
 
     const { createPortalDocumentRequest } = await import("@/lib/actions/portal-document-requests")
     const result = await createPortalDocumentRequest(validRequestInput())
 
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/client not found/i)
+    expect(result.error).toMatch(/access denied/i)
     expect(portalDocumentRequestCreate).not.toHaveBeenCalled()
   })
 
@@ -325,6 +346,7 @@ describe("cancelPortalDocumentRequest", () => {
 describe("getPortalDocumentRequests — tenant isolation", () => {
   it("rejects listing for an organization the staff member cannot access", async () => {
     requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireOrganizationRoleMock.mockRejectedValueOnce(new Error("Access denied"))
 
     const { getPortalDocumentRequests } = await import("@/lib/actions/portal-document-requests")
     await expect(getPortalDocumentRequests("org-OTHER")).rejects.toThrow("Access denied")
@@ -341,6 +363,18 @@ describe("getPortalDocumentRequests — tenant isolation", () => {
     const where = portalDocumentRequestFindMany.mock.calls[0][0].where
     expect(where.organizationId).toBe(ORG_ID)
     expect(where.clientId).toBe(CLIENT_ID)
+  })
+
+  it("limits an organization-level Case Manager list to current client assignments", async () => {
+    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    portalDocumentRequestFindMany.mockResolvedValue([])
+
+    const { getPortalDocumentRequests } = await import("@/lib/actions/portal-document-requests")
+    await getPortalDocumentRequests(ORG_ID)
+
+    const assignments = portalDocumentRequestFindMany.mock.calls[0][0].where.client.assignments
+    expect(assignments.some.staffUserId).toBe(STAFF_ID)
+    expect(assignments.some.AND).toHaveLength(2)
   })
 })
 
@@ -399,13 +433,14 @@ describe("setPortalUploadPermission", () => {
     requireOrgAccessMock.mockResolvedValue({})
     getActiveRoleMock.mockReturnValue("ORG_ADMIN")
     portalClientAccessFindUnique.mockResolvedValue({ id: ACCESS_ID, organizationId: "org-OTHER", clientId: CLIENT_ID })
+    requireOrganizationRoleMock.mockRejectedValueOnce(new Error("Access denied"))
 
     const { setPortalUploadPermission } = await import("@/lib/actions/portal-document-requests")
     const result = await setPortalUploadPermission(ACCESS_ID, true)
 
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/not found/i)
+    expect(result.error).toMatch(/access denied/i)
     expect(portalClientAccessUpdate).not.toHaveBeenCalled()
   })
 
@@ -901,6 +936,7 @@ describe("getPortalUploadChecklist / getStaffDocumentChecklist — checklist def
   it("getStaffDocumentChecklist is scoped to the active organization and rejects a cross-tenant client", async () => {
     requireOrgAccessMock.mockResolvedValue({})
     clientFindUnique.mockResolvedValue({ organizationId: "org-OTHER" })
+    requireClientAccessMock.mockResolvedValueOnce({ userId: STAFF_ID, organizationId: "org-OTHER", role: "ORG_ADMIN" })
 
     const { getStaffDocumentChecklist } = await import("@/lib/actions/portal-document-requests")
     await expect(getStaffDocumentChecklist(ORG_ID, CLIENT_ID)).rejects.toThrow(/not found/i)

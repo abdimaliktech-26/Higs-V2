@@ -3,8 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { UserRole } from "@prisma/client"
 import { prisma } from "@/lib/db"
-import { auth } from "@/lib/auth"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { ORGANIZATION_WIDE_CLIENT_ROLES, requireClientAccess, requireOrganizationRole } from "@/lib/live-authorization"
 import { requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent } from "@/lib/audit"
 import { notifyActivePortalUsersForClient } from "@/lib/portal/notifications"
@@ -28,24 +27,12 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
   const data = parsed.data
 
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
-
     // Client ownership verified server-side — never trust clientId beyond
-    // confirming it actually belongs to this org.
+    // deriving the target organization and assignment scope from it.
     const client = await prisma.client.findUnique({ where: { id: data.clientId }, select: { id: true, organizationId: true } })
-    if (!client || client.organizationId !== orgId) {
-      return { success: false, error: "Client not found" }
-    }
+    if (!client) return { success: false, error: "Client not found" }
+    const authorization = await requireClientAccess(client.id, "manage", "create portal document request")
+    const orgId = authorization.organizationId
 
     if (data.packetId) {
       const packet = await prisma.packet.findUnique({ where: { id: data.packetId }, select: { clientId: true, organizationId: true } })
@@ -92,14 +79,14 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
           priority: data.priority,
           isRequired: data.isRequired,
           dueDate: data.dueDate ? new Date(data.dueDate) : null,
-          requestedByUserId: user.id as string,
+          requestedByUserId: authorization.userId,
         },
       })
     })
 
     await createAuditEvent({
       organizationId: orgId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PORTAL_DOCUMENT_REQUEST_CREATED",
       targetType: "portal_document_request",
       targetId: request.id,
@@ -107,7 +94,7 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
     })
 
     await prisma.portalDocumentTimelineEvent.create({
-      data: { requestId: request.id, eventType: "REQUESTED", createdByUserId: user.id as string },
+      data: { requestId: request.id, eventType: "REQUESTED", createdByUserId: authorization.userId },
     })
 
     await notifyActivePortalUsersForClient({
@@ -130,22 +117,11 @@ export async function createPortalDocumentRequest(raw: Record<string, unknown>):
 
 export async function cancelPortalDocumentRequest(requestId: string, reason?: string): Promise<ActionResult<{ id: string }>> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
-
     const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId } })
-    if (!request || request.organizationId !== orgId) {
-      return { success: false, error: "Request not found" }
-    }
+    if (!request) return { success: false, error: "Request not found" }
+    const authorization = await requireClientAccess(request.clientId, "manage", "cancel portal document request")
+    if (authorization.organizationId !== request.organizationId) return { success: false, error: "Request not found" }
+    const orgId = authorization.organizationId
     if (request.status === "CANCELLED") {
       return { success: false, error: "Request is already cancelled" }
     }
@@ -155,12 +131,12 @@ export async function cancelPortalDocumentRequest(requestId: string, reason?: st
 
     await prisma.portalDocumentRequest.update({
       where: { id: requestId },
-      data: { status: "CANCELLED", cancelledAt: new Date(), cancelledByUserId: user.id as string, cancellationReason: reason || null },
+      data: { status: "CANCELLED", cancelledAt: new Date(), cancelledByUserId: authorization.userId, cancellationReason: reason || null },
     })
 
     await createAuditEvent({
       organizationId: orgId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PORTAL_DOCUMENT_REQUEST_CANCELLED",
       targetType: "portal_document_request",
       targetId: requestId,
@@ -168,7 +144,7 @@ export async function cancelPortalDocumentRequest(requestId: string, reason?: st
     })
 
     await prisma.portalDocumentTimelineEvent.create({
-      data: { requestId, eventType: "CANCELLED", createdByUserId: user.id as string, note: reason || null },
+      data: { requestId, eventType: "CANCELLED", createdByUserId: authorization.userId, note: reason || null },
     })
 
     revalidatePath(`/clients/${request.clientId}/portal-access`)
@@ -180,9 +156,28 @@ export async function cancelPortalDocumentRequest(requestId: string, reason?: st
 }
 
 export async function getPortalDocumentRequests(orgId: string, clientId?: string) {
-  await requireOrgAccess(orgId)
+  const authorization = clientId
+    ? await requireClientAccess(clientId, "manage", "list portal document requests")
+    : await requireOrganizationRole(orgId, MANAGE_ROLES, "list portal document requests")
+  if (authorization.organizationId !== orgId) throw new Error("Access denied")
+  const now = new Date()
+  const assignmentScope = !clientId && !ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)
+    ? {
+        client: {
+          assignments: {
+            some: {
+              staffUserId: authorization.userId,
+              AND: [
+                { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+                { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+              ],
+            },
+          },
+        },
+      }
+    : {}
   return prisma.portalDocumentRequest.findMany({
-    where: { organizationId: orgId, ...(clientId ? { clientId } : {}) },
+    where: { organizationId: orgId, ...(clientId ? { clientId } : {}), ...assignmentScope },
     include: {
       requestedBy: { select: { id: true, name: true, email: true } },
       supportingDocuments: {
@@ -203,22 +198,10 @@ export async function getPortalDocumentRequests(orgId: string, clientId?: string
 // or canManageOtherGuardians.
 export async function setPortalUploadPermission(accessId: string, enabled: boolean): Promise<ActionResult<{ id: string; canUploadDocuments: boolean }>> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!user.isSuperAdmin && !PERMISSION_MANAGE_ROLES.includes(role)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
-
     const access = await prisma.portalClientAccess.findUnique({ where: { id: accessId } })
-    if (!access || access.organizationId !== orgId) {
-      return { success: false, error: "Access grant not found" }
-    }
+    if (!access) return { success: false, error: "Access grant not found" }
+    const authorization = await requireOrganizationRole(access.organizationId, PERMISSION_MANAGE_ROLES, "change portal upload permission")
+    const orgId = authorization.organizationId
 
     const updated = await prisma.portalClientAccess.update({
       where: { id: accessId },
@@ -227,7 +210,7 @@ export async function setPortalUploadPermission(accessId: string, enabled: boole
 
     await createAuditEvent({
       organizationId: orgId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PORTAL_ACCESS_UPLOAD_PERMISSION_CHANGED",
       targetType: "portal_client_access",
       targetId: accessId,
@@ -269,9 +252,8 @@ export async function getPortalUploadChecklist(clientId: string): Promise<Docume
 
 // ── Staff: checklist summary scoped to the active organization ──
 export async function getStaffDocumentChecklist(orgId: string, clientId: string): Promise<DocumentChecklistSummary> {
-  await requireOrgAccess(orgId)
-  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { organizationId: true } })
-  if (!client || client.organizationId !== orgId) throw new Error("Client not found")
+  const authorization = await requireClientAccess(clientId, "read", "view portal document checklist")
+  if (authorization.organizationId !== orgId) throw new Error("Client not found")
   return computeChecklistSummary(clientId)
 }
 
@@ -328,22 +310,11 @@ async function getLatestSupportingDocument(requestId: string) {
 // ── Staff: SUBMITTED → UNDER_REVIEW (informational — signals a reviewer is looking at it) ──
 export async function markPortalDocumentUnderReview(requestId: string): Promise<ActionResult<{ id: string }>> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
-
     const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId } })
-    if (!request || request.organizationId !== orgId) {
-      return { success: false, error: "Request not found" }
-    }
+    if (!request) return { success: false, error: "Request not found" }
+    const authorization = await requireClientAccess(request.clientId, "manage", "start portal document review")
+    if (authorization.organizationId !== request.organizationId) return { success: false, error: "Request not found" }
+    const orgId = authorization.organizationId
     if (request.status !== "SUBMITTED") {
       return { success: false, error: "Review can only be started from a Submitted request" }
     }
@@ -357,13 +328,13 @@ export async function markPortalDocumentUnderReview(requestId: string): Promise<
       await tx.portalDocumentRequest.update({ where: { id: requestId }, data: { status: "UNDER_REVIEW" } })
       await tx.supportingDocument.update({ where: { id: latestUpload.id }, data: { reviewStatus: "UNDER_REVIEW" } })
       await tx.portalDocumentTimelineEvent.create({
-        data: { requestId, eventType: "UNDER_REVIEW", supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+        data: { requestId, eventType: "UNDER_REVIEW", supportingDocumentId: latestUpload.id, createdByUserId: authorization.userId },
       })
     })
 
     await createAuditEvent({
       organizationId: orgId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PORTAL_DOCUMENT_REQUEST_UNDER_REVIEW",
       targetType: "portal_document_request",
       targetId: requestId,
@@ -385,22 +356,11 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
   const data = parsed.data
 
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!user.isSuperAdmin && !MANAGE_ROLES.includes(role)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
-
     const request = await prisma.portalDocumentRequest.findUnique({ where: { id: requestId } })
-    if (!request || request.organizationId !== orgId) {
-      return { success: false, error: "Request not found" }
-    }
+    if (!request) return { success: false, error: "Request not found" }
+    const authorization = await requireClientAccess(request.clientId, "manage", "review portal document request")
+    if (authorization.organizationId !== request.organizationId) return { success: false, error: "Request not found" }
+    const orgId = authorization.organizationId
     if (request.status !== "SUBMITTED" && request.status !== "UNDER_REVIEW") {
       return { success: false, error: "This request cannot be reviewed in its current state" }
     }
@@ -417,7 +377,7 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
       await tx.portalDocumentRequest.update({ where: { id: requestId }, data: { status: data.decision } })
       await tx.supportingDocument.update({ where: { id: latestUpload.id }, data: { reviewStatus: data.decision } })
       await tx.portalDocumentTimelineEvent.create({
-        data: { requestId, eventType: data.decision, supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+        data: { requestId, eventType: data.decision, supportingDocumentId: latestUpload.id, createdByUserId: authorization.userId },
       })
 
       if (hasFeedback) {
@@ -425,14 +385,14 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
           data: {
             requestId,
             supportingDocumentId: latestUpload.id,
-            reviewerUserId: user.id as string,
+            reviewerUserId: authorization.userId,
             note,
             category: data.category || "OTHER",
             severity: data.severity || (data.decision === "NEEDS_REPLACEMENT" ? "REQUIRED" : "SUGGESTED"),
           },
         })
         await tx.portalDocumentTimelineEvent.create({
-          data: { requestId, eventType: "FEEDBACK_ADDED", supportingDocumentId: latestUpload.id, createdByUserId: user.id as string },
+          data: { requestId, eventType: "FEEDBACK_ADDED", supportingDocumentId: latestUpload.id, createdByUserId: authorization.userId },
         })
       }
 
@@ -461,7 +421,7 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
             })
             await createAuditEvent({
               organizationId: orgId,
-              actorId: user.id as string,
+              actorId: authorization.userId,
               action: "PACKET_DOCUMENT_COMPLETED_VIA_PORTAL",
               targetType: "packet_document",
               targetId: packetDocument.id,
@@ -494,7 +454,7 @@ export async function reviewPortalDocumentRequest(requestId: string, raw: Record
 
     await createAuditEvent({
       organizationId: orgId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PORTAL_DOCUMENT_REQUEST_REVIEWED",
       targetType: "portal_document_request",
       targetId: requestId,

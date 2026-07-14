@@ -168,4 +168,17 @@ Staff-side portal access administration now uses current database roles in the o
 
 Portal management remains restricted to `SUPER_ADMIN`, `ORG_ADMIN`, and `COMPLIANCE_DIRECTOR`. The public invitation activation flow and portal-user consent acceptance continue to use their separate token, portal-session, live-grant, and concurrency controls and were not replaced by staff authorization.
 
+## PR-2G — Portal Document-Request Administration
+
+Staff-side portal document-request workflows now derive authorization from the target client, request, or access grant:
+
+- request creation derives the organization and assignment scope from the client, then validates optional packet/document links against that same client and organization;
+- cancellation, review start, approval, and replacement decisions derive access from the request's client and reject inconsistent request/client organization chains;
+- organization-level request lists restrict assigned Case Managers to current assignments, while direct client lists require live manage access to that client;
+- portal upload-permission changes derive the organization from the access grant and remain restricted to organization-wide management roles;
+- staff checklist summaries require live client read access; and
+- request, timeline, feedback, packet-document completion, notification, and audit writes use the live database actor.
+
+The portal user's checklist, upload history, feedback, and request reads remain protected by the separate live portal-client grant boundary. Existing duplicate-request, review-state, upload-provenance, packet-completion, notification, and audit behavior remains intact.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
