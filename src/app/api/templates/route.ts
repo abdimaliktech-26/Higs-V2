@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
 import { storeFile } from "@/lib/storage"
 import { limiters } from "@/lib/rate-limit"
-import { auth } from "@/lib/auth"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { getLiveStaffAuthorizationContext, requireOrganizationRole } from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
 import { validate, createDocTemplateSchema } from "@/lib/validation"
 import { validateTemplatePdfUpload, sanitizeTemplateFileName } from "@/lib/document-template-upload"
@@ -13,20 +12,18 @@ import { UserRole } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
-function canManage(user: Record<string, unknown>) {
-  const role = getActiveRole(user as any)
-  return (user.isSuperAdmin as boolean) || ADMIN_ROLES.includes(role)
-}
-
 // ── Staff: upload a brand-new DocumentTemplate — real PDF only, generated storage key ──
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
-  const user = session.user as Record<string, unknown>
-  const orgId = user.activeOrganizationId as string | undefined
+  let identity
+  try {
+    identity = await getLiveStaffAuthorizationContext()
+  } catch {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+  }
+  const orgId = identity.selectedOrganizationId
   if (!orgId) return NextResponse.json({ success: false, error: "No organization selected" }, { status: 400 })
 
-  const rl = limiters.upload.check(user.id as string)
+  const rl = limiters.upload.check(identity.userId)
   if (!rl.allowed) {
     return NextResponse.json(
       { success: false, error: `Too many uploads. Try again in ${rl.retryAfter} seconds.` },
@@ -34,11 +31,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  if (!canManage(user)) {
-    return NextResponse.json({ success: false, error: "Insufficient permissions" }, { status: 403 })
-  }
+  let authorization
   try {
-    await requireOrgAccess(orgId)
+    authorization = await requireOrganizationRole(orgId, ADMIN_ROLES, "upload document template")
   } catch {
     return NextResponse.json({ success: false, error: "Access denied" }, { status: 403 })
   }
@@ -87,7 +82,7 @@ export async function POST(req: NextRequest) {
         fileKey: record.key,
         fileSize: record.size,
         mimeType: "application/pdf",
-        uploadedById: user.id as string,
+        uploadedById: authorization.userId,
         status: "draft",
       },
     })
@@ -99,7 +94,7 @@ export async function POST(req: NextRequest) {
 
   await createAuditEvent({
     organizationId: orgId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_UPLOADED",
     targetType: "document_template",
     targetId: tpl.id,

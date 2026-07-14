@@ -3,9 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { validate, createPacketTemplateSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { signStaffFileUrl } from "@/lib/storage"
 import { validateTemplateConditions, validatePacketTemplateConditions } from "@/lib/actions/template-conditions"
 import { buildPacketConditionDefinition, evaluateInitialPacketApplicability, deriveIsMinor } from "@/lib/conditions/runtime"
@@ -13,6 +11,7 @@ import { CONDITION_RUNTIME_VERSION } from "@/lib/conditions/runtime-types"
 import {
   CLIENT_READ_ROLES,
   ORGANIZATION_WIDE_CLIENT_ROLES,
+  getLiveStaffAuthorizationContext,
   requireActiveOrganizationMembership,
   requireActiveAssignableStaff,
   requireClientAccess,
@@ -24,15 +23,10 @@ import { AuditAction, UserRole, type Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
-function canManage(user: Record<string, unknown>) {
-  const role = getActiveRole(user as any)
-  return user.isSuperAdmin as boolean || ADMIN_ROLES.includes(role)
-}
-
 // === Document Templates ===
 
 export async function getDocumentTemplates(orgId: string, params?: { search?: string; status?: string; formType?: string; program?: string }) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "list document templates")
   const where: Prisma.DocumentTemplateWhereInput = { organizationId: orgId }
   if (params?.search) where.name = { contains: params.search, mode: "insensitive" }
   if (params?.status && params.status !== "all") where.status = params.status
@@ -57,7 +51,7 @@ export async function getDocumentTemplateById(id: string) {
     include: { uploadedBy: { select: { name: true, email: true } } },
   })
   if (!tpl) return null
-  await requireOrgAccess(tpl.organizationId)
+  await requireActiveOrganizationMembership(tpl.organizationId, "view document template")
   // The resource-bound URL is computed here so
   // client components (the Template Field Editor) never import it directly.
   return { ...tpl, signedFileUrl: signStaffFileUrl("document_template", tpl.id) }
@@ -108,14 +102,9 @@ async function getVersionFamilyIds(templateId: string): Promise<string[]> {
 // currently-active row in that same family; unrelated template families are
 // never touched. ──
 export async function updateTemplateStatus(id: string, status: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false as const, error: "Insufficient permissions" }
-
   const tpl = await prisma.documentTemplate.findUnique({ where: { id } })
   if (!tpl) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(tpl.organizationId)
+  const authorization = await requireOrganizationRole(tpl.organizationId, ADMIN_ROLES, "change document template status")
 
   if (status === "active") {
     const conditionCheck = await validateTemplateConditions(id)
@@ -146,19 +135,19 @@ export async function updateTemplateStatus(id: string, status: string) {
     })
 
     await createAuditEvent({
-      organizationId: tpl.organizationId, actorId: user.id as string, action: "TEMPLATE_ACTIVATED",
+      organizationId: tpl.organizationId, actorId: authorization.userId, action: "TEMPLATE_ACTIVATED",
       targetType: "document_template", targetId: id, metadata: { name: tpl.name, retiredSiblingIds: retiredSiblings },
     })
     for (const siblingId of retiredSiblings) {
       await createAuditEvent({
-        organizationId: tpl.organizationId, actorId: user.id as string, action: "TEMPLATE_RETIRED",
+        organizationId: tpl.organizationId, actorId: authorization.userId, action: "TEMPLATE_RETIRED",
         targetType: "document_template", targetId: siblingId, metadata: { name: tpl.name, supersededById: id },
       })
     }
   } else {
     await prisma.documentTemplate.update({ where: { id }, data: { status } })
     if (status === "retired") {
-      await createAuditEvent({ organizationId: tpl.organizationId, actorId: user.id as string, action: "TEMPLATE_RETIRED", targetType: "document_template", targetId: id, metadata: { name: tpl.name } })
+      await createAuditEvent({ organizationId: tpl.organizationId, actorId: authorization.userId, action: "TEMPLATE_RETIRED", targetType: "document_template", targetId: id, metadata: { name: tpl.name } })
     }
   }
 
@@ -169,7 +158,7 @@ export async function updateTemplateStatus(id: string, status: string) {
 // === Packet Templates ===
 
 export async function getPacketTemplates(orgId: string, params?: { includeInactive?: boolean; status?: string; programId?: string; packetType?: string }) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "list packet templates")
   const where: Prisma.PacketTemplateWhereInput = { organizationId: orgId }
   if (params?.includeInactive) {
     if (params.status && params.status !== "all") where.status = params.status
@@ -194,7 +183,7 @@ const TEMPLATE_AUDIT_ACTIONS: AuditAction[] = [
 ]
 
 export async function getTemplateActivity(orgId: string, limit = 8) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "view template activity")
   return prisma.auditEvent.findMany({
     where: {
       organizationId: orgId,
@@ -213,12 +202,10 @@ export async function createPacketTemplate(raw: Record<string, unknown>) {
   const parsed = validate(createPacketTemplateSchema, raw)
   if (!parsed.success) return { success: false as const, error: parsed.error }
   const data = parsed.data
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  const orgId = user.activeOrganizationId as string
-  if (!canManage(user)) return { success: false as const, error: "Insufficient permissions" }
-  await requireOrgAccess(orgId)
+  const identity = await getLiveStaffAuthorizationContext()
+  const orgId = identity.selectedOrganizationId
+  if (!orgId) return { success: false as const, error: "Select an organization" }
+  const authorization = await requireOrganizationRole(orgId, ADMIN_ROLES, "create packet template")
 
   if (data.documents.length > 0) {
     const owned = await prisma.documentTemplate.count({
@@ -239,30 +226,25 @@ export async function createPacketTemplate(raw: Record<string, unknown>) {
     })
   }
 
-  await createAuditEvent({ organizationId: orgId, actorId: user.id as string, action: "PACKET_TEMPLATE_CREATED", targetType: "packet_template", targetId: pt.id, metadata: { name: pt.name } })
+  await createAuditEvent({ organizationId: orgId, actorId: authorization.userId, action: "PACKET_TEMPLATE_CREATED", targetType: "packet_template", targetId: pt.id, metadata: { name: pt.name } })
   revalidatePath("/templates")
   return { success: true as const, data: { id: pt.id } }
 }
 
 // ── Staff: toggle an existing packet template document mapping between required/optional ──
 export async function updatePacketTemplateDocumentRequired(packetTemplateDocumentId: string, required: boolean) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false as const, error: "Insufficient permissions" }
-
   const row = await prisma.packetTemplateDocument.findUnique({
     where: { id: packetTemplateDocumentId },
     include: { packetTemplate: { select: { id: true, organizationId: true } } },
   })
   if (!row) return { success: false as const, error: "Mapping not found" }
-  await requireOrgAccess(row.packetTemplate.organizationId)
+  const authorization = await requireOrganizationRole(row.packetTemplate.organizationId, ADMIN_ROLES, "update packet template document")
 
   await prisma.packetTemplateDocument.update({ where: { id: packetTemplateDocumentId }, data: { required } })
 
   await createAuditEvent({
     organizationId: row.packetTemplate.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "PACKET_TEMPLATE_DOCUMENT_UPDATED",
     targetType: "packet_template",
     targetId: row.packetTemplate.id,
@@ -279,7 +261,18 @@ export async function getPackets(orgId: string, params?: { search?: string; stat
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 20
   const where: Record<string, unknown> = { organizationId: orgId }
   if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
-    where.client = { assignments: { some: { staffUserId: authorization.userId } } }
+    const now = new Date()
+    where.client = {
+      assignments: {
+        some: {
+          staffUserId: authorization.userId,
+          AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+            { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+          ],
+        },
+      },
+    }
   }
   if (params?.status && params.status !== "all") where.status = params.status
   if (params?.search) where.OR = [

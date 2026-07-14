@@ -33,6 +33,18 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
+vi.mock("@/lib/live-authorization", () => ({
+  requireActiveOrganizationMembership: async (organizationId: string) => {
+    await requireOrgAccessMock(organizationId)
+    return { userId: STAFF_ID, organizationId, role: getActiveRoleMock() }
+  },
+  requireOrganizationRole: async (organizationId: string, roles: string[]) => {
+    await requireOrgAccessMock(organizationId)
+    const role = getActiveRoleMock()
+    if (!roles.includes(role)) throw new Error("Insufficient permissions")
+    return { userId: STAFF_ID, organizationId, role }
+  },
+}))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -163,10 +175,10 @@ describe("createDocumentTemplateField", () => {
 
   it("rejects a role not permitted to manage templates", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    documentTemplateFindUnique.mockResolvedValue(draftTemplate())
     const { createDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
-    const result = await createDocumentTemplateField(TEMPLATE_ID, validFieldInput())
-    expect(result.success).toBe(false)
-    expect(documentTemplateFindUnique).not.toHaveBeenCalled()
+    await expect(createDocumentTemplateField(TEMPLATE_ID, validFieldInput())).rejects.toThrow("Insufficient permissions")
+    expect(documentTemplateFieldCreate).not.toHaveBeenCalled()
   })
 
   it("rejects cross-tenant field creation", async () => {
@@ -290,10 +302,10 @@ describe("updateDocumentTemplateField", () => {
 
   it("rejects a role not permitted to manage templates", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    documentTemplateFieldFindUnique.mockResolvedValue(existingField())
     const { updateDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
-    const result = await updateDocumentTemplateField(FIELD_ID, { name: "X" })
-    expect(result.success).toBe(false)
-    expect(documentTemplateFieldFindUnique).not.toHaveBeenCalled()
+    await expect(updateDocumentTemplateField(FIELD_ID, { name: "X" })).rejects.toThrow("Insufficient permissions")
+    expect(documentTemplateFieldUpdate).not.toHaveBeenCalled()
   })
 
   it("rejects cross-tenant field update", async () => {
@@ -360,10 +372,10 @@ describe("deleteDocumentTemplateField", () => {
 
   it("rejects a role not permitted to manage templates", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    documentTemplateFieldFindUnique.mockResolvedValue(existingField())
     const { deleteDocumentTemplateField } = await import("@/lib/actions/document-template-fields")
-    const result = await deleteDocumentTemplateField(FIELD_ID)
-    expect(result.success).toBe(false)
-    expect(documentTemplateFieldFindUnique).not.toHaveBeenCalled()
+    await expect(deleteDocumentTemplateField(FIELD_ID)).rejects.toThrow("Insufficient permissions")
+    expect(documentTemplateFieldDelete).not.toHaveBeenCalled()
   })
 
   it("rejects cross-tenant field deletion", async () => {

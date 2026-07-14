@@ -105,6 +105,7 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAud
 vi.mock("@/lib/live-authorization", () => ({
   CLIENT_READ_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER", "DSP", "NURSE"],
   ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  getLiveStaffAuthorizationContext: async () => ({ userId: STAFF_ID, selectedOrganizationId: ORG_ID }),
   requireClientAccess: (...a: unknown[]) => requireClientAccessMock(...a),
   requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
   requireActiveAssignableStaff: (...a: unknown[]) => requireActiveAssignableStaffMock(...a),
@@ -238,6 +239,7 @@ describe("updatePacketTemplateDocumentRequired", () => {
     packetTemplateDocumentFindUnique.mockResolvedValue({
       id: "ptd-1", required: true, packetTemplate: { id: "pt-1", organizationId: "org-OTHER" },
     })
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
 
     const { updatePacketTemplateDocumentRequired } = await import("@/lib/actions/templates")
     await expect(updatePacketTemplateDocumentRequired("ptd-1", false)).rejects.toThrow("Access denied")
@@ -260,12 +262,14 @@ describe("updatePacketTemplateDocumentRequired", () => {
   it("rejects a role not permitted to manage templates", async () => {
     authMock.mockResolvedValue(staffSession())
     getActiveRoleMock.mockReturnValue("DSP")
+    packetTemplateDocumentFindUnique.mockResolvedValue({
+      id: "ptd-1", required: true, packetTemplate: { id: "pt-1", organizationId: ORG_ID },
+    })
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
 
     const { updatePacketTemplateDocumentRequired } = await import("@/lib/actions/templates")
-    const result = await updatePacketTemplateDocumentRequired("ptd-1", false)
-
-    expect(result.success).toBe(false)
-    expect(packetTemplateDocumentFindUnique).not.toHaveBeenCalled()
+    await expect(updatePacketTemplateDocumentRequired("ptd-1", false)).rejects.toThrow("Access denied")
+    expect(packetTemplateDocumentUpdate).not.toHaveBeenCalled()
   })
 })
 
@@ -342,12 +346,12 @@ describe("updateTemplateStatus — one active version per family", () => {
   it("rejects a role not permitted to manage templates", async () => {
     authMock.mockResolvedValue(staffSession())
     getActiveRoleMock.mockReturnValue("DSP")
+    documentTemplateFindUnique.mockResolvedValueOnce(templateRow())
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
 
     const { updateTemplateStatus } = await import("@/lib/actions/templates")
-    const result = await updateTemplateStatus(TEMPLATE_ID, "active")
-
-    expect(result.success).toBe(false)
-    expect(documentTemplateFindUnique).not.toHaveBeenCalled()
+    await expect(updateTemplateStatus(TEMPLATE_ID, "active")).rejects.toThrow("Access denied")
+    expect(documentTemplateUpdate).not.toHaveBeenCalled()
   })
 
   it("rejects a nonexistent template", async () => {
@@ -854,11 +858,11 @@ describe("packet list and status actions use live authorization", () => {
     requireOrganizationRoleMock.mockResolvedValue({ userId: "case-1", organizationId: ORG_ID, role: "CASE_MANAGER" })
     const { getPackets } = await import("@/lib/actions/templates")
     await getPackets(ORG_ID)
-    expect(packetFindMany.mock.calls[0][0].where).toMatchObject({
-      organizationId: ORG_ID,
-      client: { assignments: { some: { staffUserId: "case-1" } } },
-    })
-    expect(packetCount.mock.calls[0][0].where.client).toEqual({ assignments: { some: { staffUserId: "case-1" } } })
+    const listWhere = packetFindMany.mock.calls[0][0].where
+    expect(listWhere.organizationId).toBe(ORG_ID)
+    expect(listWhere.client.assignments.some.staffUserId).toBe("case-1")
+    expect(listWhere.client.assignments.some.AND).toHaveLength(2)
+    expect(packetCount.mock.calls[0][0].where.client.assignments.some.AND).toHaveLength(2)
   })
 
   it("does not add assignment filtering for an organization-wide packet list", async () => {

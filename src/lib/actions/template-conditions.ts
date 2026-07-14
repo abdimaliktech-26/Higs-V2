@@ -2,9 +2,8 @@
 
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { requireActiveOrganizationMembership, requireOrganizationRole } from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import {
   validate,
   createRootConditionGroupSchema,
@@ -29,20 +28,7 @@ const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTO
 const FIELD_OWNER_PURPOSES = ["FIELD_VISIBILITY", "FIELD_REQUIREDNESS"] as const
 const DOCUMENT_OWNER_PURPOSES = ["DOCUMENT_INCLUSION", "DOCUMENT_REQUIREDNESS"] as const
 
-function canManage(user: Record<string, unknown>) {
-  const role = getActiveRole(user as any)
-  return (user.isSuperAdmin as boolean) || ADMIN_ROLES.includes(role)
-}
-
 type ActionResult<T = Record<string, unknown>> = { success: true; data: T } | { success: false; error: string }
-
-async function requireStaffManager(): Promise<{ success: false; error: string } | { success: true; user: Record<string, unknown> }> {
-  const session = await auth()
-  if (!session?.user) return { success: false, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false, error: "Insufficient permissions" }
-  return { success: true, user }
-}
 
 // ── Owner resolution — field-owned (Step 4a) ──
 async function getFieldOwnerContext(documentTemplateFieldId: string) {
@@ -151,16 +137,13 @@ export async function createRootConditionGroup(documentTemplateFieldId: string, 
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   if (!(FIELD_OWNER_PURPOSES as readonly string[]).includes(data.purpose)) {
     return { success: false, error: `Purpose ${data.purpose} is not valid for a field-owned condition group` }
   }
 
   const owner = await getFieldOwnerContext(documentTemplateFieldId)
   if (!owner) return { success: false, error: "Field not found" }
-  await requireOrgAccess(owner.template.organizationId)
+  const authorization = await requireOrganizationRole(owner.template.organizationId, ADMIN_ROLES, "create field condition group")
   if (owner.template.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
   if (await rootPurposeAlreadyExists("field", documentTemplateFieldId, data.purpose)) {
     return { success: false, error: `A ${data.purpose} root group already exists for this field` }
@@ -183,7 +166,7 @@ export async function createRootConditionGroup(documentTemplateFieldId: string, 
 
   await createAuditEvent({
     organizationId: owner.template.organizationId,
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_CREATED",
     targetType: "template_condition_group",
     targetId: group.id,
@@ -199,16 +182,13 @@ export async function createRootConditionGroupForDocument(packetTemplateDocument
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   if (!(DOCUMENT_OWNER_PURPOSES as readonly string[]).includes(data.purpose)) {
     return { success: false, error: `Purpose ${data.purpose} is not valid for a document-owned condition group` }
   }
 
   const owner = await getDocumentOwnerContext(packetTemplateDocumentId)
   if (!owner) return { success: false, error: "Document mapping not found" }
-  await requireOrgAccess(owner.packetTemplate.organizationId)
+  const authorization = await requireOrganizationRole(owner.packetTemplate.organizationId, ADMIN_ROLES, "create document condition group")
   if (owner.documentTemplate.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
   if (await rootPurposeAlreadyExists("document", packetTemplateDocumentId, data.purpose)) {
     return { success: false, error: `A ${data.purpose} root group already exists for this document mapping` }
@@ -231,7 +211,7 @@ export async function createRootConditionGroupForDocument(packetTemplateDocument
 
   await createAuditEvent({
     organizationId: owner.packetTemplate.organizationId,
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_CREATED",
     targetType: "template_condition_group",
     targetId: group.id,
@@ -245,9 +225,6 @@ export async function createNestedConditionGroup(parentGroupId: string, raw: Rec
   const parsed = validate(createNestedConditionGroupSchema, raw)
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
-
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
 
   const parent = await prisma.templateConditionGroup.findUnique({ where: { id: parentGroupId } })
   if (!parent) return { success: false, error: "Parent group not found" }
@@ -266,7 +243,7 @@ export async function createNestedConditionGroup(parentGroupId: string, raw: Rec
         return o ? ({ kind: "document", owner: o } as RootOwnerContext) : null
       })()
   if (!owner) return { success: false, error: "Parent group's owner not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "create nested condition group")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   const group = await prisma.templateConditionGroup.create({
@@ -281,7 +258,7 @@ export async function createNestedConditionGroup(parentGroupId: string, raw: Rec
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_CREATED",
     targetType: "template_condition_group",
     targetId: group.id,
@@ -297,21 +274,18 @@ export async function updateConditionGroupLogicOperator(groupId: string, raw: Re
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   const group = await prisma.templateConditionGroup.findUnique({ where: { id: groupId } })
   if (!group) return { success: false, error: "Group not found" }
   const owner = await getRootOwnerContext(groupId)
   if (!owner) return { success: false, error: "Group not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "update condition group")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   await prisma.templateConditionGroup.update({ where: { id: groupId }, data: { logicOperator: data.logicOperator } })
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_UPDATED",
     targetType: "template_condition_group",
     targetId: groupId,
@@ -323,21 +297,18 @@ export async function updateConditionGroupLogicOperator(groupId: string, raw: Re
 
 // ── Group: delete (cascades to its conditions and any nested child group) ──
 export async function deleteConditionGroup(groupId: string): Promise<ActionResult<{ id: string }>> {
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   const group = await prisma.templateConditionGroup.findUnique({ where: { id: groupId } })
   if (!group) return { success: false, error: "Group not found" }
   const owner = await getRootOwnerContext(groupId)
   if (!owner) return { success: false, error: "Group not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "delete condition group")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   await prisma.templateConditionGroup.delete({ where: { id: groupId } })
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_DELETED",
     targetType: "template_condition_group",
     targetId: groupId,
@@ -454,14 +425,11 @@ export async function createCondition(groupId: string, raw: Record<string, unkno
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   const group = await prisma.templateConditionGroup.findUnique({ where: { id: groupId } })
   if (!group) return { success: false, error: "Group not found" }
   const owner = await getRootOwnerContext(groupId)
   if (!owner) return { success: false, error: "Group not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "create template condition")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   const check = await validateOperatorAndValue(owner, data.sourceType, data.sourceFieldKey, data.sourcePacketTemplateDocumentId, data.operator, data.comparisonValue)
@@ -481,7 +449,7 @@ export async function createCondition(groupId: string, raw: Record<string, unkno
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_CREATED",
     targetType: "template_condition",
     targetId: condition.id,
@@ -497,16 +465,13 @@ export async function updateCondition(conditionId: string, raw: Record<string, u
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   const existing = await prisma.templateCondition.findUnique({ where: { id: conditionId } })
   if (!existing) return { success: false, error: "Condition not found" }
   const group = await prisma.templateConditionGroup.findUnique({ where: { id: existing.groupId } })
   if (!group) return { success: false, error: "Condition not found" }
   const owner = await getRootOwnerContext(existing.groupId)
   if (!owner) return { success: false, error: "Condition not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "update template condition")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   const mergedSourceType = data.sourceType ?? (existing.sourceType as ConditionSourceType)
@@ -533,7 +498,7 @@ export async function updateCondition(conditionId: string, raw: Record<string, u
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_UPDATED",
     targetType: "template_condition",
     targetId: conditionId,
@@ -545,23 +510,20 @@ export async function updateCondition(conditionId: string, raw: Record<string, u
 
 // ── Condition: delete ──
 export async function deleteCondition(conditionId: string): Promise<ActionResult<{ id: string }>> {
-  const auth1 = await requireStaffManager()
-  if (!auth1.success) return auth1
-
   const existing = await prisma.templateCondition.findUnique({ where: { id: conditionId } })
   if (!existing) return { success: false, error: "Condition not found" }
   const group = await prisma.templateConditionGroup.findUnique({ where: { id: existing.groupId } })
   if (!group) return { success: false, error: "Condition not found" }
   const owner = await getRootOwnerContext(existing.groupId)
   if (!owner) return { success: false, error: "Condition not found" }
-  await requireOrgAccess(ownerOrganizationId(owner))
+  const authorization = await requireOrganizationRole(ownerOrganizationId(owner), ADMIN_ROLES, "delete template condition")
   if (ownerIsRetired(owner)) return { success: false, error: "Retired templates cannot be edited" }
 
   await prisma.templateCondition.delete({ where: { id: conditionId } })
 
   await createAuditEvent({
     organizationId: ownerOrganizationId(owner),
-    actorId: auth1.user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_CONDITION_DELETED",
     targetType: "template_condition",
     targetId: conditionId,
@@ -575,7 +537,7 @@ export async function deleteCondition(conditionId: string): Promise<ActionResult
 export async function getConditionsForTemplate(documentTemplateId: string) {
   const template = await prisma.documentTemplate.findUnique({ where: { id: documentTemplateId } })
   if (!template) throw new Error("Template not found")
-  await requireOrgAccess(template.organizationId)
+  await requireActiveOrganizationMembership(template.organizationId, "view template conditions")
 
   const fieldIds = (await prisma.documentTemplateField.findMany({ where: { documentTemplateId }, select: { id: true } })).map((f) => f.id)
   if (fieldIds.length === 0) return []
@@ -596,7 +558,7 @@ export async function getConditionsForPacketTemplateDocument(packetTemplateDocum
     include: { packetTemplate: { select: { organizationId: true } } },
   })
   if (!mapping) throw new Error("Document mapping not found")
-  await requireOrgAccess(mapping.packetTemplate.organizationId)
+  await requireActiveOrganizationMembership(mapping.packetTemplate.organizationId, "view packet template document conditions")
 
   return prisma.templateConditionGroup.findMany({
     where: { packetTemplateDocumentId },
@@ -624,7 +586,7 @@ export interface FieldConditionDependencySummary {
 export async function getFieldConditionDependencySummary(documentTemplateId: string, fieldKey: string): Promise<FieldConditionDependencySummary> {
   const template = await prisma.documentTemplate.findUnique({ where: { id: documentTemplateId } })
   if (!template) throw new Error("Template not found")
-  await requireOrgAccess(template.organizationId)
+  await requireActiveOrganizationMembership(template.organizationId, "inspect template condition dependencies")
 
   const fieldIds = (await prisma.documentTemplateField.findMany({ where: { documentTemplateId }, select: { id: true } })).map((f) => f.id)
 
@@ -704,7 +666,7 @@ export async function getPacketTemplateDocumentConditionDependencies(packetTempl
     include: { packetTemplate: { select: { id: true, organizationId: true } } },
   })
   if (!mapping) throw new Error("Document mapping not found")
-  await requireOrgAccess(mapping.packetTemplate.organizationId)
+  await requireActiveOrganizationMembership(mapping.packetTemplate.organizationId, "inspect packet template document dependencies")
 
   const ownedConditions = await prisma.templateCondition.findMany({
     where: {
@@ -754,7 +716,7 @@ export interface TemplateConditionValidationError {
 export async function validateTemplateConditions(documentTemplateId: string): Promise<{ valid: boolean; errors: TemplateConditionValidationError[] }> {
   const template = await prisma.documentTemplate.findUnique({ where: { id: documentTemplateId } })
   if (!template) throw new Error("Template not found")
-  await requireOrgAccess(template.organizationId)
+  await requireActiveOrganizationMembership(template.organizationId, "validate document template conditions")
 
   const templateFields = await prisma.documentTemplateField.findMany({ where: { documentTemplateId }, select: { id: true, fieldKey: true, fieldType: true } })
   const fieldIds = templateFields.map((f) => f.id)
@@ -869,7 +831,7 @@ export interface PacketTemplateConditionValidationError {
 export async function validatePacketTemplateConditions(packetTemplateId: string): Promise<{ valid: boolean; errors: PacketTemplateConditionValidationError[] }> {
   const packetTemplate = await prisma.packetTemplate.findUnique({ where: { id: packetTemplateId } })
   if (!packetTemplate) throw new Error("Packet template not found")
-  await requireOrgAccess(packetTemplate.organizationId)
+  await requireActiveOrganizationMembership(packetTemplate.organizationId, "validate packet template conditions")
 
   const mappings = await prisma.packetTemplateDocument.findMany({
     where: { packetTemplateId },

@@ -58,6 +58,19 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
+vi.mock("@/lib/live-authorization", () => ({
+  getLiveStaffAuthorizationContext: async () => {
+    const session = await authMock()
+    if (!session?.user) throw new Error("Unauthorized")
+    return { userId: session.user.id, selectedOrganizationId: session.user.activeOrganizationId }
+  },
+  requireOrganizationRole: async (organizationId: string, roles: string[]) => {
+    await requireOrgAccessMock(organizationId)
+    const role = getActiveRoleMock()
+    if (!roles.includes(role)) throw new Error("Insufficient permissions")
+    return { userId: STAFF_ID, organizationId, role }
+  },
+}))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/storage", () => ({ storeFile: (...a: unknown[]) => storeFileMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
@@ -261,7 +274,8 @@ describe("POST /api/templates/[templateId]/versions — new version upload", () 
     getActiveRoleMock.mockReturnValue("DSP")
     const { status } = await callVersionRoute(TEMPLATE_ID, makeFile(PDF_BYTES, "form-v2.pdf", "application/pdf"))
     expect(status).toBe(403)
-    expect(documentTemplateFindUnique).not.toHaveBeenCalled()
+    expect(documentTemplateFindUnique).toHaveBeenCalledWith({ where: { id: TEMPLATE_ID } })
+    expect(storeFileMock).not.toHaveBeenCalled()
   })
 })
 

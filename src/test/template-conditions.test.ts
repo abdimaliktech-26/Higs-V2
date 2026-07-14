@@ -58,6 +58,18 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
+vi.mock("@/lib/live-authorization", () => ({
+  requireActiveOrganizationMembership: async (organizationId: string) => {
+    await requireOrgAccessMock(organizationId)
+    return { userId: STAFF_ID, organizationId, role: getActiveRoleMock() }
+  },
+  requireOrganizationRole: async (organizationId: string, roles: string[]) => {
+    await requireOrgAccessMock(organizationId)
+    const role = getActiveRoleMock()
+    if (!roles.includes(role)) throw new Error("Insufficient permissions")
+    return { userId: STAFF_ID, organizationId, role }
+  },
+}))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -113,10 +125,10 @@ describe("createRootConditionGroup", () => {
 
   it("rejects an unauthorized role", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
     const { createRootConditionGroup } = await import("@/lib/actions/template-conditions")
-    const result = await createRootConditionGroup(FIELD_ID, { purpose: "FIELD_VISIBILITY" })
-    expect(result.success).toBe(false)
-    expect(documentTemplateFieldFindUnique).not.toHaveBeenCalled()
+    await expect(createRootConditionGroup(FIELD_ID, { purpose: "FIELD_VISIBILITY" })).rejects.toThrow("Insufficient permissions")
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
   })
 
   it("rejects cross-tenant field ownership", async () => {
@@ -317,10 +329,11 @@ describe("createCondition — source/operator/type validation", () => {
 
   it("rejects an unauthorized role", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    templateConditionGroupFindUnique.mockResolvedValue(rootGroupRow())
+    documentTemplateFieldFindUnique.mockResolvedValue(fieldRow())
     const { createCondition } = await import("@/lib/actions/template-conditions")
-    const result = await createCondition(GROUP_ID, { sourceType: "CLIENT_IS_MINOR", operator: "EQUALS", comparisonValue: true })
-    expect(result.success).toBe(false)
-    expect(templateConditionGroupFindUnique).not.toHaveBeenCalled()
+    await expect(createCondition(GROUP_ID, { sourceType: "CLIENT_IS_MINOR", operator: "EQUALS", comparisonValue: true })).rejects.toThrow("Insufficient permissions")
+    expect(templateConditionCreate).not.toHaveBeenCalled()
   })
 
   it("rejects creating a condition on a retired template", async () => {

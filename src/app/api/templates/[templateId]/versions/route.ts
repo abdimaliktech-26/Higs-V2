@@ -4,18 +4,12 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
 import { storeFile } from "@/lib/storage"
 import { limiters } from "@/lib/rate-limit"
-import { auth } from "@/lib/auth"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { getLiveStaffAuthorizationContext, requireOrganizationRole } from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
 import { validateTemplatePdfUpload, sanitizeTemplateFileName } from "@/lib/document-template-upload"
 import { UserRole, Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
-
-function canManage(user: Record<string, unknown>) {
-  const role = getActiveRole(user as any)
-  return (user.isSuperAdmin as boolean) || ADMIN_ROLES.includes(role)
-}
 
 // ── Staff: upload a new version of an existing DocumentTemplate — real PDF only ──
 // Creates a new row (version = previous + 1) rather than mutating the
@@ -25,11 +19,14 @@ function canManage(user: Record<string, unknown>) {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ templateId: string }> }) {
   const { templateId } = await params
 
-  const session = await auth()
-  if (!session?.user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
-  const user = session.user as Record<string, unknown>
+  let identity
+  try {
+    identity = await getLiveStaffAuthorizationContext()
+  } catch {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+  }
 
-  const rl = limiters.upload.check(user.id as string)
+  const rl = limiters.upload.check(identity.userId)
   if (!rl.allowed) {
     return NextResponse.json(
       { success: false, error: `Too many uploads. Try again in ${rl.retryAfter} seconds.` },
@@ -37,14 +34,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tem
     )
   }
 
-  if (!canManage(user)) {
-    return NextResponse.json({ success: false, error: "Insufficient permissions" }, { status: 403 })
-  }
-
   const previous = await prisma.documentTemplate.findUnique({ where: { id: templateId } })
   if (!previous) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 })
+  let authorization
   try {
-    await requireOrgAccess(previous.organizationId)
+    authorization = await requireOrganizationRole(previous.organizationId, ADMIN_ROLES, "upload document template version")
   } catch {
     return NextResponse.json({ success: false, error: "Access denied" }, { status: 403 })
   }
@@ -87,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tem
           fileKey: record.key,
           fileSize: record.size,
           mimeType: "application/pdf",
-          uploadedById: user.id as string,
+          uploadedById: authorization.userId,
           status: "draft",
         },
       })
@@ -193,7 +187,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tem
 
   await createAuditEvent({
     organizationId: previous.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "DOCUMENT_TEMPLATE_VERSION_CREATED",
     targetType: "document_template",
     targetId: tpl.id,

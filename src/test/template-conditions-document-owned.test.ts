@@ -62,6 +62,18 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
+vi.mock("@/lib/live-authorization", () => ({
+  requireActiveOrganizationMembership: async (organizationId: string) => {
+    await requireOrgAccessMock(organizationId)
+    return { userId: STAFF_ID, organizationId, role: getActiveRoleMock() }
+  },
+  requireOrganizationRole: async (organizationId: string, roles: string[]) => {
+    await requireOrgAccessMock(organizationId)
+    const role = getActiveRoleMock()
+    if (!roles.includes(role)) throw new Error("Insufficient permissions")
+    return { userId: STAFF_ID, organizationId, role }
+  },
+}))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -170,10 +182,10 @@ describe("createRootConditionGroupForDocument", () => {
 
   it("rejects a role not permitted to manage templates", async () => {
     getActiveRoleMock.mockReturnValue("DSP")
+    mockMappings({ [MAPPING_A]: mappingRow(MAPPING_A, DT_A) })
     const { createRootConditionGroupForDocument } = await import("@/lib/actions/template-conditions")
-    const result = await createRootConditionGroupForDocument(MAPPING_A, { purpose: "DOCUMENT_INCLUSION" })
-    expect(result.success).toBe(false)
-    expect(packetTemplateDocumentFindUnique).not.toHaveBeenCalled()
+    await expect(createRootConditionGroupForDocument(MAPPING_A, { purpose: "DOCUMENT_INCLUSION" })).rejects.toThrow("Insufficient permissions")
+    expect(templateConditionGroupCreate).not.toHaveBeenCalled()
   })
 
   it("rejects cross-tenant mapping access", async () => {

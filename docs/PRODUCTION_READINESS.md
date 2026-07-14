@@ -233,4 +233,18 @@ The staff document library now applies live authorization before returning or mu
 
 The conversion preserves the existing library tabs, searches, categories, signed file delivery, audit events, and storage behavior. Six focused tests cover assignment-filter composition, organization-wide scope, client-bound and unbound uploads, authorization-before-detail loading, and organization-chain mismatch rejection. Final verification passed 1,270/1,270 tests across 63 files, ESLint, Prisma format and validation, TypeScript type-check, and the Next.js production build. No schema or migration change was introduced.
 
+## PR-2L — Template Administration Authorization
+
+Document- and packet-template administration now uses the live database-backed staff boundary throughout:
+
+- document-template lists, detail, field layouts, condition trees, dependency summaries, validators, packet-template lists, and template activity require current active membership in the target organization;
+- new template uploads treat the selected organization only as a target, then require the current organization-wide template-management role;
+- new-version uploads, template status changes, field create/update/delete, condition-group and condition mutations, and packet-template mapping changes derive the target organization from the existing resource before applying the current role;
+- packet-template creation uses the selected organization only after reloading the live staff identity and current role;
+- upload rate limits and audit records use the live database actor rather than JWT role, membership, or Super Admin snapshots;
+- global Super Admin access remains explicit through the shared live authorization helper and its operation-specific reason; and
+- assignment-scoped packet lists now require a currently effective assignment, including start and end dates, instead of accepting any historical assignment row.
+
+The conversion preserves PDF validation/storage, immutable template version rows, field and condition carry-forward behavior, condition validation and cycle detection, dependency protection, packet materialization, and existing audit behavior. The five focused template suites passed 198/198 tests and the full suite passed 1,270/1,270 tests across 63 files. No legacy `requireOrgAccess`, `getActiveRole`, JWT membership, or JWT selected-role authorization remains under `src/lib/actions` or `src/app/api`; the remaining `isGlobalSuperAdmin` use is the explicit live value returned by the shared authorization layer. No schema or migration change was introduced.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

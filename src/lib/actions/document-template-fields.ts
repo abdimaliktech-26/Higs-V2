@@ -2,19 +2,13 @@
 
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { requireActiveOrganizationMembership, requireOrganizationRole } from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { validate, createTemplateFieldSchema, updateTemplateFieldSchema } from "@/lib/validation"
 import { getFieldConditionDependencySummary } from "@/lib/actions/template-conditions"
 import { UserRole } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
-
-function canManage(user: Record<string, unknown>) {
-  const role = getActiveRole(user as any)
-  return (user.isSuperAdmin as boolean) || ADMIN_ROLES.includes(role)
-}
 
 type ActionResult<T = Record<string, unknown>> = { success: true; data: T } | { success: false; error: string }
 
@@ -22,7 +16,7 @@ type ActionResult<T = Record<string, unknown>> = { success: true; data: T } | { 
 export async function getDocumentTemplateFields(documentTemplateId: string) {
   const template = await prisma.documentTemplate.findUnique({ where: { id: documentTemplateId } })
   if (!template) throw new Error("Template not found")
-  await requireOrgAccess(template.organizationId)
+  await requireActiveOrganizationMembership(template.organizationId, "view document template fields")
 
   return prisma.documentTemplateField.findMany({
     where: { documentTemplateId },
@@ -35,14 +29,9 @@ export async function createDocumentTemplateField(documentTemplateId: string, ra
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const session = await auth()
-  if (!session?.user) return { success: false, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false, error: "Insufficient permissions" }
-
   const template = await prisma.documentTemplate.findUnique({ where: { id: documentTemplateId } })
   if (!template) return { success: false, error: "Template not found" }
-  await requireOrgAccess(template.organizationId)
+  const authorization = await requireOrganizationRole(template.organizationId, ADMIN_ROLES, "create document template field")
   if (template.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
 
   const existing = await prisma.documentTemplateField.findUnique({
@@ -69,7 +58,7 @@ export async function createDocumentTemplateField(documentTemplateId: string, ra
 
   await createAuditEvent({
     organizationId: template.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_FIELD_CREATED",
     targetType: "document_template_field",
     targetId: field.id,
@@ -85,17 +74,12 @@ export async function updateDocumentTemplateField(fieldId: string, raw: Record<s
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
 
-  const session = await auth()
-  if (!session?.user) return { success: false, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false, error: "Insufficient permissions" }
-
   const field = await prisma.documentTemplateField.findUnique({
     where: { id: fieldId },
     include: { documentTemplate: { select: { id: true, organizationId: true, status: true } } },
   })
   if (!field) return { success: false, error: "Field not found" }
-  await requireOrgAccess(field.documentTemplate.organizationId)
+  const authorization = await requireOrganizationRole(field.documentTemplate.organizationId, ADMIN_ROLES, "update document template field")
   if (field.documentTemplate.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
 
   if (data.fieldKey && data.fieldKey !== field.fieldKey) {
@@ -131,7 +115,7 @@ export async function updateDocumentTemplateField(fieldId: string, raw: Record<s
 
   await createAuditEvent({
     organizationId: field.documentTemplate.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_FIELD_UPDATED",
     targetType: "document_template_field",
     targetId: fieldId,
@@ -142,17 +126,12 @@ export async function updateDocumentTemplateField(fieldId: string, raw: Record<s
 }
 
 export async function deleteDocumentTemplateField(fieldId: string): Promise<ActionResult<{ id: string }>> {
-  const session = await auth()
-  if (!session?.user) return { success: false, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!canManage(user)) return { success: false, error: "Insufficient permissions" }
-
   const field = await prisma.documentTemplateField.findUnique({
     where: { id: fieldId },
     include: { documentTemplate: { select: { id: true, organizationId: true, status: true } } },
   })
   if (!field) return { success: false, error: "Field not found" }
-  await requireOrgAccess(field.documentTemplate.organizationId)
+  const authorization = await requireOrganizationRole(field.documentTemplate.organizationId, ADMIN_ROLES, "delete document template field")
   if (field.documentTemplate.status === "retired") return { success: false, error: "Retired templates cannot be edited" }
 
   const dependencies = await getFieldConditionDependencySummary(field.documentTemplateId, field.fieldKey)
@@ -164,7 +143,7 @@ export async function deleteDocumentTemplateField(fieldId: string): Promise<Acti
 
   await createAuditEvent({
     organizationId: field.documentTemplate.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "TEMPLATE_FIELD_DELETED",
     targetType: "document_template_field",
     targetId: fieldId,
