@@ -126,4 +126,19 @@ Approval and staff-signature administration now use the same live target-resourc
 
 `SUPER_ADMIN`, `ORG_ADMIN`, and `COMPLIANCE_DIRECTOR` retain organization-wide approval/signature administration. `CASE_MANAGER` is assignment-scoped. `DSP` and `NURSE` cannot administer approval or signature workflows. Portal signature discovery and execution remain on the separate live portal session, grant, permission, and accepted-authorization checks; PR-2C does not weaken or replace them.
 
+## PR-2D — Reports and Audit Read Boundaries
+
+Report and audit surfaces now derive access from current database membership and role:
+
+- report access requires a current client-read role;
+- Case Manager, DSP, and Nurse report aggregates are restricted to currently assigned clients across clients, packets, documents, validation results, signatures, approvals, and supporting documents;
+- assignment-scoped staff activity reports expose only the live actor's own audit activity;
+- organization-wide roles retain organization-wide report aggregates;
+- audit event lists ignore caller-supplied actor filters for non-administrative roles, preventing a user from overriding the enforced self scope;
+- audit detail authorizes the event's organization and actor scope before loading actor or organization detail;
+- assignment-scoped audit dashboard packet metrics include only currently assigned clients; and
+- resource audit summaries first derive the owning organization from a minimal event lookup, then return only that organization's events and enforce self scope for non-administrative roles.
+
+These changes also make assignment start and end dates authoritative in reporting and audit packet aggregates, rather than treating any historical assignment row as current access.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

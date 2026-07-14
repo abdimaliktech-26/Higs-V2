@@ -2,25 +2,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const findManyMock = vi.fn().mockResolvedValue([])
 const countMock = vi.fn().mockResolvedValue(0)
-const requireOrgAccessMock = vi.fn()
-const getActiveRoleMock = vi.fn()
+const findUniqueMock = vi.fn()
+const findFirstMock = vi.fn()
+const packetFindManyMock = vi.fn()
+const requireActiveOrganizationMembershipMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     auditEvent: {
       findMany: (...args: unknown[]) => findManyMock(...args),
       count: (...args: unknown[]) => countMock(...args),
+      findUnique: (...args: unknown[]) => findUniqueMock(...args),
+      findFirst: (...args: unknown[]) => findFirstMock(...args),
     },
+    packet: { findMany: (...args: unknown[]) => packetFindManyMock(...args) },
   },
 }))
 
-vi.mock("@/lib/permissions", () => ({
-  requireOrgAccess: (...args: unknown[]) => requireOrgAccessMock(...args),
-  getActiveRole: (...args: unknown[]) => getActiveRoleMock(...args),
-}))
-
-vi.mock("@/lib/auth", () => ({
-  auth: vi.fn(),
+vi.mock("@/lib/live-authorization", () => ({
+  requireActiveOrganizationMembership: (...args: unknown[]) => requireActiveOrganizationMembershipMock(...args),
 }))
 
 vi.mock("@/lib/validation", () => ({
@@ -34,14 +34,14 @@ describe("getAuditEvents — search filter", () => {
   beforeEach(() => {
     findManyMock.mockClear()
     countMock.mockClear()
-    requireOrgAccessMock.mockReset()
-    getActiveRoleMock.mockReset()
+    findUniqueMock.mockReset()
+    findFirstMock.mockReset()
+    packetFindManyMock.mockResolvedValue([])
+    requireActiveOrganizationMembershipMock.mockReset()
+    requireActiveOrganizationMembershipMock.mockResolvedValue({ userId: "user-1", organizationId: ORG_ID, role: "SUPER_ADMIN" })
   })
 
   it("empty audit search omits the OR clause entirely", async () => {
-    requireOrgAccessMock.mockResolvedValue({ id: "user-1", isSuperAdmin: true, memberships: [] })
-    getActiveRoleMock.mockReturnValue("SUPER_ADMIN")
-
     const { getAuditEvents } = await import("@/lib/actions/audit")
     await getAuditEvents(ORG_ID, { search: "" })
 
@@ -50,9 +50,6 @@ describe("getAuditEvents — search filter", () => {
   })
 
   it("exact valid AuditAction search matches the enum by equality, not contains", async () => {
-    requireOrgAccessMock.mockResolvedValue({ id: "user-1", isSuperAdmin: true, memberships: [] })
-    getActiveRoleMock.mockReturnValue("SUPER_ADMIN")
-
     const { getAuditEvents } = await import("@/lib/actions/audit")
     await getAuditEvents(ORG_ID, { search: "client viewed" })
 
@@ -66,9 +63,6 @@ describe("getAuditEvents — search filter", () => {
   })
 
   it("free-text search that is not a valid enum falls back to text-field conditions only", async () => {
-    requireOrgAccessMock.mockResolvedValue({ id: "user-1", isSuperAdmin: true, memberships: [] })
-    getActiveRoleMock.mockReturnValue("SUPER_ADMIN")
-
     const { getAuditEvents } = await import("@/lib/actions/audit")
     await getAuditEvents(ORG_ID, { search: "north star packet" })
 
@@ -80,8 +74,7 @@ describe("getAuditEvents — search filter", () => {
   })
 
   it("tenant scoping remains enforced for non-view-all roles regardless of search", async () => {
-    requireOrgAccessMock.mockResolvedValue({ id: "user-1", isSuperAdmin: false, memberships: [] })
-    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    requireActiveOrganizationMembershipMock.mockResolvedValue({ userId: "user-1", organizationId: ORG_ID, role: "CASE_MANAGER" })
 
     const { getAuditEvents } = await import("@/lib/actions/audit")
     await getAuditEvents(ORG_ID, { search: "client viewed" })
@@ -90,5 +83,37 @@ describe("getAuditEvents — search filter", () => {
     expect(where.organizationId).toBe(ORG_ID)
     expect(where.actorId).toBe("user-1")
     expect(where.OR).toContainEqual({ action: "CLIENT_VIEWED" })
+  })
+
+  it("does not let an assignment-scoped actor override their own actor filter", async () => {
+    requireActiveOrganizationMembershipMock.mockResolvedValue({ userId: "user-1", organizationId: ORG_ID, role: "CASE_MANAGER" })
+    const { getAuditEvents } = await import("@/lib/actions/audit")
+    await getAuditEvents(ORG_ID, { actorId: "another-user" })
+    expect(findManyMock.mock.calls[0][0].where.actorId).toBe("user-1")
+  })
+})
+
+describe("audit detail and dashboard resource scope", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    findManyMock.mockResolvedValue([])
+    countMock.mockResolvedValue(0)
+    packetFindManyMock.mockResolvedValue([])
+    requireActiveOrganizationMembershipMock.mockResolvedValue({ userId: "user-1", organizationId: ORG_ID, role: "CASE_MANAGER" })
+  })
+
+  it("hides another actor's audit event from a Case Manager", async () => {
+    findUniqueMock.mockResolvedValue({ organizationId: ORG_ID, actorId: "other-user" })
+    const { getAuditEventDetail } = await import("@/lib/actions/audit")
+    await expect(getAuditEventDetail("event-1")).resolves.toBeNull()
+    expect(findUniqueMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("limits dashboard packet aggregates to currently assigned clients", async () => {
+    const { getAuditDashboardSummary } = await import("@/lib/actions/audit")
+    await getAuditDashboardSummary(ORG_ID)
+    const where = packetFindManyMock.mock.calls[0][0].where
+    expect(where.client.assignments.some.staffUserId).toBe("user-1")
+    expect(where.client.assignments.some.AND).toHaveLength(2)
   })
 })

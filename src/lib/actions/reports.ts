@@ -1,29 +1,23 @@
 "use server"
 
 import { prisma } from "@/lib/db"
-import {  } from "@/lib/validation"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { CLIENT_READ_ROLES, ORGANIZATION_WIDE_CLIENT_ROLES, requireOrganizationRole } from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { UserRole } from "@prisma/client"
-
-const FULL_REPORT_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
 export interface ReportFilters {
   from?: string; to?: string; program?: string; packetType?: string; staffId?: string; status?: string
 }
 
-interface ScopedWhere {
-  client?: Record<string, unknown>
-  organizationId?: string
-  assignments?: Record<string, unknown>
-}
-
-function getBaseWhere(orgId: string, isFullAccess: boolean, userId: string, filters?: ReportFilters): ScopedWhere {
-  const where: ScopedWhere = { organizationId: orgId }
-  if (!isFullAccess) {
-    where.assignments = { some: { staffUserId: userId } }
+function currentAssignmentWhere(userId: string, now: Date) {
+  return {
+    some: {
+      staffUserId: userId,
+      AND: [
+        { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+        { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+      ],
+    },
   }
-  return where
 }
 
 function getDateFilter(filters?: ReportFilters): Record<string, Date> | undefined {
@@ -46,28 +40,38 @@ export interface ReportsData {
 }
 
 export async function getReportsData(orgId: string, filters?: ReportFilters): Promise<ReportsData> {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user as any)
-  const isSuperAdmin = user.isSuperAdmin as boolean
-  const isFullAccess = isSuperAdmin || FULL_REPORT_ROLES.includes(role)
-  const userId = user.id
-
-  const baseWhere = getBaseWhere(orgId, isFullAccess, userId)
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "view organization reports")
+  const isFullAccess = ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)
+  const userId = authorization.userId
+  const assignmentWhere = currentAssignmentWhere(userId, new Date())
+  const clientWhere: Record<string, unknown> = { organizationId: orgId }
+  if (!isFullAccess) clientWhere.assignments = assignmentWhere
   const basePacketWhere: Record<string, unknown> = { organizationId: orgId }
-  if (!isFullAccess) basePacketWhere.client = { assignments: { some: { staffUserId: userId } } }
+  if (!isFullAccess) basePacketWhere.client = { assignments: assignmentWhere }
+
+  const signatureWhere: Record<string, unknown> = { organizationId: orgId }
+  const approvalWhere: Record<string, unknown> = { organizationId: orgId }
+  const supportingDocumentWhere: Record<string, unknown> = { organizationId: orgId }
+  const auditWhere: Record<string, unknown> = { organizationId: orgId, createdAt: { gte: new Date(Date.now() - 30 * 86400000) } }
+  if (!isFullAccess) {
+    signatureWhere.packet = { client: { assignments: assignmentWhere } }
+    approvalWhere.packet = { client: { assignments: assignmentWhere } }
+    supportingDocumentWhere.client = { assignments: assignmentWhere }
+    auditWhere.actorId = userId
+  }
 
   const dateFilter = getDateFilter(filters)
   if (dateFilter) basePacketWhere.createdAt = dateFilter
 
   const [clients, packets, documents, validations, signatures, approvals, supportingDocs, auditEvents, programs] = await Promise.all([
-    prisma.client.groupBy({ by: ["status"], where: { organizationId: orgId } as any, _count: true }),
+    prisma.client.groupBy({ by: ["status"], where: clientWhere as any, _count: true }),
     prisma.packet.findMany({ where: basePacketWhere, select: { status: true, dueDate: true, completedAt: true, packetType: true, createdAt: true, clientId: true } }),
     prisma.packetDocument.findMany({ where: { packet: basePacketWhere as any }, select: { status: true } }),
     prisma.validationResult.findMany({ where: { packet: basePacketWhere as any }, select: { score: true, criticalCount: true, warningCount: true }, orderBy: { ranAt: "desc" } }),
-    prisma.signatureRequest.findMany({ where: { organizationId: orgId }, select: { status: true } }),
-    prisma.approvalRequest.findMany({ where: { organizationId: orgId }, select: { status: true } }),
-    prisma.supportingDocument.count({ where: { organizationId: orgId } }),
-    prisma.auditEvent.groupBy({ by: ["actorId"], where: { organizationId: orgId, createdAt: { gte: new Date(Date.now() - 30 * 86400000) } }, _count: true, orderBy: { _count: { id: "desc" } }, take: 10 }),
+    prisma.signatureRequest.findMany({ where: signatureWhere as any, select: { status: true } }),
+    prisma.approvalRequest.findMany({ where: approvalWhere as any, select: { status: true } }),
+    prisma.supportingDocument.count({ where: supportingDocumentWhere as any }),
+    prisma.auditEvent.groupBy({ by: ["actorId"], where: auditWhere as any, _count: true, orderBy: { _count: { id: "desc" } }, take: 10 }),
     prisma.program.findMany({ where: { organizationId: orgId, isActive: true }, select: { id: true, name: true, code: true } }),
   ])
 

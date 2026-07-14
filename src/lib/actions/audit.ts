@@ -1,31 +1,43 @@
 "use server"
 
 import { prisma } from "@/lib/db"
-import { validate, auditQuerySchema } from "@/lib/validation"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
-import { auth } from "@/lib/auth"
+import { requireActiveOrganizationMembership } from "@/lib/live-authorization"
 import { UserRole, AuditAction } from "@prisma/client"
 
 const VIEW_ALL_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
+
+async function requireAuditScope(orgId: string, reason: string) {
+  const authorization = await requireActiveOrganizationMembership(orgId, reason)
+  return { authorization, isViewAll: VIEW_ALL_ROLES.includes(authorization.role) }
+}
+
+function currentAssignmentWhere(userId: string, now: Date) {
+  return {
+    some: {
+      staffUserId: userId,
+      AND: [
+        { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+        { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+      ],
+    },
+  }
+}
 
 export async function getAuditEvents(orgId: string, params?: {
   action?: string; actorId?: string; targetType?: string; targetId?: string
   search?: string; from?: string; to?: string; page?: number; pageSize?: number
 }) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user as any)
-  const isSuperAdmin = user.isSuperAdmin as boolean
-  const isViewAll = isSuperAdmin || VIEW_ALL_ROLES.includes(role)
+  const { authorization, isViewAll } = await requireAuditScope(orgId, "list audit events")
 
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 50
   const where: Record<string, unknown> = { organizationId: orgId }
 
   if (!isViewAll) {
-    where.actorId = user.id
+    where.actorId = authorization.userId
   }
 
   if (params?.action) where.action = params.action
-  if (params?.actorId) where.actorId = params.actorId
+  if (params?.actorId && isViewAll) where.actorId = params.actorId
   if (params?.targetType) where.targetType = params.targetType
   if (params?.targetId) where.targetId = params.targetId
 
@@ -65,21 +77,22 @@ export async function getAuditEvents(orgId: string, params?: {
 }
 
 export async function getAuditEventDetail(eventId: string) {
+  const target = await prisma.auditEvent.findUnique({ where: { id: eventId }, select: { organizationId: true, actorId: true } })
+  if (!target?.organizationId) return null
+  const { authorization, isViewAll } = await requireAuditScope(target.organizationId, "view audit event")
+  if (!isViewAll && target.actorId !== authorization.userId) return null
+
   const event = await prisma.auditEvent.findUnique({
     where: { id: eventId },
     include: { actor: { select: { name: true, email: true } }, organization: { select: { name: true, id: true } } },
   })
   if (!event) return null
-  await requireOrgAccess(event.organizationId!)
   return event
 }
 
 export async function getAuditDashboardSummary(orgId: string) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user as any)
-  const isSuperAdmin = user.isSuperAdmin as boolean
-  const isViewAll = isSuperAdmin || VIEW_ALL_ROLES.includes(role)
-  const actorScope = isViewAll ? {} : { actorId: user.id }
+  const { authorization, isViewAll } = await requireAuditScope(orgId, "view audit dashboard")
+  const actorScope = isViewAll ? {} : { actorId: authorization.userId }
 
   const now = new Date()
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000)
@@ -96,7 +109,9 @@ export async function getAuditDashboardSummary(orgId: string) {
       include: { actor: { select: { name: true, email: true } } },
     }),
     prisma.packet.findMany({
-      where: { organizationId: orgId },
+      where: isViewAll
+        ? { organizationId: orgId }
+        : { organizationId: orgId, client: { assignments: currentAssignmentWhere(authorization.userId, now) } },
       select: { status: true, documents: { select: { status: true, isRequired: true } } },
     }),
   ])
@@ -120,19 +135,23 @@ export async function getAuditDashboardSummary(orgId: string) {
 }
 
 export async function getAuditSummary(targetType: string, targetId: string) {
-  const session = await auth()
-  if (!session?.user) throw new Error("Unauthorized")
+  const target = await prisma.auditEvent.findFirst({
+    where: { targetType, targetId, organizationId: { not: null } },
+    select: { organizationId: true },
+  })
+  if (!target?.organizationId) return []
+  const { authorization, isViewAll } = await requireAuditScope(target.organizationId, "view resource audit summary")
 
   const events = await prisma.auditEvent.findMany({
-    where: { targetType, targetId },
+    where: {
+      organizationId: target.organizationId,
+      targetType,
+      targetId,
+      ...(isViewAll ? {} : { actorId: authorization.userId }),
+    },
     orderBy: { createdAt: "desc" },
     take: 100,
     include: { actor: { select: { name: true } } },
   })
-
-  if (events.length > 0) {
-    await requireOrgAccess(events[0].organizationId!)
-  }
-
   return events
 }
