@@ -401,9 +401,13 @@ describe("getEligiblePortalSigningGrants", () => {
   })
 })
 
-describe("Step 5c.1 — no portal execution behavior exists yet", () => {
-  it("this module exports no executePortalSignature function", async () => {
+// Superseded by Step 5c.2 (approved): executePortalSignature now exists in
+// this module, exercised in full by signatures-execute-portal.test.ts. This
+// test now confirms only that it's a real function — the "no execution"
+// guarantee from Step 5c.1 doesn't apply once 5c.2 is in scope.
+describe("Step 5c.2 — portal execution now exists", () => {
+  it("executePortalSignature is a real function", async () => {
     const mod = await import("@/lib/actions/signatures")
-    expect((mod as any).executePortalSignature).toBeUndefined()
+    expect(typeof (mod as any).executePortalSignature).toBe("function")
   })
 })

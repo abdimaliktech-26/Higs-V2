@@ -6,9 +6,11 @@ import { validate, createSignatureRequestSchema } from "@/lib/validation"
 import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
-import { createAuditEvent } from "@/lib/audit"
+import { requirePortalPermission } from "@/lib/portal/auth"
+import { createAuditEvent, createPortalAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 import { limiters, checkRateLimit } from "@/lib/rate-limit"
 import { formatSignedFieldValue, normalizeSignerName, normalizeDisplayName } from "@/lib/actions/signature-formatting"
 
@@ -328,6 +330,145 @@ export interface ExecuteStaffSignatureResult {
   allRequiredSignaturesComplete: boolean
 }
 
+// Alias kept distinct (not merged into ExecuteStaffSignatureResult) so the
+// staff and portal action contracts can diverge later without a shared type
+// forcing them to stay identical — they simply happen to have the same
+// shape today.
+export type ExecutePortalSignatureResult = ExecuteStaffSignatureResult
+
+// ── Step 5c.2 — shared identity-independent execution transaction ──
+//
+// Records exactly one actor per SignatureEvent — a staff execution sets
+// createdById and leaves portalUserId null; a portal execution sets
+// portalUserId and leaves createdById null. Never both. Everything here is
+// intentionally identity-agnostic: field/document re-verification, the
+// conditional-updateMany concurrency gate, deterministic field-value
+// formatting, the SignatureEvent, both audit writes, and the remaining-
+// count query are all identical regardless of who signed. Staff-specific
+// authorization (org role, self-signer-email match, typed-name match,
+// consent) and portal-specific authorization (grant/authorization
+// re-verification) deliberately stay in their own calling functions, never
+// here — this function only runs once every one of those has already
+// passed.
+type SignatureExecutionActor =
+  | { type: "staff"; userId: string }
+  | { type: "portal"; portalUserId: string; organizationId: string; clientId: string; accessGrantId: string }
+
+interface SignatureExecutionParams {
+  requestId: string
+  packetDocumentId: string
+  pdfFieldId: string
+  organizationId: string
+  packetId: string | null
+  signerName: string
+  signerDisplayName: string
+  signedAt: Date
+  ip: string
+  userAgent: string | null
+  actor: SignatureExecutionActor
+}
+
+async function executeSignatureTransaction(
+  tx: Prisma.TransactionClient,
+  params: SignatureExecutionParams
+): Promise<{ remainingIncompleteSignatures: number }> {
+  const { requestId, packetDocumentId, pdfFieldId, organizationId, packetId, signerName, signerDisplayName, signedAt, ip, userAgent, actor } = params
+
+  // Re-verify field ownership and type inside the transaction — never trust
+  // the outer, pre-transaction read for this.
+  const field = await tx.pdfField.findUnique({ where: { id: pdfFieldId } })
+  if (!field || field.packetDocumentId !== packetDocumentId) {
+    throw new Error("The linked signature field could not be verified.")
+  }
+  if (field.fieldType !== "signature") {
+    throw new Error("The linked field is not a signature field.")
+  }
+
+  // Re-verify the document's organization, applicability, and lock status
+  // inside the transaction too.
+  const doc = await tx.packetDocument.findUnique({ where: { id: packetDocumentId }, include: { packet: true } })
+  if (!doc || doc.packet.organizationId !== organizationId) {
+    throw new Error("The linked document could not be verified.")
+  }
+  if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") {
+    throw new Error("This document is currently not applicable based on packet conditions and cannot be signed.")
+  }
+  if (doc.packet.status === "approved" || doc.packet.status === "archived") {
+    throw new Error("This document is approved and locked for editing.")
+  }
+
+  // The concurrency gate: only a request currently "sent" or "viewed"
+  // transitions to "signed", and exactly one concurrent caller can ever win
+  // this — a conditional update, never a read-then-write. This remains the
+  // sole double-signing gate for both staff and portal execution.
+  const updateResult = await tx.signatureRequest.updateMany({
+    where: { id: requestId, status: { in: ["sent", "viewed"] } },
+    data: { status: "signed", signedAt, signedIp: ip, signedUserAgent: userAgent },
+  })
+  if (updateResult.count !== 1) {
+    throw new Error("This signature request has already been completed.")
+  }
+
+  const fieldValue = formatSignedFieldValue(signerDisplayName, signedAt)
+  await tx.pdfField.update({ where: { id: field.id }, data: { value: fieldValue } })
+
+  await tx.signatureEvent.create({
+    data: {
+      signatureRequestId: requestId,
+      eventType: "signed",
+      ipAddress: ip,
+      userAgent,
+      createdById: actor.type === "staff" ? actor.userId : null,
+      portalUserId: actor.type === "portal" ? actor.portalUserId : null,
+      metadata: actor.type === "staff" ? { method: "staff_self_signature" } : { method: "portal_signature" },
+    },
+  })
+
+  // Staff-facing AuditEvent — created for both staff and portal execution,
+  // so a portal-signed document remains visible in the org-wide compliance
+  // audit surfaces staff already use. actorId is left unset for a portal
+  // signature (never a PortalUser id in the staff User FK) — the portal
+  // signer's identity lives in structured metadata instead, matching the
+  // existing actorId:undefined convention already used for non-staff-
+  // actor events elsewhere in this codebase.
+  const staffAuditMetadata =
+    actor.type === "portal"
+      ? { packetId, packetDocumentId, signerName, method: "portal_signature", portalUserId: actor.portalUserId, accessGrantId: actor.accessGrantId }
+      : { packetId, packetDocumentId, signerName }
+  await createAuditEvent({
+    organizationId,
+    actorId: actor.type === "staff" ? actor.userId : undefined,
+    action: "SIGNATURE_COMPLETED",
+    targetType: "signature_request",
+    targetId: requestId,
+    ipAddress: ip,
+    userAgent,
+    metadata: staffAuditMetadata,
+  }, tx)
+
+  // Portal-facing audit — records the portal actor and portal activity,
+  // reusing the previously dormant PORTAL_SIGNATURE_SIGNED value.
+  if (actor.type === "portal") {
+    await createPortalAuditEvent({
+      organizationId: actor.organizationId,
+      portalUserId: actor.portalUserId,
+      clientId: actor.clientId,
+      action: "PORTAL_SIGNATURE_SIGNED",
+      targetType: "signature_request",
+      targetId: requestId,
+      ipAddress: ip,
+      userAgent: userAgent ?? undefined,
+      metadata: { packetId, packetDocumentId, accessGrantId: actor.accessGrantId },
+    }, tx)
+  }
+
+  const remainingIncompleteSignatures = packetId
+    ? await tx.signatureRequest.count({ where: { packetId, status: { in: ["pending", "sent", "viewed"] } } })
+    : 0
+
+  return { remainingIncompleteSignatures }
+}
+
 // ── Step 5a.1 — Staff Signature Execution Foundation ──
 //
 // The only approved path to a "signed" SignatureRequest. Staff-self-
@@ -409,76 +550,199 @@ export async function executeStaffSignature(
     const packetDocumentId = req.packetDocumentId
     const pdfFieldId = req.pdfFieldId
 
-    const txResult = await prisma.$transaction(async (tx) => {
-      // Re-verify field ownership and type inside the transaction — never
-      // trust the outer, pre-transaction read for this.
-      const field = await tx.pdfField.findUnique({ where: { id: pdfFieldId } })
-      if (!field || field.packetDocumentId !== packetDocumentId) {
-        throw new Error("The linked signature field could not be verified.")
-      }
-      if (field.fieldType !== "signature") {
-        throw new Error("The linked field is not a signature field.")
-      }
-
-      // Re-verify the document's organization, applicability, and lock
-      // status inside the transaction too.
-      const doc = await tx.packetDocument.findUnique({ where: { id: packetDocumentId }, include: { packet: true } })
-      if (!doc || doc.packet.organizationId !== req.organizationId) {
-        throw new Error("The linked document could not be verified.")
-      }
-      if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE") {
-        throw new Error("This document is currently not applicable based on packet conditions and cannot be signed.")
-      }
-      if (doc.packet.status === "approved" || doc.packet.status === "archived") {
-        throw new Error("This document is approved and locked for editing.")
-      }
-
-      // The concurrency gate: only a request currently "sent" or "viewed"
-      // transitions to "signed", and exactly one concurrent caller can ever
-      // win this — a conditional update, never a read-then-write.
-      const updateResult = await tx.signatureRequest.updateMany({
-        where: { id: requestId, status: { in: ["sent", "viewed"] } },
-        data: { status: "signed", signedAt, signedIp: ip, signedUserAgent: userAgent },
+    const txResult = await prisma.$transaction((tx) =>
+      executeSignatureTransaction(tx, {
+        requestId, packetDocumentId, pdfFieldId,
+        organizationId: req.organizationId, packetId: req.packetId,
+        signerName: req.signerName,
+        signerDisplayName: normalizeDisplayName(typedName),
+        signedAt, ip, userAgent,
+        actor: { type: "staff", userId: actorId },
       })
-      if (updateResult.count !== 1) {
-        throw new Error("This signature request has already been completed.")
-      }
-
-      const fieldValue = formatSignedFieldValue(normalizeDisplayName(typedName), signedAt)
-      await tx.pdfField.update({ where: { id: field.id }, data: { value: fieldValue } })
-
-      await tx.signatureEvent.create({
-        data: {
-          signatureRequestId: requestId,
-          eventType: "signed",
-          ipAddress: ip,
-          userAgent,
-          createdById: actorId,
-          metadata: { method: "staff_self_signature" },
-        },
-      })
-
-      await createAuditEvent({
-        organizationId: req.organizationId,
-        actorId,
-        action: "SIGNATURE_COMPLETED",
-        targetType: "signature_request",
-        targetId: requestId,
-        ipAddress: ip,
-        userAgent,
-        metadata: { packetId: doc.packetId, packetDocumentId, signerName: req.signerName },
-      }, tx)
-
-      const remainingIncompleteSignatures = req.packetId
-        ? await tx.signatureRequest.count({
-            where: { packetId: req.packetId, status: { in: ["pending", "sent", "viewed"] } },
-          })
-        : 0
-
-      return { remainingIncompleteSignatures }
-    })
+    )
 
     revalidatePath("/signatures")
+    revalidatePath(`/signatures/${requestId}`)
+
+    return {
+      success: true,
+      data: {
+        requestId,
+        status: "signed",
+        signedAt: signedAt.toISOString(),
+        remainingIncompleteSignatures: txResult.remainingIncompleteSignatures,
+        allRequiredSignaturesComplete: txResult.remainingIncompleteSignatures === 0,
+      },
+    }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
+  }
+}
+
+// ── Step 5c.2 — Portal Signature Execution Action ──
+//
+// The only approved path for a portal user to sign their own assigned
+// request. Structurally mirrors executeStaffSignature but with entirely
+// different outer authorization: a live portal session, an exact
+// portalUserId/accessGrantId match against the request, a live
+// canSignDocuments check, and a live accepted/effective/non-revoked
+// PortalAccessAuthorization — never signerEmail alone, since the
+// structured grant/portal-user/contact/client relationships already
+// established in Step 5c.1 are authoritative here.
+//
+// Nothing about organization, client, grant, authorization, contact,
+// packet/document/field relationships, timestamp, IP, or user-agent is
+// ever taken from the caller. Portal permission and authorization are
+// legally significant and revocable, so every one of those checks is
+// re-verified a second time inside the transaction, immediately before
+// the request's status transition — the outer checks are a UX
+// convenience, never treated as sufficient on their own.
+export async function executePortalSignature(
+  requestId: string,
+  input: { signerName: string; consentAccepted: boolean }
+): Promise<{ success: true; data: ExecutePortalSignatureResult } | { success: false; error: string }> {
+  try {
+    const req = await prisma.signatureRequest.findUnique({
+      where: { id: requestId },
+      include: { packetDocument: { include: { packet: true } } },
+    })
+    if (!req) return { success: false, error: "Signature request not found" }
+
+    // The portal-assignment invariant from Step 5c.1: all three or none.
+    // A staff request (all null) or a partially-assigned row can never be
+    // executed through this action.
+    if (!req.portalUserId || !req.accessGrantId || !req.clientContactId) {
+      return { success: false, error: "This request is not assigned to a portal signer." }
+    }
+    if (!req.packetDocumentId || !req.packetDocument || !req.pdfFieldId) {
+      return { success: false, error: "This request is not linked to a signature field." }
+    }
+
+    const rl = checkRateLimit(limiters.signature, req.portalUserId)
+    if (rl) return rl
+
+    const clientId = req.packetDocument.packet.clientId
+
+    // Live portal session + live, unexpired/unrevoked grant + live
+    // canSignDocuments check — nothing here is trusted from a prior page
+    // render.
+    const context = await requirePortalPermission(clientId, "canSignDocuments")
+
+    if (req.portalUserId !== context.portalUserId) {
+      return { success: false, error: "You are not the signer assigned to this request." }
+    }
+    if (req.accessGrantId !== context.accessId) {
+      return { success: false, error: "This request is not linked to your current access grant." }
+    }
+
+    const contact = await prisma.clientContact.findUnique({ where: { id: req.clientContactId } })
+    if (!contact || contact.clientId !== clientId) {
+      return { success: false, error: "The signer contact for this request could not be verified." }
+    }
+
+    const now = new Date()
+    const authorization = await prisma.portalAccessAuthorization.findFirst({
+      where: {
+        accessGrantId: req.accessGrantId,
+        portalUserId: req.portalUserId,
+        clientId,
+        revokedAt: null,
+        acceptedAt: { not: null },
+        effectiveDate: { lte: now },
+        OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+      },
+    })
+    if (!authorization) {
+      return { success: false, error: "No accepted, effective signing authorization exists for this access grant." }
+    }
+
+    // Typed-name comparison against the Step 5c.1 server-derived
+    // ClientContact snapshot on the request — the same normalization
+    // helper executeStaffSignature already uses, never a new comparison
+    // mechanism.
+    const typedName = (input.signerName || "").trim()
+    if (!typedName) return { success: false, error: "Enter your name to sign." }
+    if (normalizeSignerName(typedName) !== normalizeSignerName(req.signerName)) {
+      return { success: false, error: "The name you entered does not match the signer name on this request." }
+    }
+
+    if (input.consentAccepted !== true) {
+      return { success: false, error: "You must accept the consent statement to sign." }
+    }
+    if (!req.consentText || !req.consentText.trim()) {
+      return { success: false, error: "This request has no consent language configured and cannot be signed yet." }
+    }
+
+    if (req.packetDocument.applicabilityStatus === "CONDITIONALLY_INACTIVE") {
+      return { success: false, error: "This document is currently not applicable based on packet conditions and cannot be signed." }
+    }
+    if (req.packetDocument.packet.status === "approved" || req.packetDocument.packet.status === "archived") {
+      return { success: false, error: "This document is approved and locked for editing." }
+    }
+    if (req.status !== "sent" && req.status !== "viewed") {
+      return { success: false, error: "This signature request has already been completed." }
+    }
+
+    const { ip, userAgent } = await getSignatureRequestMeta()
+    const signedAt = new Date()
+    const packetDocumentId = req.packetDocumentId
+    const pdfFieldId = req.pdfFieldId
+    const accessGrantId = req.accessGrantId
+    const portalUserId = req.portalUserId
+    const organizationId = req.organizationId
+    const clientContactId = req.clientContactId
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      // Second, transactional re-verification — portal permission and
+      // authorization are legally significant and revocable, so the outer
+      // checks above are not treated as sufficient. A revocation,
+      // permission disablement, grant expiry, reassignment, or contact
+      // change that wins the race against this transaction is caught here,
+      // before the status transition, not after.
+      const grant = await tx.portalClientAccess.findUnique({ where: { id: accessGrantId } })
+      if (!grant || grant.portalUserId !== portalUserId || grant.clientId !== clientId || grant.organizationId !== organizationId) {
+        throw new Error("This request is no longer linked to your access grant.")
+      }
+      if (grant.status !== "ACTIVE" || grant.revokedAt || (grant.expiresAt && grant.expiresAt <= signedAt)) {
+        throw new Error("Your access grant is no longer active.")
+      }
+      if (!grant.canSignDocuments) {
+        throw new Error("Signing permission is no longer enabled for your access grant.")
+      }
+
+      const txAuthorization = await tx.portalAccessAuthorization.findFirst({
+        where: {
+          accessGrantId, portalUserId, clientId,
+          revokedAt: null,
+          acceptedAt: { not: null },
+          effectiveDate: { lte: signedAt },
+          OR: [{ expirationDate: null }, { expirationDate: { gt: signedAt } }],
+        },
+      })
+      if (!txAuthorization) {
+        throw new Error("Your signing authorization is no longer accepted and effective.")
+      }
+
+      const txContact = await tx.clientContact.findUnique({ where: { id: clientContactId } })
+      if (!txContact || txContact.clientId !== clientId) {
+        throw new Error("The signer contact for this request could not be verified.")
+      }
+
+      const txReq = await tx.signatureRequest.findUnique({ where: { id: requestId } })
+      if (!txReq || txReq.portalUserId !== portalUserId || txReq.accessGrantId !== accessGrantId) {
+        throw new Error("This request has been reassigned and can no longer be executed.")
+      }
+
+      return executeSignatureTransaction(tx, {
+        requestId, packetDocumentId, pdfFieldId,
+        organizationId, packetId: req.packetId,
+        signerName: req.signerName,
+        signerDisplayName: normalizeDisplayName(typedName),
+        signedAt, ip, userAgent,
+        actor: { type: "portal", portalUserId, organizationId, clientId, accessGrantId },
+      })
+    })
+
     revalidatePath(`/signatures/${requestId}`)
 
     return {
