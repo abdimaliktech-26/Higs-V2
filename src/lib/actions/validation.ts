@@ -3,9 +3,14 @@
 import { revalidatePath } from "next/cache"
 import { validate, createValidationRuleSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import {
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  getLiveStaffAuthorizationContext,
+  requireActiveOrganizationMembership,
+  requireOrganizationRole,
+  requirePacketAccess,
+} from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { limiters, checkRateLimit } from "@/lib/rate-limit"
 import { buildPacketConditionContext, buildEditorDocumentConditionState } from "@/lib/conditions/runtime"
@@ -16,7 +21,7 @@ const RUN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"
 // === Validation Rules ===
 
 export async function getValidationRules(orgId: string, params?: { category?: string; active?: boolean }) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "list validation rules")
   const where: Record<string, unknown> = { organizationId: orgId }
   if (params?.category) where.category = params.category
   if (params?.active !== undefined) where.active = params.active
@@ -27,13 +32,10 @@ export async function createValidationRule(raw: Record<string, unknown>) {
   const parsed = validate(createValidationRuleSchema, raw)
   if (!parsed.success) return { success: false as const, error: parsed.error }
   const data = parsed.data
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  const orgId = user.activeOrganizationId as string
-  await requireOrgAccess(orgId)
-  if (!MANAGE_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
-    return { success: false as const, error: "Insufficient permissions" }
+  const identity = await getLiveStaffAuthorizationContext()
+  const orgId = identity.selectedOrganizationId
+  if (!orgId) return { success: false as const, error: "Select an organization" }
+  await requireOrganizationRole(orgId, MANAGE_ROLES, "create validation rule")
 
   await prisma.validationRule.create({ data: { organizationId: orgId, ...data } })
   revalidatePath("/compliance-rules-engine")
@@ -43,21 +45,15 @@ export async function createValidationRule(raw: Record<string, unknown>) {
 // ── Staff: activate/deactivate a ValidationRule — deactivating one actually
 // stops runPacketValidation from enforcing that category, not just a display flag ──
 export async function updateValidationRuleActive(ruleId: string, active: boolean) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  if (!MANAGE_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
-    return { success: false as const, error: "Insufficient permissions" }
-
   const rule = await prisma.validationRule.findUnique({ where: { id: ruleId } })
   if (!rule) return { success: false as const, error: "Rule not found" }
-  await requireOrgAccess(rule.organizationId)
+  const authorization = await requireOrganizationRole(rule.organizationId, MANAGE_ROLES, "change validation rule status")
 
   await prisma.validationRule.update({ where: { id: ruleId }, data: { active } })
 
   await createAuditEvent({
     organizationId: rule.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "VALIDATION_RULE_STATUS_CHANGED",
     targetType: "validation_rule",
     targetId: ruleId,
@@ -70,10 +66,8 @@ export async function updateValidationRuleActive(ruleId: string, active: boolean
 // === Run Validation ===
 
 export async function runPacketValidation(packetId: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  const actorId = user.id as string
+  const authorization = await requirePacketAccess(packetId, "manage", "run packet validation")
+  const actorId = authorization.userId
   const rl = checkRateLimit(limiters.validation, actorId)
   if (rl) return rl
 
@@ -89,9 +83,7 @@ export async function runPacketValidation(packetId: string) {
   if (!packet) return { success: false as const, error: "Packet not found" }
   type PacketDocForValidation = (typeof packet.documents)[number]
   type PacketFieldForValidation = PacketDocForValidation["fields"][number]
-  await requireOrgAccess(packet.organizationId)
-  const role = getActiveRole(user as any)
-  if (!RUN_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
+  if (authorization.organizationId !== packet.organizationId || !RUN_ROLES.includes(authorization.role))
     return { success: false as const, error: "Insufficient permissions" }
 
   const rules = await prisma.validationRule.findMany({
@@ -348,9 +340,25 @@ export async function runPacketValidation(packetId: string) {
 }
 
 export async function getValidationResults(orgId: string, params?: { packetId?: string; page?: number; pageSize?: number }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, RUN_ROLES, "list validation results")
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 20
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    const now = new Date()
+    where.packet = {
+      client: {
+        assignments: {
+          some: {
+            staffUserId: authorization.userId,
+            AND: [
+              { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+              { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+            ],
+          },
+        },
+      },
+    }
+  }
   if (params?.packetId) where.packetId = params.packetId
 
   const [results, total] = await Promise.all([
@@ -370,6 +378,11 @@ export async function getValidationResults(orgId: string, params?: { packetId?: 
 }
 
 export async function getValidationResultDetail(resultId: string) {
+  const target = await prisma.validationResult.findUnique({ where: { id: resultId }, select: { packetId: true, organizationId: true } })
+  if (!target?.packetId) return null
+  const authorization = await requirePacketAccess(target.packetId, "manage", "view validation result")
+  if (authorization.organizationId !== target.organizationId || !RUN_ROLES.includes(authorization.role)) return null
+
   const result = await prisma.validationResult.findUnique({
     where: { id: resultId },
     include: {
@@ -387,25 +400,29 @@ export async function getValidationResultDetail(resultId: string) {
     },
   })
   if (!result) return null
-  await requireOrgAccess(result.organizationId)
   return result
 }
 
 export async function resolveValidationIssue(issueId: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
+  const target = await prisma.validationIssue.findUnique({
+    where: { id: issueId },
+    select: { validationResult: { select: { packetId: true, organizationId: true } } },
+  })
+  if (!target?.validationResult.packetId) return { success: false as const, error: "Not found" }
+  const authorization = await requirePacketAccess(target.validationResult.packetId, "manage", "resolve validation issue")
+  if (authorization.organizationId !== target.validationResult.organizationId || !RUN_ROLES.includes(authorization.role)) {
+    return { success: false as const, error: "Access denied" }
+  }
 
   const issue = await prisma.validationIssue.findUnique({
     where: { id: issueId },
     include: { validationResult: { include: { packet: true } } },
   })
   if (!issue) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(issue.validationResult.organizationId)
 
   await prisma.validationIssue.update({
     where: { id: issueId },
-    data: { status: "resolved", resolvedAt: new Date(), resolvedById: user.id as string },
+    data: { status: "resolved", resolvedAt: new Date(), resolvedById: authorization.userId },
   })
 
   // Recompute result score
@@ -423,7 +440,7 @@ export async function resolveValidationIssue(issueId: string) {
 
   await createAuditEvent({
     organizationId: result.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "VALIDATION_ISSUE_RESOLVED",
     targetType: "validation_issue", targetId: issueId,
     metadata: { validationResultId: result.id, packetId: result.packetId },

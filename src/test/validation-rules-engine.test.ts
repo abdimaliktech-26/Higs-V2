@@ -18,6 +18,10 @@ const validationIssueCreate = vi.fn()
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requirePacketAccessMock = vi.fn()
+const requireOrganizationRoleMock = vi.fn()
+const requireActiveOrganizationMembershipMock = vi.fn()
+const getLiveStaffAuthorizationContextMock = vi.fn()
 const createAuditEventMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
@@ -39,6 +43,13 @@ vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
 vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
+}))
+vi.mock("@/lib/live-authorization", () => ({
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  getLiveStaffAuthorizationContext: (...a: unknown[]) => getLiveStaffAuthorizationContextMock(...a),
+  requireActiveOrganizationMembership: (...a: unknown[]) => requireActiveOrganizationMembershipMock(...a),
+  requireOrganizationRole: (...a: unknown[]) => requireOrganizationRoleMock(...a),
+  requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
@@ -184,6 +195,10 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue({})
   getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+  requirePacketAccessMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN" })
+  requireOrganizationRoleMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN" })
+  requireActiveOrganizationMembershipMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN" })
+  getLiveStaffAuthorizationContextMock.mockResolvedValue({ userId: STAFF_ID, selectedOrganizationId: ORG_ID })
   validationResultCreate.mockResolvedValue({ id: "result-1" })
   packetUpdate.mockResolvedValue({})
 })
@@ -892,11 +907,11 @@ describe("updateValidationRuleActive", () => {
   })
 
   it("rejects a role not permitted to manage rules", async () => {
-    getActiveRoleMock.mockReturnValue("DSP")
+    validationRuleFindUnique.mockResolvedValue({ id: "rule-1", organizationId: ORG_ID, active: true })
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
     const { updateValidationRuleActive } = await import("@/lib/actions/validation")
-    const result = await updateValidationRuleActive("rule-1", false)
-    expect(result.success).toBe(false)
-    expect(validationRuleFindUnique).not.toHaveBeenCalled()
+    await expect(updateValidationRuleActive("rule-1", false)).rejects.toThrow("Access denied")
+    expect(validationRuleUpdate).not.toHaveBeenCalled()
   })
 
   it("rejects a nonexistent rule", async () => {
@@ -910,7 +925,7 @@ describe("updateValidationRuleActive", () => {
 
   it("rejects cross-tenant rule toggling", async () => {
     validationRuleFindUnique.mockResolvedValue({ id: "rule-1", organizationId: "org-OTHER", active: true })
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
     const { updateValidationRuleActive } = await import("@/lib/actions/validation")
     await expect(updateValidationRuleActive("rule-1", false)).rejects.toThrow("Access denied")
     expect(validationRuleUpdate).not.toHaveBeenCalled()

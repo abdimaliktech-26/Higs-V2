@@ -141,4 +141,18 @@ Report and audit surfaces now derive access from current database membership and
 
 These changes also make assignment start and end dates authoritative in reporting and audit packet aggregates, rather than treating any historical assignment row as current access.
 
+## PR-2E — Validation Workflow Authorization
+
+Compliance validation now uses live target-organization and target-packet authorization throughout:
+
+- validation-rule reads require current active organization membership;
+- rule creation treats the selected organization only as a new-resource target, then requires a current organization-wide management role;
+- rule status changes derive the organization from the rule and record the live actor;
+- packet validation authorizes the owning packet and current client assignment before loading the detailed packet/client/document field model or running condition-aware validation;
+- validation result lists require a current validation role and limit Case Managers to currently assigned clients;
+- result detail loads a minimal result target first, authorizes its owning packet, then loads client Medicaid identifiers, documents, issues, and staff detail; and
+- issue resolution authorizes the owning packet before the detailed issue read and records the live database actor as resolver and audit actor.
+
+The existing condition-aware validation engine, rule scoping, scoring, packet status transitions, and audit behavior remain intact. DSP and Nurse roles cannot run or administer validation; assigned Case Managers can run validation and work with results only for their assigned clients.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
