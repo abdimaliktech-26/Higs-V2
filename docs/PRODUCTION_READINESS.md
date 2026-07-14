@@ -12,6 +12,23 @@ The core product workflow is substantially built. Production hardening now takes
 
 Completing PR-1 does not make Higsi V2 PHI-ready.
 
+## Current checkpoint decision after PR-1 through PR-4
+
+The authorized in-repository live-authorization and session-hardening work is complete. Staff actions, staff API routes, staff file delivery, direct server-rendered Prisma reads, and platform-wide Super Admin reads now derive authorization from current database state. The final authorization regression baseline is 1,289/1,289 tests across 67 files, with Prisma validation, TypeScript, ESLint, the production build, the real Postgres migration, and the standalone CI seed path verified.
+
+Higsi V2 remains approved only for synthetic-data development/demonstrations and internal workflow evaluation. It is still **not approved** for real PHI or a controlled PHI pilot because the remaining blockers require work that was explicitly deferred or external operational/legal evidence:
+
+- durable encrypted object storage and verified file backup/restore;
+- distributed production rate limiting;
+- malware scanning for uploads;
+- staff MFA and reviewed SSO/session governance;
+- real PDF version materialization instead of placeholder version keys;
+- reviewed signature/authorization consent language and evidence policy;
+- vendor BAAs, deployment architecture, encryption/key-management evidence, monitoring/alerting, incident response, retention/deletion policy, and tested disaster recovery; and
+- full break-glass/time-limited Super Admin governance and customer-visible access reporting.
+
+No claim that the SaaS is commercially complete or PHI-ready should be made until those items are separately authorized, implemented or evidenced, and re-audited. Billing and onboarding automation remain product-feature deferrals and are not prerequisites for validating the completed authorization foundation itself.
+
 ## PR-1 — Live Staff Authorization Foundation
 
 ### Objective
