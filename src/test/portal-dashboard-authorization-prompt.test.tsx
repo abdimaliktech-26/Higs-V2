@@ -10,6 +10,17 @@ const getPortalAccessAuthorizationForClientMock = vi.fn()
 vi.mock("@/lib/actions/portal-access-authorizations", () => ({
   getPortalAccessAuthorizationForClient: (...a: unknown[]) => getPortalAccessAuthorizationForClientMock(...a),
 }))
+// Step 5c.3 — dashboard/page.tsx now also imports getPendingPortalSignatureRequest
+// from this module (for the sibling PendingSignaturePrompt). Left
+// unmocked, the real module pulls in @/lib/auth's next-auth chain, which
+// Vite's cold SSR dependency scan cannot always resolve (next-auth's own
+// `import ... from "next/server"`) — an unrelated resolution failure, not
+// anything this test exercises. Mocking it out is the correct fix, not a
+// workaround: this file only ever needs the authorization prompt's own
+// read action.
+vi.mock("@/lib/actions/signatures", () => ({
+  getPendingPortalSignatureRequest: vi.fn().mockResolvedValue(null),
+}))
 
 const CLIENT_ID = "client-0000001"
 const OTHER_CLIENT_ID = "client-0000002"
