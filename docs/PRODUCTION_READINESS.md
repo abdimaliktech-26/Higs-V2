@@ -218,4 +218,19 @@ AI extraction, analysis, recommendation, and history actions now use live resour
 
 AI use remains restricted to organization-wide roles and assigned Case Managers. DSP and Nurse roles cannot run or administer these AI workflows.
 
+## PR-2K — Document Library Authorization
+
+The staff document library now applies live authorization before returning or mutating PHI-bearing resources:
+
+- library lists and dashboard aggregates require a current client-read role;
+- Case Manager, DSP, and Nurse packet-document and supporting-document results are restricted to currently assigned clients, including active assignment dates;
+- packet list filters compose organization, status, client, and assignment predicates without allowing one predicate to overwrite the organization boundary;
+- packet-document detail authorizes the owning document and packet before loading client, field, or template detail;
+- supporting-document detail derives authorization from its packet or client and rejects inconsistent organization chains before loading detail;
+- template detail requires current active membership in the template's owning organization;
+- packet- and client-bound supporting-document uploads derive the organization and live actor from the owning resource; and
+- unbound supporting-document uploads are restricted to organization-wide roles in the selected target organization.
+
+The conversion preserves the existing library tabs, searches, categories, signed file delivery, audit events, and storage behavior. Six focused tests cover assignment-filter composition, organization-wide scope, client-bound and unbound uploads, authorization-before-detail loading, and organization-chain mismatch rejection. Final verification passed 1,270/1,270 tests across 63 files, ESLint, Prisma format and validation, TypeScript type-check, and the Next.js production build. No schema or migration change was introduced.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
