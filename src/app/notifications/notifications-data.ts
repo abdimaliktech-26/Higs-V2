@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db"
-import { requireOrgAccess } from "@/lib/permissions"
+import { CLIENT_READ_ROLES, ORGANIZATION_WIDE_CLIENT_ROLES, requireOrganizationRole, requirePacketAccess } from "@/lib/live-authorization"
 
 export interface FocusPacketContext {
   id: string
@@ -20,7 +20,8 @@ export interface FocusPacketContext {
  */
 export async function getNotificationFocusPacket(orgId: string, packetId: string | undefined): Promise<FocusPacketContext | null> {
   if (!packetId) return null
-  await requireOrgAccess(orgId)
+  const authorization = await requirePacketAccess(packetId, "read", "view notification packet context")
+  if (authorization.organizationId !== orgId) return null
   const packet = await prisma.packet.findFirst({
     where: { id: packetId, organizationId: orgId },
     select: {
@@ -57,7 +58,7 @@ export interface UpcomingDeadline {
  * just with a future date window instead of a past one.
  */
 export async function getUpcomingDeadlines(orgId: string, days = 7): Promise<UpcomingDeadline[]> {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "view upcoming packet deadlines")
   const now = new Date()
   const horizon = new Date(now.getTime() + days * 86400000)
 
@@ -66,6 +67,15 @@ export async function getUpcomingDeadlines(orgId: string, days = 7): Promise<Upc
       organizationId: orgId,
       dueDate: { gte: now, lte: horizon },
       status: { notIn: ["approved", "archived"] },
+      ...(!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role) ? {
+        client: { assignments: { some: {
+          staffUserId: authorization.userId,
+          AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+            { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+          ],
+        } } },
+      } : {}),
     },
     select: { id: true, packetType: true, dueDate: true, client: { select: { firstName: true, lastName: true } } },
     orderBy: { dueDate: "asc" },

@@ -1,6 +1,11 @@
 import Link from "next/link"
 import { prisma } from "@/lib/db"
-import { getActiveRole } from "@/lib/permissions"
+import {
+  CLIENT_READ_ROLES,
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  requireGlobalSuperAdmin,
+  requireOrganizationRole,
+} from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +21,6 @@ import {
 } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 
-const FULL_ACCESS_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 const ACTIVE_STATUSES = ["draft", "in_progress", "needs_validation", "validation_failed", "awaiting_signature", "awaiting_approval"]
 
 function packetTypeLabel(type: string): string {
@@ -31,16 +35,24 @@ interface Props {
   role: UserRole
 }
 
-export async function DashboardContent({ orgId, isSuperAdmin, userId, userName, role }: Props) {
-  if (isSuperAdmin && !orgId) {
+export async function DashboardContent({ orgId, userName }: Props) {
+  if (!orgId) {
+    await requireGlobalSuperAdmin("view platform dashboard")
     return <SuperAdminDashboard />
   }
-  if (!orgId) return null
-
-  const isFullAccess = isSuperAdmin || FULL_ACCESS_ROLES.includes(role)
-  const clientScope = isFullAccess ? {} : { client: { assignments: { some: { staffUserId: userId } } } }
 
   const now = new Date()
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "view organization dashboard")
+  const userId = authorization.userId
+  const isFullAccess = ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)
+  const assignments = { some: {
+    staffUserId: userId,
+    AND: [
+      { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+      { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+    ],
+  } }
+  const clientScope = isFullAccess ? {} : { client: { assignments } }
   const in30Days = new Date(now.getTime() + 30 * 86400000)
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000)
   const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000)
@@ -55,7 +67,7 @@ export async function DashboardContent({ orgId, isSuperAdmin, userId, userName, 
     recentAudits,
     openCriticalIssues,
   ] = await Promise.all([
-    prisma.client.count({ where: { organizationId: orgId, status: "active", ...(isFullAccess ? {} : { assignments: { some: { staffUserId: userId } } }) } }),
+    prisma.client.count({ where: { organizationId: orgId, status: "active", ...(isFullAccess ? {} : { assignments }) } }),
     prisma.packet.findMany({
       where: { organizationId: orgId, ...clientScope },
       orderBy: { updatedAt: "desc" },
@@ -79,10 +91,10 @@ export async function DashboardContent({ orgId, isSuperAdmin, userId, userName, 
       take: 10,
       include: { packet: { include: { client: { select: { firstName: true, lastName: true } } } } },
     }),
-    prisma.validationResult.findMany({ where: { organizationId: orgId, ranAt: { gte: thirtyDaysAgo } }, select: { score: true } }),
-    prisma.validationResult.findMany({ where: { organizationId: orgId, ranAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } }, select: { score: true } }),
+    prisma.validationResult.findMany({ where: { organizationId: orgId, ranAt: { gte: thirtyDaysAgo }, ...(clientScope.client ? { packet: { client: clientScope.client } } : {}) }, select: { score: true } }),
+    prisma.validationResult.findMany({ where: { organizationId: orgId, ranAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo }, ...(clientScope.client ? { packet: { client: clientScope.client } } : {}) }, select: { score: true } }),
     prisma.auditEvent.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId: orgId, ...(isFullAccess ? {} : { actorId: userId }) },
       orderBy: { createdAt: "desc" },
       take: 6,
       include: { actor: { select: { name: true } } },

@@ -247,6 +247,18 @@ Document- and packet-template administration now uses the live database-backed s
 
 The conversion preserves PDF validation/storage, immutable template version rows, field and condition carry-forward behavior, condition validation and cycle detection, dependency protection, packet materialization, and existing audit behavior. The five focused template suites passed 198/198 tests and the full suite passed 1,270/1,270 tests across 63 files. No legacy `requireOrgAccess`, `getActiveRole`, JWT membership, or JWT selected-role authorization remains under `src/lib/actions` or `src/app/api`; the remaining `isGlobalSuperAdmin` use is the explicit live value returned by the shared authorization layer. No schema or migration change was introduced.
 
+## PR-2M — Server-Rendered Direct-Query Authorization
+
+A final repository-wide Prisma audit found four server-rendered data modules outside the action/API directories covered by PR-2L's legacy scan. They now use the same live boundary:
+
+- the organization dashboard ignores role, user, and Super Admin props for authorization, reloads the current target-organization role, applies effective assignment dates to clients, packets, signatures, and validation aggregates, and self-scopes audit activity for assignment-scoped staff;
+- the platform dashboard requires a live global Super Admin check before cross-tenant counts;
+- analytics program and client-growth data requires a current client-read role and is assignment-scoped for Case Manager, DSP, and Nurse;
+- notification packet focus authorizes the owning packet before loading client/Medicaid context, while upcoming deadlines are assignment-scoped; and
+- organization program configuration reads require current active membership.
+
+Five focused tests prove stale page props cannot widen dashboard scope, all dashboard validation periods are scoped, audit activity is self-scoped, platform counts require live Super Admin, analytics/deadlines use effective assignments, notification focus uses packet authorization, and organization configuration uses active membership. This closes the direct server-rendered Prisma gap; page-level redirects remain presentation routing only and are not treated as an authorization boundary.
+
 ## PR-3 — Versioned Staff Session Revocation and Live Super Admin Governance
 
 The existing Auth.js JWT strategy is retained, but every staff-session access now revalidates the identity and session version against Postgres:

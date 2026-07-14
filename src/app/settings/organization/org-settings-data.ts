@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db"
-import { requireOrgAccess } from "@/lib/permissions"
+import { requireActiveOrganizationMembership } from "@/lib/live-authorization"
 
 export interface OrgProgramRow {
   id: string
@@ -15,7 +15,7 @@ export interface OrgProgramRow {
  * src/lib/actions/reports.ts.
  */
 export async function getOrgPrograms(orgId: string): Promise<OrgProgramRow[]> {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "view organization programs")
   return prisma.program.findMany({
     where: { organizationId: orgId },
     select: { id: true, name: true, code: true, isActive: true },
