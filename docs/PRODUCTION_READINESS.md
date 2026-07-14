@@ -155,4 +155,17 @@ Compliance validation now uses live target-organization and target-packet author
 
 The existing condition-aware validation engine, rule scoping, scoring, packet status transitions, and audit behavior remain intact. DSP and Nurse roles cannot run or administer validation; assigned Case Managers can run validation and work with results only for their assigned clients.
 
+## PR-2F — Portal Invitation and Signing-Authorization Administration
+
+Staff-side portal access administration now uses current database roles in the organization that owns the target resource:
+
+- invitation creation derives the organization from the selected client rather than the staff session's selected organization;
+- invitation revocation derives the organization from the invitation;
+- portal access-grant revocation derives the organization from the grant;
+- invitation, access-grant, and client-picker reads require a current organization-wide portal-management role;
+- signing-authorization creation, listing, revocation, and sign-permission changes derive the organization from the access grant or client; and
+- every converted write records the live database actor instead of a JWT role or actor snapshot.
+
+Portal management remains restricted to `SUPER_ADMIN`, `ORG_ADMIN`, and `COMPLIANCE_DIRECTOR`. The public invitation activation flow and portal-user consent acceptance continue to use their separate token, portal-session, live-grant, and concurrency controls and were not replaced by staff authorization.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

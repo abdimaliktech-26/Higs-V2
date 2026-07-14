@@ -18,6 +18,7 @@ const portalClientAccessUpdateTx = vi.fn()
 
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requireOrganizationRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
 
 function makeTx() {
@@ -49,6 +50,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
+}))
+vi.mock("@/lib/live-authorization", () => ({
+  requireOrganizationRole: (...a: unknown[]) => requireOrganizationRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
@@ -98,6 +102,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   requireOrgAccessMock.mockResolvedValue(staffUser())
   getActiveRoleMock.mockReturnValue("ORG_ADMIN")
+  requireOrganizationRoleMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN" })
   portalClientAccessFindUnique.mockResolvedValue(grantRow())
   portalAccessAuthorizationFindFirst.mockResolvedValue(null)
   portalAccessAuthorizationCreate.mockResolvedValue(authorizationRow())
@@ -148,7 +153,7 @@ describe("createPortalAccessAuthorization", () => {
   })
 
   it("6. unauthorized staff role is rejected", async () => {
-    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Insufficient permissions"))
     const { createPortalAccessAuthorization } = await import("@/lib/actions/portal-access-authorizations")
     const result = await createPortalAccessAuthorization(authorizationInput())
     expect(result.success).toBe(false)
@@ -156,7 +161,7 @@ describe("createPortalAccessAuthorization", () => {
   })
 
   it("7. cross-organization access is rejected", async () => {
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
     const { createPortalAccessAuthorization } = await import("@/lib/actions/portal-access-authorizations")
     const result = await createPortalAccessAuthorization(authorizationInput())
     expect(result.success).toBe(false)
@@ -362,7 +367,7 @@ describe("setPortalSignPermission — enablement", () => {
   })
 
   it("unauthorized staff role cannot enable or disable signing", async () => {
-    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Insufficient permissions"))
     const { setPortalSignPermission } = await import("@/lib/actions/portal-access-authorizations")
     const result = await setPortalSignPermission(GRANT_ID, true)
     expect(result.success).toBe(false)
@@ -441,14 +446,14 @@ describe("revokePortalAccessAuthorization", () => {
   })
 
   it("cross-organization revocation is rejected", async () => {
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
     const { revokePortalAccessAuthorization } = await import("@/lib/actions/portal-access-authorizations")
     const result = await revokePortalAccessAuthorization("auth-1")
     expect(result.success).toBe(false)
   })
 
   it("unauthorized staff role cannot revoke", async () => {
-    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Insufficient permissions"))
     const { revokePortalAccessAuthorization } = await import("@/lib/actions/portal-access-authorizations")
     const result = await revokePortalAccessAuthorization("auth-1")
     expect(result.success).toBe(false)

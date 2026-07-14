@@ -39,6 +39,7 @@ vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: vi.fn(),
   getActiveRole: vi.fn(),
 }))
+vi.mock("@/lib/live-authorization", () => ({ requireOrganizationRole: vi.fn() }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 vi.mock("next/headers", () => ({ headers: (...a: unknown[]) => headersMock(...a) }))
 

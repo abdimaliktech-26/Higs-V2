@@ -5,8 +5,7 @@ import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
 import { Prisma, UserRole, PortalUserStatus } from "@prisma/client"
 import { prisma } from "@/lib/db"
-import { auth } from "@/lib/auth"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { requireOrganizationRole } from "@/lib/live-authorization"
 import { createPortalAuditEvent } from "@/lib/audit"
 import { validate, createPortalInvitationSchema, activatePortalAccountSchema } from "@/lib/validation"
 import { generatePortalToken, hashPortalToken } from "@/lib/portal/tokens"
@@ -26,12 +25,7 @@ async function getRequestIp(): Promise<string> {
 }
 
 async function requireStaffManager(orgId: string) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user)
-  if (!user.isSuperAdmin && !STAFF_MANAGE_ROLES.includes(role)) {
-    throw new Error("Insufficient permissions")
-  }
-  return user
+  return requireOrganizationRole(orgId, STAFF_MANAGE_ROLES, "manage portal access")
 }
 
 export type InvitationDisplayStatus = "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED"
@@ -50,19 +44,12 @@ export async function createPortalInvitation(raw: Record<string, unknown>): Prom
   const data = parsed.data
 
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-    await requireStaffManager(orgId)
-
     // Client ownership must be verified server-side — never trust the
-    // clientId form value beyond confirming it actually belongs to this org.
+    // clientId form value beyond deriving the target organization from it.
     const client = await prisma.client.findUnique({ where: { id: data.clientId }, select: { id: true, organizationId: true } })
-    if (!client || client.organizationId !== orgId) {
-      return { success: false, error: "Client not found" }
-    }
+    if (!client) return { success: false, error: "Client not found" }
+    const authorization = await requireStaffManager(client.organizationId)
+    const orgId = authorization.organizationId
 
     if (data.clientContactId) {
       const contact = await prisma.clientContact.findUnique({ where: { id: data.clientContactId }, select: { id: true, clientId: true } })
@@ -81,7 +68,7 @@ export async function createPortalInvitation(raw: Record<string, unknown>): Prom
         clientContactId: data.clientContactId || null,
         invitedEmail,
         relationship: data.relationship,
-        invitedByUserId: user.id as string,
+        invitedByUserId: authorization.userId,
         accessRole: data.accessRole,
         requestedPermissions: {
           canViewDocuments: data.canViewDocuments,
@@ -99,7 +86,7 @@ export async function createPortalInvitation(raw: Record<string, unknown>): Prom
       action: "PORTAL_INVITATION_SENT",
       targetType: "portal_invitation",
       targetId: invitation.id,
-      metadata: { invitedEmail, accessRole: data.accessRole, invitedByUserId: user.id as string },
+      metadata: { invitedEmail, accessRole: data.accessRole, invitedByUserId: authorization.userId },
     })
 
     revalidatePath("/settings/portal-access")
@@ -114,24 +101,17 @@ export async function createPortalInvitation(raw: Record<string, unknown>): Prom
 // ── Staff: revoke invitation ──
 export async function revokePortalInvitation(invitationId: string, reason?: string): Promise<ActionResult<{ id: string }>> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-    await requireStaffManager(orgId)
-
     const invitation = await prisma.portalInvitation.findUnique({ where: { id: invitationId } })
-    if (!invitation || invitation.organizationId !== orgId) {
-      return { success: false, error: "Invitation not found" }
-    }
+    if (!invitation) return { success: false, error: "Invitation not found" }
+    const authorization = await requireStaffManager(invitation.organizationId)
+    const orgId = authorization.organizationId
     if (invitation.revokedAt || invitation.acceptedAt) {
       return { success: false, error: "Invitation is already accepted or revoked" }
     }
 
     await prisma.portalInvitation.update({
       where: { id: invitationId },
-      data: { status: "REVOKED", revokedAt: new Date(), revokedByUserId: user.id as string },
+      data: { status: "REVOKED", revokedAt: new Date(), revokedByUserId: authorization.userId },
     })
 
     await createPortalAuditEvent({
@@ -196,24 +176,17 @@ export async function getClientsForPortalInvite(orgId: string) {
 // ── Staff: revoke an active access grant ──
 export async function revokePortalAccess(accessId: string, reason?: string): Promise<ActionResult<{ id: string }>> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
-    if (!orgId) return { success: false, error: "No organization selected" }
-    await requireStaffManager(orgId)
-
     const access = await prisma.portalClientAccess.findUnique({ where: { id: accessId } })
-    if (!access || access.organizationId !== orgId) {
-      return { success: false, error: "Access grant not found" }
-    }
+    if (!access) return { success: false, error: "Access grant not found" }
+    const authorization = await requireStaffManager(access.organizationId)
+    const orgId = authorization.organizationId
     if (access.status !== "ACTIVE" || access.revokedAt) {
       return { success: false, error: "Access grant is not active" }
     }
 
     await prisma.portalClientAccess.update({
       where: { id: accessId },
-      data: { status: "REVOKED", revokedAt: new Date(), revokedByUserId: user.id as string, revocationReason: reason || null },
+      data: { status: "REVOKED", revokedAt: new Date(), revokedByUserId: authorization.userId, revocationReason: reason || null },
     })
 
     await createPortalAuditEvent({

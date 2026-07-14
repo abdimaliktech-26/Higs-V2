@@ -14,7 +14,7 @@
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import { requireOrganizationRole } from "@/lib/live-authorization"
 import { requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent, createPortalAuditEvent } from "@/lib/audit"
 import { validate, createPortalAccessAuthorizationSchema } from "@/lib/validation"
@@ -29,12 +29,7 @@ type ActionResult<T = Record<string, unknown>> = { success: true; data: T } | { 
 const AUTHORIZATION_MANAGE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
 async function requireAuthorizationManager(orgId: string) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user)
-  if (!user.isSuperAdmin && !AUTHORIZATION_MANAGE_ROLES.includes(role)) {
-    throw new Error("Insufficient permissions")
-  }
-  return user
+  return requireOrganizationRole(orgId, AUTHORIZATION_MANAGE_ROLES, "manage portal signing authorization")
 }
 
 // Step 5b.1 uses only client-wide scope, recorded deterministically — never
@@ -99,7 +94,7 @@ export async function createPortalAccessAuthorization(raw: Record<string, unknow
         clientId: grant.clientId,
         portalUserId: grant.portalUserId,
         accessGrantId: grant.id,
-        grantedByUserId: user.id,
+        grantedByUserId: user.userId,
         authorityType: data.authorityType,
         scope: CLIENT_WIDE_SCOPE,
         effectiveDate,
@@ -112,7 +107,7 @@ export async function createPortalAccessAuthorization(raw: Record<string, unknow
 
     await createAuditEvent({
       organizationId: grant.organizationId,
-      actorId: user.id,
+      actorId: user.userId,
       action: "PORTAL_ACCESS_AUTHORIZATION_CREATED",
       targetType: "portal_access_authorization",
       targetId: authorization.id,
@@ -168,7 +163,7 @@ export async function revokePortalAccessAuthorization(authorizationId: string): 
     const result = await prisma.$transaction(async (tx) => {
       const updateResult = await tx.portalAccessAuthorization.updateMany({
         where: { id: authorizationId, revokedAt: null },
-        data: { revokedAt: new Date(), revokedByUserId: user.id },
+        data: { revokedAt: new Date(), revokedByUserId: user.userId },
       })
       if (updateResult.count !== 1) {
         throw new Error("This authorization has already been revoked.")
@@ -181,7 +176,7 @@ export async function revokePortalAccessAuthorization(authorizationId: string): 
 
       await createAuditEvent({
         organizationId: grant.organizationId,
-        actorId: user.id,
+        actorId: user.userId,
         action: "PORTAL_ACCESS_AUTHORIZATION_REVOKED",
         targetType: "portal_access_authorization",
         targetId: authorizationId,
@@ -245,7 +240,7 @@ export async function setPortalSignPermission(accessGrantId: string, enabled: bo
 
     await createAuditEvent({
       organizationId: grant.organizationId,
-      actorId: user.id,
+      actorId: user.userId,
       action: "PORTAL_ACCESS_SIGN_PERMISSION_CHANGED",
       targetType: "portal_client_access",
       targetId: accessGrantId,

@@ -12,6 +12,7 @@ const transactionMock = vi.fn()
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requireOrganizationRoleMock = vi.fn()
 const createPortalAuditEventMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
@@ -32,6 +33,9 @@ vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
 vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
+}))
+vi.mock("@/lib/live-authorization", () => ({
+  requireOrganizationRole: (...a: unknown[]) => requireOrganizationRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createPortalAuditEvent: (...a: unknown[]) => createPortalAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
@@ -87,6 +91,7 @@ const MALFORMED_TOKEN = "z".repeat(64) // right length, fails the hex-only shape
 
 beforeEach(() => {
   vi.clearAllMocks()
+  requireOrganizationRoleMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN" })
 })
 
 describe("createPortalInvitation", () => {
@@ -126,7 +131,8 @@ describe("createPortalInvitation", () => {
   it("rejects a role without invitation-management permission", async () => {
     authMock.mockResolvedValue({ user: staffUser() })
     requireOrgAccessMock.mockResolvedValue(staffUser())
-    getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+    clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: ORG_ID })
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Insufficient permissions"))
 
     const { createPortalInvitation } = await import("@/lib/actions/portal-invitations")
     const result = await createPortalInvitation({
@@ -144,6 +150,7 @@ describe("createPortalInvitation", () => {
     requireOrgAccessMock.mockResolvedValue(staffUser())
     getActiveRoleMock.mockReturnValue("ORG_ADMIN")
     clientFindUnique.mockResolvedValue({ id: CLIENT_ID, organizationId: "org-OTHER" })
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
 
     const { createPortalInvitation } = await import("@/lib/actions/portal-invitations")
     const result = await createPortalInvitation({
@@ -152,14 +159,14 @@ describe("createPortalInvitation", () => {
 
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/client not found/i)
+    expect(result.error).toMatch(/access denied/i)
     expect(portalInvitationCreate).not.toHaveBeenCalled()
   })
 })
 
 describe("getPortalInvitations — tenant isolation", () => {
   it("rejects listing invitations for an organization the staff member cannot access", async () => {
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireOrganizationRoleMock.mockRejectedValue(new Error("Access denied"))
 
     const { getPortalInvitations } = await import("@/lib/actions/portal-invitations")
     await expect(getPortalInvitations("org-OTHER")).rejects.toThrow("Access denied")
