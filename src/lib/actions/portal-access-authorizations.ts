@@ -1,18 +1,22 @@
 "use server"
 
 // ── Stage 5 Step 5b.1 — Portal Signing Authorization Foundation ──
+// Staff-facing actions (below): create/list/revoke an authorization,
+// enable/disable canSignDocuments. Nothing here ever sets
+// acceptedAt/acceptedIp/acceptedUserAgent — staff cannot manufacture
+// consent on a portal user's behalf through anything in this section.
 //
-// Staff-facing only. No portal consent-acceptance action, no portal
-// signing action, and no signing UI exist anywhere in this file — this is
-// the record-keeping/permission-gating foundation those later steps will
-// build on. Nothing here ever sets acceptedAt/acceptedIp/acceptedUserAgent
-// — those are exclusively written by the portal user's own future
-// acceptance action (Step 5b.2); staff cannot manufacture consent on a
-// portal user's behalf through anything in this file.
+// ── Stage 5 Step 5b.2 — Portal Consent Acceptance ──
+// Portal-facing actions (bottom of file): the authenticated portal user's
+// own read of their pending authorization and their own acceptance action.
+// No portal signing action or UI exists anywhere in this file — acceptance
+// never touches canSignDocuments.
+import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
-import { createAuditEvent } from "@/lib/audit"
+import { requirePortalClientAccess } from "@/lib/portal/auth"
+import { createAuditEvent, createPortalAuditEvent } from "@/lib/audit"
 import { validate, createPortalAccessAuthorizationSchema } from "@/lib/validation"
 import { UserRole } from "@prisma/client"
 
@@ -250,6 +254,150 @@ export async function setPortalSignPermission(accessGrantId: string, enabled: bo
 
     revalidatePath(`/clients/${grant.clientId}/portal-access`)
     return { success: true, data: { id: accessGrantId, canSignDocuments: updated.canSignDocuments } }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
+  }
+}
+
+// ── Stage 5 Step 5b.2 — Portal Consent Acceptance (portal-facing) ──
+
+async function getRequestMeta() {
+  const hdrs = await headers()
+  const forwardedFor = hdrs.get("x-forwarded-for")
+  const ip = forwardedFor ? forwardedFor.split(",")[0].trim() : hdrs.get("x-real-ip")?.trim() || "unknown"
+  const userAgent = hdrs.get("user-agent")
+  return { ip, userAgent }
+}
+
+export interface PortalAccessAuthorizationView {
+  id: string
+  authorityType: string
+  consentText: string
+  consentVersion: string
+  effectiveDate: Date
+  expirationDate: Date | null
+  acceptedAt: Date | null
+  revokedAt: Date | null
+  hasSupportingDocument: boolean
+  relationship: string
+  accessRole: string
+  grantCanSignDocuments: boolean
+}
+
+// ── Portal: the authenticated user's own authorization for one client ──
+//
+// Scoped to the caller's own, currently active PortalClientAccess grant —
+// requirePortalClientAccess re-verifies that grant live on every call, so an
+// authorization tied to a different, superseded, or inactive grant never
+// surfaces here at all (it reads as "NONE", not as a stale revoked/expired
+// record describing a defunct grant). Returns the most recent authorization
+// on this grant regardless of its own accepted/revoked/expired state, so the
+// caller can distinguish "never configured" from "configured but not
+// currently acceptable." Never exposes grantedByUserId, staff identity, or
+// the supporting document itself — only whether one is on file.
+export async function getPortalAccessAuthorizationForClient(clientId: string): Promise<PortalAccessAuthorizationView | null> {
+  const context = await requirePortalClientAccess(clientId)
+
+  const authorization = await prisma.portalAccessAuthorization.findFirst({
+    where: {
+      accessGrantId: context.accessId,
+      portalUserId: context.portalUserId,
+      clientId,
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true, authorityType: true, consentText: true, consentVersion: true,
+      effectiveDate: true, expirationDate: true, acceptedAt: true, revokedAt: true,
+      supportingDocumentId: true,
+    },
+  })
+  if (!authorization) return null
+
+  return {
+    id: authorization.id,
+    authorityType: authorization.authorityType,
+    consentText: authorization.consentText,
+    consentVersion: authorization.consentVersion,
+    effectiveDate: authorization.effectiveDate,
+    expirationDate: authorization.expirationDate,
+    acceptedAt: authorization.acceptedAt,
+    revokedAt: authorization.revokedAt,
+    hasSupportingDocument: authorization.supportingDocumentId !== null,
+    relationship: context.relationship,
+    accessRole: context.accessRole,
+    grantCanSignDocuments: context.permissions.canSignDocuments,
+  }
+}
+
+// ── Portal: the authenticated user accepts their own pending authorization ──
+//
+// The only path that may ever populate acceptedAt/acceptedIp/acceptedUserAgent.
+// Never touches PortalClientAccess.canSignDocuments — acceptance and staff
+// enablement remain two fully independent writes, exactly as approved for
+// Step 5b.1. The conditional updateMany is the sole concurrency gate: it
+// re-checks not-yet-accepted, not-revoked, effective, and not-expired
+// atomically at write time, so a stale page, a losing concurrent tab, or a
+// revocation that lands first all fail this same gate with zero writes.
+export async function acceptPortalAccessAuthorization(authorizationId: string): Promise<ActionResult<{ id: string; acceptedAt: Date }>> {
+  try {
+    const authorization = await prisma.portalAccessAuthorization.findUnique({ where: { id: authorizationId } })
+    if (!authorization) return { success: false, error: "Authorization not found" }
+
+    // requirePortalClientAccess is the authentication boundary here: it
+    // independently re-verifies a live, active, unrevoked, unexpired portal
+    // session and grant for this exact client — never trusted from a prior
+    // page render or caller-supplied client id.
+    const context = await requirePortalClientAccess(authorization.clientId)
+
+    if (authorization.portalUserId !== context.portalUserId || authorization.accessGrantId !== context.accessId) {
+      return { success: false, error: "This authorization does not belong to your account." }
+    }
+    if (!authorization.consentText.trim() || !authorization.consentVersion.trim()) {
+      return { success: false, error: "This authorization has no consent language configured and cannot be accepted yet." }
+    }
+
+    const now = new Date()
+    const { ip, userAgent } = await getRequestMeta()
+
+    const result = await prisma.portalAccessAuthorization.updateMany({
+      where: {
+        id: authorizationId,
+        portalUserId: context.portalUserId,
+        accessGrantId: context.accessId,
+        clientId: authorization.clientId,
+        acceptedAt: null,
+        revokedAt: null,
+        effectiveDate: { lte: now },
+        OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+      },
+      data: { acceptedAt: now, acceptedIp: ip, acceptedUserAgent: userAgent ?? null },
+    })
+
+    if (result.count !== 1) {
+      // Never overwrite existing acceptance evidence and never create an
+      // audit event for a losing/repeated/stale attempt — re-read the
+      // current state only to return an accurate, non-destructive message.
+      const current = await prisma.portalAccessAuthorization.findUnique({ where: { id: authorizationId } })
+      if (current?.revokedAt) return { success: false, error: "This signing authorization has been revoked and can no longer be accepted." }
+      if (current?.acceptedAt) return { success: false, error: "This signing authorization has already been accepted." }
+      if (current?.expirationDate && current.expirationDate <= now) return { success: false, error: "This signing authorization has expired." }
+      if (current && current.effectiveDate > now) return { success: false, error: "This signing authorization is not yet available for acceptance." }
+      return { success: false, error: "This signing authorization can no longer be accepted." }
+    }
+
+    await createPortalAuditEvent({
+      organizationId: context.organizationId,
+      portalUserId: context.portalUserId,
+      clientId: authorization.clientId,
+      action: "PORTAL_CONSENT_ACCEPTED",
+      targetType: "portal_access_authorization",
+      targetId: authorizationId,
+      ipAddress: ip,
+      userAgent: userAgent ?? undefined,
+      metadata: { accessGrantId: context.accessId },
+    })
+
+    return { success: true, data: { id: authorizationId, acceptedAt: now } }
   } catch (e) {
     return { success: false, error: (e as Error).message }
   }

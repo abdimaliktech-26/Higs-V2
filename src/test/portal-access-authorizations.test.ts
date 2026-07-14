@@ -465,9 +465,28 @@ describe("Step 5b.1 — regression and scope guards", () => {
     expect(result).toHaveLength(1)
   })
 
-  it("39. no portal consent-acceptance action exists in this module", async () => {
+  // Step 5b.2 staff-page regression — no code change was needed for the
+  // staff page to reflect a portal acceptance (getPortalAccessAuthorizations
+  // returns whatever is currently in the row, no caching in between); this
+  // proves that claim rather than assuming it. No polling, notification, or
+  // automatic-refresh mechanism exists or was added.
+  it("reflects acceptedAt once a portal user has accepted — the staff read model requires no code change to see it", async () => {
+    clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
+    const acceptedAt = new Date("2026-07-13T20:00:00Z")
+    portalAccessAuthorizationFindMany.mockResolvedValue([authorizationRow({ acceptedAt })])
+    const { getPortalAccessAuthorizations } = await import("@/lib/actions/portal-access-authorizations")
+    const result = await getPortalAccessAuthorizations(CLIENT_ID)
+    expect(result[0].acceptedAt).toEqual(acceptedAt)
+  })
+
+  // Superseded by Step 5b.2 (approved): the portal-owned acceptance action
+  // now exists in this module, exercised in full by
+  // portal-access-authorization-acceptance.test.ts. This test now confirms
+  // only that it's a real function — the "no acceptance action" guarantee
+  // from Step 5b.1 doesn't apply once 5b.2 is in scope.
+  it("39. the portal consent-acceptance action exists (Step 5b.2) and is a function", async () => {
     const mod = await import("@/lib/actions/portal-access-authorizations")
-    expect((mod as any).acceptPortalAccessAuthorization).toBeUndefined()
+    expect(typeof (mod as any).acceptPortalAccessAuthorization).toBe("function")
   })
 
   it("40. no portal signing action exists in this module", async () => {

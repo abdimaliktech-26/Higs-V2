@@ -1,12 +1,48 @@
+import Link from "next/link"
 import { resolvePortalPageContext } from "@/lib/portal/page-context"
 import { getPortalDashboard, generatePortalDueDateReminders } from "@/lib/actions/portal-dashboard"
+import { getPortalAccessAuthorizationForClient } from "@/lib/actions/portal-access-authorizations"
+import { derivePortalAuthorizationState } from "@/lib/portal/authorization-status"
 import { PortalShell } from "@/app/portal/portal-shell"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
+import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/states"
-import { Building2, FolderOpen, Activity } from "lucide-react"
+import { Building2, FolderOpen, Activity, ShieldCheck } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
+
+// Extracted so tests can render and assert the prompt's own visibility
+// rules directly — mocking only getPortalAccessAuthorizationForClient —
+// without also mocking getPortalDashboard, generatePortalDueDateReminders,
+// resolvePortalPageContext, or PortalShell's next/navigation hooks. Shown
+// only when there is something actually actionable: the caller's own,
+// currently active grant has a pending authorization that is effective now
+// and not revoked/expired/already accepted. derivePortalAuthorizationState
+// is the same shared derivation the acceptance page itself uses, so the
+// two surfaces can never disagree.
+export async function PendingAuthorizationPrompt({ clientId }: { clientId: string }) {
+  const authorization = await getPortalAccessAuthorizationForClient(clientId)
+  const state = derivePortalAuthorizationState(authorization, new Date())
+  if (state !== "PENDING_ACTIONABLE") return null
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
+          <div>
+            <p className="text-sm font-medium text-surface-900">Review signing authorization</p>
+            <p className="mt-0.5 text-sm text-surface-600">You have a signing authorization that requires your review. Accepting it will not sign any document.</p>
+          </div>
+        </div>
+        <Link href={`/portal/authorization?client=${clientId}`} className={buttonVariants({ variant: "primary", size: "sm" })}>
+          Review authorization
+        </Link>
+      </CardContent>
+    </Card>
+  )
+}
 
 export default async function PortalDashboardPage({ searchParams }: { searchParams: Promise<{ client?: string }> }) {
   const { client } = await searchParams
@@ -33,6 +69,8 @@ export default async function PortalDashboardPage({ searchParams }: { searchPara
           </p>
           <p className="mt-0.5 text-xs text-surface-400">You have {dashboard.relationship.toLowerCase()} access</p>
         </div>
+
+        <PendingAuthorizationPrompt clientId={currentClientId} />
 
         <Card>
           <CardHeader>
