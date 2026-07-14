@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { validate, createClientSchema, createDocTemplateSchema, createSignatureSchema, createPacketSchema, createUserSchema, orgSettingsSchema, createValidationRuleSchema } from "@/lib/validation"
+import { validate, createClientSchema, createDocTemplateSchema, createSignatureRequestSchema, createPacketSchema, createUserSchema, orgSettingsSchema, createValidationRuleSchema } from "@/lib/validation"
 
 describe("client validation", () => {
   it("accepts valid client data", () => {
@@ -50,21 +50,75 @@ describe("document template validation", () => {
 })
 
 describe("signature validation", () => {
-  it("accepts valid signature request", () => {
-    const r = validate(createSignatureSchema, {
+  const base = {
+    packetId: "packet-0000001", packetDocumentId: "doc-0000001", pdfFieldId: "field-0000001",
+    consentText: "I consent to sign this electronically.",
+  }
+
+  it("accepts a valid staff-assigned signature request", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "STAFF", ...base,
       signerName: "John Doe", signerEmail: "john@test.com",
       signerRole: "Client", signerType: "client",
     })
     expect(r.success).toBe(true)
   })
 
-  it("rejects invalid email", () => {
-    const r = validate(createSignatureSchema, {
+  it("accepts a valid portal-assigned signature request", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "PORTAL", ...base, accessGrantId: "grant-0000001",
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it("rejects invalid email on a staff-assigned request", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "STAFF", ...base,
       signerName: "John", signerEmail: "bad",
       signerRole: "Client", signerType: "client",
     })
     expect(r.success).toBe(false)
     if (!r.success) expect(r.error).toContain("email")
+  })
+
+  it("rejects a staff-assigned request missing packetDocumentId/pdfFieldId", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "STAFF", packetId: base.packetId, consentText: base.consentText,
+      signerName: "John Doe", signerEmail: "john@test.com", signerRole: "Client", signerType: "client",
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it("rejects a request with empty consent text", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "STAFF", ...base, consentText: "",
+      signerName: "John Doe", signerEmail: "john@test.com", signerRole: "Client", signerType: "client",
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it("rejects a PORTAL request carrying free-typed signer fields instead of accessGrantId", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "PORTAL", ...base,
+      signerName: "John Doe", signerEmail: "john@test.com",
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it("rejects a STAFF request that also carries accessGrantId", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "STAFF", ...base, accessGrantId: "grant-0000001",
+      signerName: "John Doe", signerEmail: "john@test.com", signerRole: "Client", signerType: "client",
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it("rejects an unrecognized assignmentType", () => {
+    const r = validate(createSignatureRequestSchema, {
+      assignmentType: "OTHER", ...base,
+      signerName: "John Doe", signerEmail: "john@test.com", signerRole: "Client", signerType: "client",
+    })
+    expect(r.success).toBe(false)
   })
 })
 

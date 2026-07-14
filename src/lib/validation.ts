@@ -197,19 +197,46 @@ export const addFieldSchema = z.object({
   pageNumber: z.number().int().min(1).default(1),
 })
 
-// ── Signature ──
-export const createSignatureSchema = z.object({
-  packetId: z.string().max(50).optional(),
-  packetDocumentId: z.string().max(50).optional(),
-  pdfFieldId: z.string().max(50).optional(),
-  signerName: z.string().min(1).max(200),
-  signerEmail: z.string().email().max(255),
-  signerRole: z.string().min(1).max(100),
-  signerType: z.string().min(1).max(50),
+// ── Signature (Stage 5 Step 5c.1) ──
+// Every newly created request — staff or portal — must link to a real
+// packet document and signature field and carry non-empty per-signature
+// consent text; the previous packet-only shape is no longer accepted here.
+// A discriminated union (rather than one object with optional portal
+// fields) makes partial portal assignment a compile-time impossibility:
+// a PORTAL request can only ever carry accessGrantId, never a free-typed
+// signer identity, and a STAFF request can never carry accessGrantId.
+const signatureRequestCommonFields = {
+  packetId: z.string().min(1).max(50),
+  packetDocumentId: z.string().min(1).max(50),
+  pdfFieldId: z.string().min(1).max(50),
+  consentText: z.string().min(1, "Consent text is required").max(10000),
   dueDate: dateStr,
-  consentText: z.string().max(10000).optional().or(z.literal("")),
   notes: z.string().max(2000).optional().or(z.literal("")),
-})
+}
+
+// .strict() on both branches so an accessGrantId slipped onto a STAFF
+// payload (or a free-typed signer identity slipped onto a PORTAL payload)
+// is rejected outright, rather than silently stripped by Zod's default
+// object parsing — the strongest guarantee this validation layer can give
+// that portal assignment is never partial.
+export const createSignatureRequestSchema = z.discriminatedUnion("assignmentType", [
+  z.object({
+    assignmentType: z.literal("STAFF"),
+    ...signatureRequestCommonFields,
+    signerName: z.string().min(1).max(200),
+    signerEmail: z.string().email().max(255),
+    signerRole: z.string().min(1).max(100),
+    signerType: z.string().min(1).max(50),
+  }).strict(),
+  z.object({
+    assignmentType: z.literal("PORTAL"),
+    ...signatureRequestCommonFields,
+    // The only portal-signer input staff may supply — portalUserId,
+    // clientContactId, signer name/email/role are all server-derived from
+    // this grant, never accepted from the client (Step 5c.1 decision #3).
+    accessGrantId: cuid,
+  }).strict(),
+])
 
 // ── Validation Rule ──
 // Constrained to categories runPacketValidation actually knows how to

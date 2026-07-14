@@ -984,10 +984,16 @@ model SignatureEvent {
   ipAddress          String?  @map("ip_address")
   userAgent          String?  @map("user_agent")
   createdById        String?  @map("created_by_id")
+  // Step 5c.1 — additive portal-actor counterpart to createdById. A staff-
+  // generated event populates createdById; a portal-generated event will
+  // populate this instead (Step 5c.2) — never both. No portal execution
+  // exists yet in this step, so no row ever sets this column.
+  portalUserId       String?  @map("portal_user_id")
   createdAt          DateTime @default(now())
 
   signatureRequest SignatureRequest @relation(fields: [signatureRequestId], references: [id], onDelete: Cascade)
   createdBy        User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  portalActor      PortalUser?      @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
 
   @@map("signature_events")
 }
@@ -1176,6 +1182,7 @@ model PortalUser {
   notifications               PortalNotification[]
   invitationsAccepted         PortalInvitation[]             @relation("PortalInvitationAcceptedBy")
   signatureRequests           SignatureRequest[]             @relation("PortalSigner")
+  signatureEvents             SignatureEvent[]
   auditEvents                 PortalAuditEvent[]             @relation("PortalAuditActor")
   emailVerificationTokens     PortalEmailVerificationToken[]
   passwordResetTokens         PortalPasswordResetToken[]

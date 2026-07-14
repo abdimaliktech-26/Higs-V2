@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
-import { validate, createSignatureSchema } from "@/lib/validation"
+import { validate, createSignatureRequestSchema } from "@/lib/validation"
 import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
@@ -42,8 +42,106 @@ async function getSignatureRequestMeta() {
   return { ip, userAgent }
 }
 
+// ── Step 5c.1 — eligible signature fields for a new request ──
+//
+// A field is eligible when it's a real signature field on an active
+// (non-conditionally-inactive) document in this packet, and isn't already
+// tied to a still-open request — reusing the exact "open" status set
+// (pending/sent/viewed) NonSigningStatus/executeStaffSignature already
+// treat as not-yet-final. Never guesses which field to use; the caller
+// always presents the full eligible set for deliberate staff selection.
+export async function getEligibleSignatureFields(packetId: string) {
+  const packet = await prisma.packet.findUnique({ where: { id: packetId }, select: { organizationId: true } })
+  if (!packet) throw new Error("Packet not found")
+  await requireOrgAccess(packet.organizationId)
+
+  const fields = await prisma.pdfField.findMany({
+    where: {
+      fieldType: "signature",
+      packetDocument: { packetId, applicabilityStatus: "ACTIVE" },
+      signatureRequests: { none: { status: { in: ["pending", "sent", "viewed"] } } },
+    },
+    include: { packetDocument: { include: { documentTemplate: { select: { name: true } } } } },
+    orderBy: [{ packetDocument: { sortOrder: "asc" } }, { pageNumber: "asc" }, { sortOrder: "asc" }],
+  })
+
+  return fields.map((f) => ({
+    id: f.id,
+    packetDocumentId: f.packetDocumentId,
+    name: f.name,
+    pageNumber: f.pageNumber,
+    isRequired: f.isRequired,
+    documentName: f.packetDocument.documentTemplate.name,
+  }))
+}
+
+// ── Step 5c.1 — eligible portal access grants for a new portal-assigned request ──
+//
+// Every check here mirrors setPortalSignPermission's own enablement
+// predicate (Step 5b.1) exactly, plus the one additional requirement this
+// step introduces: the grant must have a direct ClientContact link
+// (clientContactId), since that contact is the only reliable source for a
+// server-derived signer name (decision #3/#4) — a grant without one is not
+// eligible, not silently worked around with a heuristic.
+export async function getEligiblePortalSigningGrants(clientId: string) {
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { organizationId: true } })
+  if (!client) throw new Error("Client not found")
+  await requireOrgAccess(client.organizationId)
+
+  const now = new Date()
+  const grants = await prisma.portalClientAccess.findMany({
+    where: {
+      clientId,
+      status: "ACTIVE",
+      revokedAt: null,
+      canSignDocuments: true,
+      clientContactId: { not: null },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+    },
+    include: {
+      portalUser: { select: { id: true, email: true, status: true, emailVerifiedAt: true } },
+      clientContact: { select: { id: true, firstName: true, lastName: true, relationship: true } },
+    },
+  })
+  if (grants.length === 0) return []
+
+  const effectiveAuthorizations = await prisma.portalAccessAuthorization.findMany({
+    where: {
+      accessGrantId: { in: grants.map((g) => g.id) },
+      revokedAt: null,
+      acceptedAt: { not: null },
+      effectiveDate: { lte: now },
+      OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+    },
+    select: { accessGrantId: true },
+  })
+  const eligibleGrantIds = new Set(effectiveAuthorizations.map((a) => a.accessGrantId))
+
+  return grants
+    .filter((g) => eligibleGrantIds.has(g.id) && g.clientContact && g.portalUser.status === "ACTIVE" && g.portalUser.emailVerifiedAt !== null)
+    .map((g) => ({
+      accessGrantId: g.id,
+      portalUserId: g.portalUserId,
+      email: g.portalUser.email,
+      contactName: `${g.clientContact!.firstName} ${g.clientContact!.lastName}`,
+      relationship: g.clientContact!.relationship,
+      accessRole: g.accessRole,
+    }))
+}
+
+// ── Step 5c.1 — create a signature request (staff- or portal-assigned) ──
+//
+// A discriminated union input (createSignatureRequestSchema) makes partial
+// portal assignment impossible at the type level: only assignmentType
+// "PORTAL" carries accessGrantId, and portalUserId/clientContactId/
+// signerName/signerEmail are always derived server-side from that grant —
+// never accepted from the caller. Every request created here — staff or
+// portal — must link to a real packetDocument and a real signature-type
+// PdfField with non-empty consent text; the previous packet-only shape is
+// no longer produced by this action. No portal execution happens here —
+// this only creates the row a later step (5c.2) may execute.
 export async function createSignatureRequest(raw: Record<string, unknown>): Promise<ActionResult> {
-  const parsed = validate(createSignatureSchema, raw)
+  const parsed = validate(createSignatureRequestSchema, raw)
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
   try {
@@ -57,14 +155,110 @@ export async function createSignatureRequest(raw: Record<string, unknown>): Prom
     if (!REQUEST_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
       return { success: false, error: "Insufficient permissions" }
 
-    const req = await prisma.signatureRequest.create({
-      data: {
-        organizationId: orgId, packetId: data.packetId || null,
-        packetDocumentId: data.packetDocumentId || null, pdfFieldId: data.pdfFieldId || null,
+    const packet = await prisma.packet.findUnique({ where: { id: data.packetId } })
+    if (!packet || packet.organizationId !== orgId) return { success: false, error: "Packet not found" }
+
+    const packetDocument = await prisma.packetDocument.findUnique({ where: { id: data.packetDocumentId } })
+    if (!packetDocument || packetDocument.packetId !== packet.id) {
+      return { success: false, error: "The selected document does not belong to this packet." }
+    }
+    if (packetDocument.applicabilityStatus !== "ACTIVE") {
+      return { success: false, error: "This document is currently not applicable and cannot receive a signature request." }
+    }
+
+    const field = await prisma.pdfField.findUnique({ where: { id: data.pdfFieldId } })
+    if (!field || field.packetDocumentId !== packetDocument.id) {
+      return { success: false, error: "The selected field does not belong to the selected document." }
+    }
+    if (field.fieldType !== "signature") {
+      return { success: false, error: "The selected field is not a signature field." }
+    }
+    const openRequestOnField = await prisma.signatureRequest.findFirst({
+      where: { pdfFieldId: field.id, status: { in: ["pending", "sent", "viewed"] } },
+      select: { id: true },
+    })
+    if (openRequestOnField) {
+      return { success: false, error: "This signature field already has an open signature request." }
+    }
+
+    let signerFields: {
+      signerName: string; signerEmail: string; signerRole: string; signerType: string
+      portalUserId: string | null; clientContactId: string | null; accessGrantId: string | null
+    }
+
+    if (data.assignmentType === "PORTAL") {
+      const grant = await prisma.portalClientAccess.findUnique({
+        where: { id: data.accessGrantId },
+        include: {
+          portalUser: { select: { email: true, status: true, emailVerifiedAt: true } },
+          clientContact: { select: { firstName: true, lastName: true, clientId: true } },
+        },
+      })
+      if (!grant || grant.organizationId !== orgId || grant.clientId !== packet.clientId) {
+        return { success: false, error: "The selected portal access grant does not belong to this client." }
+      }
+      const now = new Date()
+      if (grant.status !== "ACTIVE" || grant.revokedAt || (grant.expiresAt && grant.expiresAt <= now)) {
+        return { success: false, error: "This access grant is not active and cannot receive a signature request." }
+      }
+      if (!grant.canSignDocuments) {
+        return { success: false, error: "Signing permission has not been enabled for this access grant." }
+      }
+      if (grant.portalUser.status !== "ACTIVE" || !grant.portalUser.emailVerifiedAt) {
+        return { success: false, error: "The portal user for this access grant is not an active, verified account." }
+      }
+      if (!grant.clientContactId || !grant.clientContact) {
+        return { success: false, error: "This access grant has no linked contact record and cannot be assigned a signature request." }
+      }
+      // Belt-and-suspenders: PortalInvitation's creation-time check already
+      // guarantees a grant's clientContactId always belongs to its own
+      // clientId (portal-invitations.ts), and clientContactId is never
+      // reassigned afterward — but re-verify here rather than trust that
+      // invariant silently, matching requirePortalClientAccess's own
+      // redundant organizationId re-check.
+      if (grant.clientContact.clientId !== packet.clientId) {
+        return { success: false, error: "The linked contact does not belong to this client." }
+      }
+
+      const authorization = await prisma.portalAccessAuthorization.findFirst({
+        where: {
+          accessGrantId: grant.id,
+          portalUserId: grant.portalUserId,
+          clientId: packet.clientId,
+          revokedAt: null,
+          acceptedAt: { not: null },
+          effectiveDate: { lte: now },
+          OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+        },
+      })
+      if (!authorization) {
+        return { success: false, error: "No accepted, effective signing authorization exists for this access grant." }
+      }
+
+      signerFields = {
+        signerName: `${grant.clientContact.firstName} ${grant.clientContact.lastName}`,
+        signerEmail: grant.portalUser.email,
+        signerRole: grant.accessRole,
+        signerType: "portal",
+        portalUserId: grant.portalUserId,
+        clientContactId: grant.clientContactId,
+        accessGrantId: grant.id,
+      }
+    } else {
+      signerFields = {
         signerName: data.signerName, signerEmail: data.signerEmail,
         signerRole: data.signerRole, signerType: data.signerType,
+        portalUserId: null, clientContactId: null, accessGrantId: null,
+      }
+    }
+
+    const req = await prisma.signatureRequest.create({
+      data: {
+        organizationId: orgId, packetId: packet.id,
+        packetDocumentId: packetDocument.id, pdfFieldId: field.id,
+        ...signerFields,
         status: "pending", dueDate: data.dueDate ? new Date(data.dueDate) : null,
-        consentText: data.consentText || null, notes: data.notes || null,
+        consentText: data.consentText, notes: data.notes || null,
         requestedById: user.id as string,
       },
     })
@@ -72,10 +266,11 @@ export async function createSignatureRequest(raw: Record<string, unknown>): Prom
     await createAuditEvent({
       organizationId: orgId, actorId: user.id as string,
       action: "SIGNATURE_REQUESTED", targetType: "signature_request", targetId: req.id,
-      metadata: { signerName: data.signerName, signerEmail: data.signerEmail, packetId: data.packetId },
+      metadata: { signerName: signerFields.signerName, signerEmail: signerFields.signerEmail, packetId: packet.id, assignmentType: data.assignmentType },
     })
 
     revalidatePath("/signatures")
+    revalidatePath(`/packets/${packet.id}`)
     return { success: true, data: { id: req.id } }
   } catch (e) {
     return { success: false, error: (e as Error).message }

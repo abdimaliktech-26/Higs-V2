@@ -1,6 +1,6 @@
 import { getPacketById, updatePacketStatus } from "@/lib/actions/templates"
 import { runPacketValidation, getValidationResults, getValidationResultDetail } from "@/lib/actions/validation"
-import { createSignatureRequest, getSignatureRequests } from "@/lib/actions/signatures"
+import { getSignatureRequests, getEligibleSignatureFields, getEligiblePortalSigningGrants } from "@/lib/actions/signatures"
 import { submitForApproval, getApprovalRequests, getApprovalDetail } from "@/lib/actions/approvals"
 import { getAuditSummary } from "@/lib/actions/audit"
 import { runPacketAnalysis, getAiRecommendations } from "@/lib/actions/ai"
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { EmptyState, ErrorState } from "@/components/ui/states"
 import { Separator } from "@/components/ui/separator"
 import {
-  ArrowLeft, FileText, FolderOpen, User, Calendar, CheckCircle2, Shield, BrainCircuit, Lightbulb,
+  ArrowLeft, FileText, FolderOpen, Calendar, CheckCircle2, Shield, BrainCircuit, Lightbulb,
 } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 import Link from "next/link"
@@ -26,6 +26,7 @@ import { PacketDocumentsTable } from "./packet-documents-table"
 import { PacketTimeline } from "./packet-timeline"
 import { PacketActionBar } from "./packet-action-bar"
 import { deriveReadiness, derivePriorityItem } from "./packet-overview-metrics"
+import { RequestSignatureModal } from "./request-signature-modal"
 
 interface Props { packetId: string }
 
@@ -59,12 +60,14 @@ export async function PacketOverviewContent({ packetId }: Props) {
   const currentIdx = STATUS_FLOW.indexOf(packet.status)
   const nextStatus = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null
 
-  const [validationList, signatures, approvals, activity, recommendations] = await Promise.all([
+  const [validationList, signatures, approvals, activity, recommendations, eligibleFields, eligibleGrants] = await Promise.all([
     getValidationResults(orgId, { packetId, pageSize: 1 }),
     getSignatureRequests(orgId, { packetId, pageSize: 20 }),
     getApprovalRequests(orgId, { packetId, pageSize: 1 }),
     getAuditSummary("packet", packetId),
     getAiRecommendations(orgId, { packetId, status: "open" }),
+    getEligibleSignatureFields(packetId),
+    getEligiblePortalSigningGrants(client.id),
   ])
 
   const latestValidationId = validationList.results[0]?.id
@@ -262,17 +265,13 @@ export async function PacketOverviewContent({ packetId }: Props) {
           <Card>
             <CardHeader><CardTitle>Next Steps</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              <form action={async () => {
-                "use server"
-                await createSignatureRequest({
-                  packetId, signerName: `${client.firstName} ${client.lastName}`,
-                  signerEmail: client.email || "", signerRole: "Client", signerType: "client",
-                })
-              }}>
-                <Button type="submit" className="w-full justify-start" variant="secondary">
-                  <User className="h-4 w-4" /> Request Client Signature
-                </Button>
-              </form>
+              <RequestSignatureModal
+                packetId={packetId}
+                defaultSignerName={`${client.firstName} ${client.lastName}`}
+                defaultSignerEmail={client.email || ""}
+                eligibleFields={eligibleFields}
+                eligibleGrants={eligibleGrants}
+              />
               {!approvalData || approvalData.status !== "pending" ? (
                 <form action={async () => { "use server"; await submitForApproval(packetId) }}>
                   <Button type="submit" className="w-full justify-start" variant="secondary">
