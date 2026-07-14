@@ -8,6 +8,7 @@ const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
+const requireDocumentAccessMock = vi.fn()
 
 const packetDocumentFindUnique = vi.fn()
 const pdfFieldFindMany = vi.fn()
@@ -48,6 +49,7 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/live-authorization", () => ({ requireDocumentAccess: (...a: unknown[]) => requireDocumentAccessMock(...a) }))
 vi.mock("@/lib/storage", () => ({ signStaffFileUrl: () => "https://example.com/signed" }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -170,6 +172,7 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue({})
   getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+  requireDocumentAccessMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "CASE_MANAGER" })
   pdfFieldFindMany.mockResolvedValue([{ id: FIELD_ID }])
   pdfFieldUpdate.mockResolvedValue({})
   pdfFieldCreate.mockResolvedValue({})
@@ -228,18 +231,17 @@ describe("saveDocumentFields — ownership and authorization", () => {
   })
 
   it("rejects an unauthenticated caller", async () => {
-    authMock.mockResolvedValue(null)
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { saveDocumentFields } = await import("@/lib/actions/documents")
     const result = await saveDocumentFields(DOC_ID, [])
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/unauthorized/i)
-    expect(packetDocumentFindUnique).not.toHaveBeenCalled()
+    expect(result.error).toMatch(/access denied/i)
   })
 
   it("rejects a role without edit permission", async () => {
     packetDocumentFindUnique.mockResolvedValue(legacyDoc())
-    getActiveRoleMock.mockReturnValue("DSP")
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { saveDocumentFields } = await import("@/lib/actions/documents")
     const result = await saveDocumentFields(DOC_ID, [])
     expect(result.success).toBe(false)

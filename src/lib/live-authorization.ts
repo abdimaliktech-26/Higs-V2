@@ -7,6 +7,7 @@ import type { UserRole } from "@prisma/client"
 
 export const ORGANIZATION_WIDE_CLIENT_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 export const ASSIGNMENT_SCOPED_CLIENT_ROLES: readonly UserRole[] = ["CASE_MANAGER", "DSP", "NURSE"]
+export const CLIENT_READ_ROLES: readonly UserRole[] = [...ORGANIZATION_WIDE_CLIENT_ROLES, ...ASSIGNMENT_SCOPED_CLIENT_ROLES]
 export const CLIENT_CREATION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 export const PACKET_CREATION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 export const APPROVAL_SUBMISSION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
@@ -40,8 +41,8 @@ export interface LiveResourceAuthorization extends LiveOrganizationAuthorization
   isAssignedToClient: boolean
 }
 
-export type ClientAccessCapability = "read" | "manage" | "assign" | "packet:create"
-export type PacketAccessCapability = "read" | "submit:approval"
+export type ClientAccessCapability = "read" | "manage" | "archive" | "assign" | "packet:create"
+export type PacketAccessCapability = "read" | "manage" | "submit:approval"
 export type DocumentAccessCapability = "read" | "write"
 
 async function deny(userId?: string, organizationId?: string, reason = "live authorization denied"): Promise<never> {
@@ -159,6 +160,8 @@ async function authorizeClient(
     ? organizationWide || (assignmentScoped && assigned)
     : capability === "packet:create"
       ? organizationWide || (authorization.role === "CASE_MANAGER" && assigned)
+      : capability === "manage"
+        ? organizationWide || (authorization.role === "CASE_MANAGER" && assigned)
       : organizationWide
   if (!allowed) return deny(authorization.userId, organizationId, "client capability denied")
   return { ...authorization, clientId, isAssignedToClient: assigned }
@@ -189,7 +192,7 @@ export async function requirePacketAccess(
   if (packet.client.organizationId !== packet.organizationId) {
     return deny(identity.userId, packet.organizationId, "packet organization chain mismatch")
   }
-  const clientCapability: ClientAccessCapability = capability === "submit:approval" ? "packet:create" : "read"
+  const clientCapability: ClientAccessCapability = capability === "read" ? "read" : "packet:create"
   const authorization = await authorizeClient(identity, packet.organizationId, packet.clientId, clientCapability, superAdminReason)
   if (capability === "submit:approval" && !APPROVAL_SUBMISSION_ROLES.includes(authorization.role)) {
     return deny(authorization.userId, packet.organizationId, "approval submission capability denied")

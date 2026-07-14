@@ -96,4 +96,20 @@ Staff file delivery no longer treats a signed storage key as authorization. New 
 
 Legacy raw-storage-key URLs are rejected. The unused generic upload endpoint is disabled because it created files without an owning database resource; template, supporting-document, and portal uploads continue through their resource-specific workflows. Portal file delivery remains on its separate live portal-grant authorization path.
 
+## PR-2B — Client, Packet, and Document Action Conversion
+
+The next PHI-bearing staff paths now use PR-1 live authorization:
+
+- client lists are resolved against live target-organization roles and assignment-scoped roles are always filtered to the live actor's current client assignments;
+- client detail, update, archive, program lookup, and assignable-staff lookup no longer authorize from JWT membership/role snapshots;
+- assigned Case Managers may update assigned clients, while archival remains organization-wide-role-only;
+- packet lists apply the same live organization/assignment scope;
+- ordinary packet workflow changes require live packet manage access, packet archival requires an organization-wide role, and arbitrary status strings are rejected;
+- the generic packet-status action can no longer set `approved`, so approval cannot bypass the separate audited approval-request decision and separation-of-duties check;
+- packet-document status changes use live document write access and reject unknown statuses;
+- document field save/evaluation/add/update, version creation, comments, and portal-visibility sharing use live document access and the live actor ID; and
+- direct field/version mutations now reject conditionally inactive documents and approved/archived packet locks instead of relying on the editor UI.
+
+Assignment-scoped DSP and Nurse roles remain read-only for client/packet/document resources. Case Managers receive manage access only for currently assigned clients. Client creation, client archival, assignment administration, packet archival, and approval decisions retain their more restrictive organization-wide policies.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

@@ -13,6 +13,7 @@ const createAuditEventMock = vi.fn()
 const packetDocumentFindUnique = vi.fn()
 const packetFindUnique = vi.fn()
 const pdfFieldFindMany = vi.fn()
+const requireDocumentAccessMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -27,6 +28,7 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/live-authorization", () => ({ requireDocumentAccess: (...a: unknown[]) => requireDocumentAccessMock(...a) }))
 vi.mock("@/lib/storage", () => ({ signStaffFileUrl: () => "https://example.com/signed" }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -108,6 +110,7 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue({})
   getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+  requireDocumentAccessMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "CASE_MANAGER" })
 })
 
 describe("evaluateDocumentFieldConditions — basic authenticated evaluation", () => {
@@ -152,18 +155,17 @@ describe("evaluateDocumentFieldConditions — legacy documents", () => {
 
 describe("evaluateDocumentFieldConditions — authorization and tenant safety", () => {
   it("rejects an unauthenticated caller", async () => {
-    authMock.mockResolvedValue(null)
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { evaluateDocumentFieldConditions } = await import("@/lib/actions/documents")
     const result = await evaluateDocumentFieldConditions(DOC_ID, [])
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/unauthorized/i)
-    expect(packetDocumentFindUnique).not.toHaveBeenCalled()
+    expect(result.error).toMatch(/access denied/i)
   })
 
   it("rejects cross-tenant document access", async () => {
     wireConsistentFixtures()
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { evaluateDocumentFieldConditions } = await import("@/lib/actions/documents")
     const result = await evaluateDocumentFieldConditions(DOC_ID, [])
     expect(result.success).toBe(false)
@@ -173,12 +175,12 @@ describe("evaluateDocumentFieldConditions — authorization and tenant safety", 
 
   it("rejects a role with no editor access at all", async () => {
     wireConsistentFixtures()
-    getActiveRoleMock.mockReturnValue("BILLING_ADMIN")
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { evaluateDocumentFieldConditions } = await import("@/lib/actions/documents")
     const result = await evaluateDocumentFieldConditions(DOC_ID, [])
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/insufficient permissions/i)
+    expect(result.error).toMatch(/access denied/i)
   })
 
   it("rejects a nonexistent document without leaking anything about it", async () => {

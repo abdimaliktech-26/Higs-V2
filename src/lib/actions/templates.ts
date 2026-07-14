@@ -10,7 +10,16 @@ import { signStaffFileUrl } from "@/lib/storage"
 import { validateTemplateConditions, validatePacketTemplateConditions } from "@/lib/actions/template-conditions"
 import { buildPacketConditionDefinition, evaluateInitialPacketApplicability, deriveIsMinor } from "@/lib/conditions/runtime"
 import { CONDITION_RUNTIME_VERSION } from "@/lib/conditions/runtime-types"
-import { requireActiveAssignableStaff, requireClientAccess, requirePacketAccess } from "@/lib/live-authorization"
+import {
+  CLIENT_READ_ROLES,
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  requireActiveOrganizationMembership,
+  requireActiveAssignableStaff,
+  requireClientAccess,
+  requireDocumentAccess,
+  requireOrganizationRole,
+  requirePacketAccess,
+} from "@/lib/live-authorization"
 import { AuditAction, UserRole, type Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
@@ -266,9 +275,12 @@ export async function updatePacketTemplateDocumentRequired(packetTemplateDocumen
 // === Packet Instances ===
 
 export async function getPackets(orgId: string, params?: { search?: string; status?: string; page?: number; pageSize?: number }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "list packets in organization")
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 20
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    where.client = { assignments: { some: { staffUserId: authorization.userId } } }
+  }
   if (params?.status && params.status !== "all") where.status = params.status
   if (params?.search) where.OR = [
     { client: { firstName: { contains: params.search, mode: "insensitive" } } },
@@ -483,45 +495,56 @@ export async function createPacket(data: {
 }
 
 export async function updatePacketStatus(packetId: string, status: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-
   const packet = await prisma.packet.findUnique({ where: { id: packetId } })
   if (!packet) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(packet.organizationId)
+  const allowedStatuses = ["draft", "in_progress", "needs_validation", "validation_failed", "awaiting_signature", "awaiting_approval", "archived"]
+  if (!allowedStatuses.includes(status)) {
+    return { success: false as const, error: status === "approved" ? "Packets must be approved through the approval workflow" : "Invalid packet status" }
+  }
+  let authorization
+  try {
+    authorization = status === "archived"
+      ? await requireOrganizationRole(packet.organizationId, ORGANIZATION_WIDE_CLIENT_ROLES, "archive packet")
+      : await requirePacketAccess(packetId, "manage", "update packet workflow status")
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Access denied" }
+  }
 
   const updateData: Record<string, unknown> = { status }
-  if (status === "approved" || status === "archived") updateData.completedAt = new Date()
+  if (status === "archived") updateData.completedAt = new Date()
 
   await prisma.packet.update({ where: { id: packetId }, data: updateData as any })
 
-  await createAuditEvent({ organizationId: packet.organizationId, actorId: user.id as string, action: "PACKET_STATUS_CHANGED", targetType: "packet", targetId: packetId, metadata: { from: packet.status, to: status } })
+  await createAuditEvent({ organizationId: packet.organizationId, actorId: authorization.userId, action: "PACKET_STATUS_CHANGED", targetType: "packet", targetId: packetId, metadata: { from: packet.status, to: status } })
   revalidatePath(`/packets/${packetId}`)
   revalidatePath("/packets")
   return { success: true as const, data: { id: packetId } }
 }
 
 export async function updatePacketDocumentStatus(packetDocumentId: string, status: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-
   const doc = await prisma.packetDocument.findUnique({ where: { id: packetDocumentId }, include: { packet: true } })
   if (!doc) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(doc.packet.organizationId)
+  if (!["pending", "in_progress", "needs_review", "completed"].includes(status)) {
+    return { success: false as const, error: "Invalid document status" }
+  }
+  let authorization
+  try {
+    authorization = await requireDocumentAccess(packetDocumentId, "write", "update packet document status")
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Access denied" }
+  }
 
   await prisma.packetDocument.update({
     where: { id: packetDocumentId },
     data: { status, completedAt: status === "completed" ? new Date() : status === "pending" ? null : undefined },
   })
 
-  await createAuditEvent({ organizationId: doc.packet.organizationId, actorId: user.id as string, action: "PACKET_DOCUMENT_STATUS_CHANGED", targetType: "packet_document", targetId: packetDocumentId, metadata: { packetId: doc.packetId, status } })
+  await createAuditEvent({ organizationId: doc.packet.organizationId, actorId: authorization.userId, action: "PACKET_DOCUMENT_STATUS_CHANGED", targetType: "packet_document", targetId: packetDocumentId, metadata: { packetId: doc.packetId, status } })
   revalidatePath(`/packets/${doc.packetId}`)
   return { success: true as const, data: { id: packetDocumentId } }
 }
 
 export async function getProgramsForOrg(orgId: string) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "list programs for packet workflow")
   return prisma.program.findMany({ where: { organizationId: orgId, isActive: true }, orderBy: { name: "asc" } })
 }

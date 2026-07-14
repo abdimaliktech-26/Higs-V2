@@ -58,7 +58,9 @@ export async function PacketOverviewContent({ packetId }: Props) {
   const progressPct = docs.length ? Math.round((completedDocs / docs.length) * 100) : 0
 
   const currentIdx = STATUS_FLOW.indexOf(packet.status)
-  const nextStatus = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null
+  const nextStatusCandidate = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null
+  // Approval is exclusively a separate, audited approval-request decision.
+  const nextStatus = nextStatusCandidate === "approved" ? null : nextStatusCandidate
 
   const [validationList, signatures, approvals, activity, recommendations, eligibleFields, eligibleGrants] = await Promise.all([
     getValidationResults(orgId, { packetId, pageSize: 1 }),

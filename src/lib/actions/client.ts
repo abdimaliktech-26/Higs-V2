@@ -3,34 +3,24 @@
 import { revalidatePath } from "next/cache"
 import { validate, createClientSchema, clientQuerySchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
-import type { ClientFormData } from "@/lib/types"
-import { UserRole } from "@prisma/client"
-import { auth } from "@/lib/auth"
 import {
+  ASSIGNMENT_SCOPED_CLIENT_ROLES,
   CLIENT_ASSIGNMENT_ROLES,
   CLIENT_CREATION_ROLES,
+  CLIENT_READ_ROLES,
   getLiveStaffAuthorizationContext,
+  requireActiveOrganizationMembership,
   requireActiveAssignableStaff,
+  requireClientAccess,
   requireOrganizationRole,
 } from "@/lib/live-authorization"
 
-const FULL_ACCESS_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
-const ASSIGNED_ROLES: UserRole[] = ["CASE_MANAGER", "DSP", "NURSE"]
-
 export type ClientActionResult = { success: true; data: { id: string } } | { success: false; error: string }
 
-async function getClientFilter(orgId: string) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user)
-  if (FULL_ACCESS_ROLES.includes(role) || user.isSuperAdmin) return {}
-  return { assignments: { some: { staffUserId: user.id } } }
-}
-
 export async function getClients(orgId: string, raw: Record<string, unknown> = {}) {
-  const user = await requireOrgAccess(orgId)
-  const role = getActiveRole(user)
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "list clients in organization")
+  const role = authorization.role
   const parsed = validate(clientQuerySchema, raw)
   const params = parsed.success ? parsed.data : { page: 1, pageSize: 20 }
   const page = params.page; const pageSize = params.pageSize
@@ -49,10 +39,9 @@ export async function getClients(orgId: string, raw: Record<string, unknown> = {
   if (raw.program) where.enrollments = { some: { programId: raw.program } }
   if (raw.packetStatus) where.packets = { some: { status: String(raw.packetStatus) } }
 
-  const isFullAccess = FULL_ACCESS_ROLES.includes(role) || user.isSuperAdmin
-  if (!isFullAccess && ASSIGNED_ROLES.includes(role)) {
+  if (ASSIGNMENT_SCOPED_CLIENT_ROLES.includes(role)) {
     // Tenant/role scoping always wins — a filter value can never widen this beyond the user's own clients.
-    where.assignments = { some: { staffUserId: user.id } }
+    where.assignments = { some: { staffUserId: authorization.userId } }
   } else if (raw.caseManager) {
     where.assignments = { some: { staffUserId: String(raw.caseManager) } }
   }
@@ -83,6 +72,7 @@ export async function getClients(orgId: string, raw: Record<string, unknown> = {
 }
 
 export async function getClientById(clientId: string) {
+  await requireClientAccess(clientId, "read", "view client details")
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     include: {
@@ -95,13 +85,6 @@ export async function getClientById(clientId: string) {
     },
   })
   if (!client) return null
-  const user = await requireOrgAccess(client.organizationId)
-  const role = getActiveRole(user)
-  if (!FULL_ACCESS_ROLES.includes(role) && !user.isSuperAdmin) {
-    if (ASSIGNED_ROLES.includes(role)) {
-      if (!client.assignments.some((a: Record<string, unknown>) => a.staffUserId === user.id)) return null
-    }
-  }
   return client
 }
 
@@ -145,15 +128,9 @@ export async function updateClient(clientId: string, raw: Record<string, unknown
   const parsed = validate(createClientSchema.partial(), raw)
   if (!parsed.success) return { success: false, error: parsed.error }
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
     const existing = await prisma.client.findUnique({ where: { id: clientId } })
     if (!existing) return { success: false, error: "Client not found" }
-    await requireOrgAccess(existing.organizationId)
-    const role = getActiveRole(user as any)
-    if (!FULL_ACCESS_ROLES.includes(role) && role !== "CASE_MANAGER")
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireClientAccess(clientId, "manage", "update client")
 
     const data = parsed.data as Record<string, unknown>
     const client = await prisma.client.update({
@@ -164,7 +141,7 @@ export async function updateClient(clientId: string, raw: Record<string, unknown
       } as any,
     })
     await createAuditEvent({
-      organizationId: existing.organizationId, actorId: user.id as string,
+      organizationId: existing.organizationId, actorId: authorization.userId,
       action: "CLIENT_UPDATED", targetType: "client", targetId: clientId,
       metadata: { clientName: `${client.firstName} ${client.lastName}` },
     })
@@ -177,21 +154,16 @@ export async function updateClient(clientId: string, raw: Record<string, unknown
 
 export async function archiveClient(clientId: string, reason?: string): Promise<ClientActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
     const existing = await prisma.client.findUnique({ where: { id: clientId } })
     if (!existing) return { success: false, error: "Client not found" }
-    await requireOrgAccess(existing.organizationId)
-    const role = getActiveRole(user as any)
-    if (!FULL_ACCESS_ROLES.includes(role)) return { success: false, error: "Only admins can archive clients" }
+    const authorization = await requireClientAccess(clientId, "archive", "archive client")
 
     await prisma.client.update({
       where: { id: clientId },
       data: { status: "archived", archivedAt: new Date(), archivedReason: reason || null },
     })
     await createAuditEvent({
-      organizationId: existing.organizationId, actorId: user.id as string,
+      organizationId: existing.organizationId, actorId: authorization.userId,
       action: "CLIENT_ARCHIVED", targetType: "client", targetId: clientId,
       metadata: { clientName: `${existing.firstName} ${existing.lastName}`, reason },
     })
@@ -203,12 +175,12 @@ export async function archiveClient(clientId: string, reason?: string): Promise<
 }
 
 export async function getPrograms(orgId: string) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "list organization programs for client workflow")
   return prisma.program.findMany({ where: { organizationId: orgId, isActive: true }, orderBy: { name: "asc" } })
 }
 
 export async function getAvailableStaff(orgId: string) {
-  await requireOrgAccess(orgId)
+  await requireOrganizationRole(orgId, CLIENT_ASSIGNMENT_ROLES, "list staff available for client assignment")
   const members = await prisma.organizationMember.findMany({
     where: { organizationId: orgId, status: "ACTIVE" },
     include: { user: { select: { id: true, name: true, email: true } } },

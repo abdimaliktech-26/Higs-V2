@@ -145,6 +145,28 @@ describe("assignment-scoped client access", () => {
     await expect(requireClientAccess(CLIENT_ID, "packet:create", "create packet")).resolves.toMatchObject({ role: "CASE_MANAGER" })
   })
 
+  it("allows an assigned Case Manager to update an assigned client", async () => {
+    const { requireClientAccess } = await import("@/lib/live-authorization")
+    await expect(requireClientAccess(CLIENT_ID, "manage", "update client")).resolves.toMatchObject({ role: "CASE_MANAGER" })
+  })
+
+  it("denies client updates to assigned DSP and Nurse roles", async () => {
+    organizationMemberFindUnique.mockResolvedValue(membership("DSP"))
+    const { requireClientAccess } = await import("@/lib/live-authorization")
+    await expect(requireClientAccess(CLIENT_ID, "manage", "update client")).rejects.toThrow("Access denied")
+  })
+
+  it("denies client archival to an assigned Case Manager", async () => {
+    const { requireClientAccess } = await import("@/lib/live-authorization")
+    await expect(requireClientAccess(CLIENT_ID, "archive", "archive client")).rejects.toThrow("Access denied")
+  })
+
+  it("allows client archival to an organization-wide role", async () => {
+    organizationMemberFindUnique.mockResolvedValue(membership("ORG_ADMIN"))
+    const { requireClientAccess } = await import("@/lib/live-authorization")
+    await expect(requireClientAccess(CLIENT_ID, "archive", "archive client")).resolves.toMatchObject({ role: "ORG_ADMIN" })
+  })
+
   it.each(["DSP", "NURSE"])("denies packet creation to %s even when assigned", async (role) => {
     organizationMemberFindUnique.mockResolvedValue(membership(role))
     const { requireClientAccess } = await import("@/lib/live-authorization")
@@ -181,6 +203,17 @@ describe("packet, document, role, and assignee policies", () => {
   it("allows approval submission by an assigned Case Manager", async () => {
     const { requirePacketAccess } = await import("@/lib/live-authorization")
     await expect(requirePacketAccess("packet-1", "submit:approval", "submit approval")).resolves.toMatchObject({ role: "CASE_MANAGER" })
+  })
+
+  it("allows an assigned Case Manager to manage the target packet", async () => {
+    const { requirePacketAccess } = await import("@/lib/live-authorization")
+    await expect(requirePacketAccess("packet-1", "manage", "update packet")).resolves.toMatchObject({ role: "CASE_MANAGER" })
+  })
+
+  it("denies packet management to an assigned DSP", async () => {
+    organizationMemberFindUnique.mockResolvedValue(membership("DSP"))
+    const { requirePacketAccess } = await import("@/lib/live-authorization")
+    await expect(requirePacketAccess("packet-1", "manage", "update packet")).rejects.toThrow("Access denied")
   })
 
   it("derives document access from the parent packet organization and client", async () => {

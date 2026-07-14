@@ -13,7 +13,13 @@ const packetTemplateDocumentUpdate = vi.fn()
 const packetTemplateDocumentFindMany = vi.fn()
 const clientFindUnique = vi.fn()
 const packetCreate = vi.fn()
+const packetFindMany = vi.fn()
+const packetFindUnique = vi.fn()
+const packetCount = vi.fn()
+const packetUpdate = vi.fn()
 const packetDocumentCreate = vi.fn()
+const packetDocumentFindUnique = vi.fn()
+const packetDocumentUpdate = vi.fn()
 const packetConditionSnapshotCreate = vi.fn()
 const documentTemplateFieldFindMany = vi.fn()
 const documentTemplateFieldFindFirst = vi.fn()
@@ -27,6 +33,9 @@ const createAuditEventMock = vi.fn()
 const requireClientAccessMock = vi.fn()
 const requirePacketAccessMock = vi.fn()
 const requireActiveAssignableStaffMock = vi.fn()
+const requireOrganizationRoleMock = vi.fn()
+const requireActiveOrganizationMembershipMock = vi.fn()
+const requireDocumentAccessMock = vi.fn()
 
 function makeTx(overrides: Record<string, any> = {}) {
   return {
@@ -65,8 +74,18 @@ vi.mock("@/lib/db", () => ({
       findMany: (...a: unknown[]) => packetTemplateDocumentFindMany(...a),
     },
     client: { findUnique: (...a: unknown[]) => clientFindUnique(...a) },
-    packet: { create: (...a: unknown[]) => packetCreate(...a) },
-    packetDocument: { create: (...a: unknown[]) => packetDocumentCreate(...a) },
+    packet: {
+      create: (...a: unknown[]) => packetCreate(...a),
+      findMany: (...a: unknown[]) => packetFindMany(...a),
+      findUnique: (...a: unknown[]) => packetFindUnique(...a),
+      count: (...a: unknown[]) => packetCount(...a),
+      update: (...a: unknown[]) => packetUpdate(...a),
+    },
+    packetDocument: {
+      create: (...a: unknown[]) => packetDocumentCreate(...a),
+      findUnique: (...a: unknown[]) => packetDocumentFindUnique(...a),
+      update: (...a: unknown[]) => packetDocumentUpdate(...a),
+    },
     packetConditionSnapshot: { create: (...a: unknown[]) => packetConditionSnapshotCreate(...a) },
     documentTemplateField: {
       findMany: (...a: unknown[]) => documentTemplateFieldFindMany(...a),
@@ -84,9 +103,14 @@ vi.mock("@/lib/permissions", () => ({
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/live-authorization", () => ({
+  CLIENT_READ_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER", "DSP", "NURSE"],
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
   requireClientAccess: (...a: unknown[]) => requireClientAccessMock(...a),
   requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
   requireActiveAssignableStaff: (...a: unknown[]) => requireActiveAssignableStaffMock(...a),
+  requireOrganizationRole: (...a: unknown[]) => requireOrganizationRoleMock(...a),
+  requireActiveOrganizationMembership: (...a: unknown[]) => requireActiveOrganizationMembershipMock(...a),
+  requireDocumentAccess: (...a: unknown[]) => requireDocumentAccessMock(...a),
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -117,6 +141,13 @@ beforeEach(() => {
   requireClientAccessMock.mockResolvedValue(liveAuthorization)
   requirePacketAccessMock.mockResolvedValue({ ...liveAuthorization, packetId: "packet-1" })
   requireActiveAssignableStaffMock.mockResolvedValue(undefined)
+  requireOrganizationRoleMock.mockResolvedValue(liveAuthorization)
+  requireActiveOrganizationMembershipMock.mockResolvedValue(liveAuthorization)
+  requireDocumentAccessMock.mockResolvedValue({ ...liveAuthorization, documentId: "document-1", packetId: "packet-1" })
+  packetFindMany.mockResolvedValue([])
+  packetCount.mockResolvedValue(0)
+  packetUpdate.mockResolvedValue({})
+  packetDocumentUpdate.mockResolvedValue({})
 })
 
 const DOC_A = "doc-a"
@@ -815,5 +846,73 @@ describe("createPacket — Step 4c.2a: transactional, condition-aware creation",
       await expect(createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })).rejects.toThrow("field seeding failed")
       expect(createAuditEventMock.mock.calls.some((c: any) => c[0].action === "PACKET_CREATED")).toBe(false)
     })
+  })
+})
+
+describe("packet list and status actions use live authorization", () => {
+  it("scopes assignment-based packet lists through the client assignment relation", async () => {
+    requireOrganizationRoleMock.mockResolvedValue({ userId: "case-1", organizationId: ORG_ID, role: "CASE_MANAGER" })
+    const { getPackets } = await import("@/lib/actions/templates")
+    await getPackets(ORG_ID)
+    expect(packetFindMany.mock.calls[0][0].where).toMatchObject({
+      organizationId: ORG_ID,
+      client: { assignments: { some: { staffUserId: "case-1" } } },
+    })
+    expect(packetCount.mock.calls[0][0].where.client).toEqual({ assignments: { some: { staffUserId: "case-1" } } })
+  })
+
+  it("does not add assignment filtering for an organization-wide packet list", async () => {
+    const { getPackets } = await import("@/lib/actions/templates")
+    await getPackets(ORG_ID)
+    expect(packetFindMany.mock.calls[0][0].where.client).toBeUndefined()
+  })
+
+  it("uses target-packet manage capability for normal workflow status changes", async () => {
+    packetFindUnique.mockResolvedValue({ id: "packet-1", organizationId: ORG_ID, status: "draft" })
+    const { updatePacketStatus } = await import("@/lib/actions/templates")
+    const result = await updatePacketStatus("packet-1", "in_progress")
+    expect(result.success).toBe(true)
+    expect(requirePacketAccessMock).toHaveBeenCalledWith("packet-1", "manage", "update packet workflow status")
+    expect(packetUpdate).toHaveBeenCalledWith({ where: { id: "packet-1" }, data: { status: "in_progress" } })
+  })
+
+  it("blocks generic status updates from bypassing the approval workflow", async () => {
+    packetFindUnique.mockResolvedValue({ id: "packet-1", organizationId: ORG_ID, status: "awaiting_approval" })
+    const { updatePacketStatus } = await import("@/lib/actions/templates")
+    const result = await updatePacketStatus("packet-1", "approved")
+    expect(result).toEqual({ success: false, error: "Packets must be approved through the approval workflow" })
+    expect(requirePacketAccessMock).not.toHaveBeenCalled()
+    expect(packetUpdate).not.toHaveBeenCalled()
+  })
+
+  it("requires an organization-wide live role to archive a packet", async () => {
+    packetFindUnique.mockResolvedValue({ id: "packet-1", organizationId: ORG_ID, status: "approved" })
+    const { updatePacketStatus } = await import("@/lib/actions/templates")
+    const result = await updatePacketStatus("packet-1", "archived")
+    expect(result.success).toBe(true)
+    expect(requireOrganizationRoleMock).toHaveBeenCalledWith(ORG_ID, ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"], "archive packet")
+  })
+
+  it("rejects unknown packet statuses before authorization or persistence", async () => {
+    packetFindUnique.mockResolvedValue({ id: "packet-1", organizationId: ORG_ID, status: "draft" })
+    const { updatePacketStatus } = await import("@/lib/actions/templates")
+    await expect(updatePacketStatus("packet-1", "made_up")).resolves.toEqual({ success: false, error: "Invalid packet status" })
+    expect(packetUpdate).not.toHaveBeenCalled()
+  })
+
+  it("uses live document write access for packet-document status changes", async () => {
+    packetDocumentFindUnique.mockResolvedValue({ id: "document-1", packetId: "packet-1", packet: { organizationId: ORG_ID } })
+    const { updatePacketDocumentStatus } = await import("@/lib/actions/templates")
+    const result = await updatePacketDocumentStatus("document-1", "completed")
+    expect(result.success).toBe(true)
+    expect(requireDocumentAccessMock).toHaveBeenCalledWith("document-1", "write", "update packet document status")
+    expect(packetDocumentUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "document-1" }, data: expect.objectContaining({ status: "completed" }) }))
+  })
+
+  it("rejects unknown packet-document statuses", async () => {
+    packetDocumentFindUnique.mockResolvedValue({ id: "document-1", packetId: "packet-1", packet: { organizationId: ORG_ID } })
+    const { updatePacketDocumentStatus } = await import("@/lib/actions/templates")
+    await expect(updatePacketDocumentStatus("document-1", "approved")).resolves.toEqual({ success: false, error: "Invalid document status" })
+    expect(packetDocumentUpdate).not.toHaveBeenCalled()
   })
 })

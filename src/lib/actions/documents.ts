@@ -3,9 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { validate, saveFieldsSchema, addFieldSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { signStaffFileUrl } from "@/lib/storage"
 import { requireDocumentAccess } from "@/lib/live-authorization"
@@ -19,7 +17,6 @@ import {
 } from "@/lib/conditions/runtime"
 
 const EDIT_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
-const READ_ROLES: UserRole[] = ["DSP", "NURSE"]
 
 const CONFIGURATION_ERROR_MESSAGE = "This document has a compliance configuration error and cannot be edited until it is resolved."
 
@@ -200,19 +197,12 @@ export async function saveDocumentFields(
   fields: { id?: string; name: string; fieldType: string; value?: string; pageNumber: number; posX?: number; posY?: number; isRequired: boolean }[]
 ): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
       include: { packet: true },
     })
     if (!doc) return { success: false, error: "Document not found" }
-    await requireOrgAccess(doc.packet.organizationId)
-    const role = getActiveRole(user as any)
-    if (!(user.isSuperAdmin as boolean) && !EDIT_ROLES.includes(role))
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireDocumentAccess(documentId, "write", "save document fields")
 
     // Server-side read-only enforcement — never rely on the client disabling
     // its Save button. Checked before the transaction even opens, since
@@ -337,7 +327,7 @@ export async function saveDocumentFields(
 
       await createAuditEvent({
         organizationId: doc.packet.organizationId,
-        actorId: user.id as string,
+        actorId: authorization.userId,
         action: "DOCUMENT_SAVED",
         targetType: "packet_document",
         targetId: documentId,
@@ -345,7 +335,7 @@ export async function saveDocumentFields(
       }, tx)
 
       if (isConditionAware) {
-        await reconcilePacketDocumentApplicability(tx, doc.packet.id, user.id as string)
+        await reconcilePacketDocumentApplicability(tx, doc.packet.id, authorization.userId)
       }
 
       return { status: newStatus, ignoredFieldIds }
@@ -375,20 +365,12 @@ export async function evaluateDocumentFieldConditions(
   fields: { id: string; value?: string | null }[]
 ): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
       include: { packet: true },
     })
     if (!doc) return { success: false, error: "Document not found" }
-    await requireOrgAccess(doc.packet.organizationId)
-    const role = getActiveRole(user as any)
-    const isSuperAdmin = user.isSuperAdmin as boolean
-    const hasAccess = isSuperAdmin || EDIT_ROLES.includes(role) || READ_ROLES.includes(role)
-    if (!hasAccess) return { success: false, error: "Access denied: insufficient permissions" }
+    await requireDocumentAccess(documentId, "write", "evaluate document field conditions")
 
     // Same read-only gate as saveDocumentFields — a document the editor
     // wouldn't let anyone type into shouldn't be evaluated either.
@@ -448,13 +430,12 @@ export async function addPdfField(data: {
   packetDocumentId: string; name: string; fieldType: string; pageNumber: number
 }): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({ where: { id: data.packetDocumentId }, include: { packet: true } })
     if (!doc) return { success: false, error: "Not found" }
-    await requireOrgAccess(doc.packet.organizationId)
+    const authorization = await requireDocumentAccess(data.packetDocumentId, "write", "add document field")
+    if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE" || ["approved", "archived"].includes(doc.packet.status)) {
+      return { success: false, error: "This document is locked for editing" }
+    }
 
     const field = await prisma.pdfField.create({
       data: { packetDocumentId: data.packetDocumentId, name: data.name, fieldType: data.fieldType, pageNumber: data.pageNumber, source: "manual" },
@@ -462,7 +443,7 @@ export async function addPdfField(data: {
 
     await createAuditEvent({
       organizationId: doc.packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "DOCUMENT_FIELD_ADDED",
       targetType: "pdf_field",
       targetId: field.id,
@@ -477,19 +458,18 @@ export async function addPdfField(data: {
 
 export async function updatePdfField(fieldId: string, data: { value?: string; posX?: number; posY?: number }): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const field = await prisma.pdfField.findUnique({ where: { id: fieldId }, include: { packetDocument: { include: { packet: true } } } })
     if (!field) return { success: false, error: "Not found" }
-    await requireOrgAccess(field.packetDocument.packet.organizationId)
+    const authorization = await requireDocumentAccess(field.packetDocumentId, "write", "update document field")
+    if (field.packetDocument.applicabilityStatus === "CONDITIONALLY_INACTIVE" || ["approved", "archived"].includes(field.packetDocument.packet.status)) {
+      return { success: false, error: "This document is locked for editing" }
+    }
 
     await prisma.pdfField.update({ where: { id: fieldId }, data })
 
     await createAuditEvent({
       organizationId: field.packetDocument.packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "DOCUMENT_FIELD_UPDATED",
       targetType: "pdf_field",
       targetId: fieldId,
@@ -503,16 +483,15 @@ export async function updatePdfField(fieldId: string, data: { value?: string; po
 
 export async function createPdfVersion(documentId: string, comment?: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
       include: { packet: true, documentTemplate: true },
     })
     if (!doc) return { success: false, error: "Not found" }
-    await requireOrgAccess(doc.packet.organizationId)
+    const authorization = await requireDocumentAccess(documentId, "write", "create document version")
+    if (doc.applicabilityStatus === "CONDITIONALLY_INACTIVE" || ["approved", "archived"].includes(doc.packet.status)) {
+      return { success: false, error: "This document is locked for editing" }
+    }
 
     const nextVersion = doc.currentVersion + 1
     const now = new Date().toISOString().split("T")[0]
@@ -523,7 +502,7 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
         fileUrl: `https://storage.higsi.com/documents/${documentId}/v${nextVersion}.pdf`,
         fileKey: `documents/${documentId}/v${nextVersion}.pdf`,
         comment: comment || `Version ${nextVersion}`,
-        createdById: user.id as string,
+        createdById: authorization.userId,
       },
     })
 
@@ -531,7 +510,7 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
 
     await createAuditEvent({
       organizationId: doc.packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "PDF_VERSION_CREATED",
       targetType: "packet_document",
       targetId: documentId,
@@ -546,24 +525,20 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
 
 export async function addDocumentComment(documentId: string, text: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
       include: { packet: true },
     })
     if (!doc) return { success: false, error: "Not found" }
-    await requireOrgAccess(doc.packet.organizationId)
+    const authorization = await requireDocumentAccess(documentId, "write", "add document comment")
 
     const comment = await prisma.documentComment.create({
-      data: { packetDocumentId: documentId, text, createdById: user.id as string },
+      data: { packetDocumentId: documentId, text, createdById: authorization.userId },
     })
 
     await createAuditEvent({
       organizationId: doc.packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "DOCUMENT_COMMENT_ADDED",
       targetType: "document_comment",
       targetId: comment.id,
@@ -587,21 +562,12 @@ export async function setPacketDocumentPortalVisibility(
   input: { portalVisible: boolean; portalAccessLevel?: "VIEW" | "VIEW_AND_DOWNLOAD" }
 ): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
       include: { packet: { select: { organizationId: true } } },
     })
     if (!doc) return { success: false, error: "Not found" }
-
-    await requireOrgAccess(doc.packet.organizationId)
-    const role = getActiveRole(user as any)
-    if (!EDIT_ROLES.includes(role) && !(user.isSuperAdmin as boolean)) {
-      return { success: false, error: "Insufficient permissions" }
-    }
+    const authorization = await requireDocumentAccess(documentId, "write", "change document portal visibility")
 
     const updated = await prisma.packetDocument.update({
       where: { id: documentId },
@@ -609,7 +575,7 @@ export async function setPacketDocumentPortalVisibility(
         ? {
             portalVisible: true,
             portalVisibleAt: new Date(),
-            sharedByUserId: user.id as string,
+            sharedByUserId: authorization.userId,
             portalAccessLevel: input.portalAccessLevel || "VIEW",
           }
         : {
@@ -622,7 +588,7 @@ export async function setPacketDocumentPortalVisibility(
 
     await createAuditEvent({
       organizationId: doc.packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "DOCUMENT_PORTAL_VISIBILITY_CHANGED",
       targetType: "packet_document",
       targetId: documentId,

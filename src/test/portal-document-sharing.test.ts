@@ -6,6 +6,7 @@ const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
+const requireDocumentAccessMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -21,6 +22,7 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/live-authorization", () => ({ requireDocumentAccess: (...a: unknown[]) => requireDocumentAccessMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 vi.mock("@/lib/storage", () => ({ signStaffFileUrl: vi.fn() }))
 vi.mock("@/lib/validation", () => ({ validate: vi.fn(), saveFieldsSchema: {}, addFieldSchema: {} }))
@@ -35,6 +37,7 @@ function staffSession(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  requireDocumentAccessMock.mockResolvedValue({ userId: STAFF_ID, organizationId: ORG_ID, role: "CASE_MANAGER" })
 })
 
 describe("setPacketDocumentPortalVisibility", () => {
@@ -64,7 +67,7 @@ describe("setPacketDocumentPortalVisibility", () => {
   it("rejects a staff role not permitted to manage documents", async () => {
     authMock.mockResolvedValue(staffSession())
     requireOrgAccessMock.mockResolvedValue({})
-    getActiveRoleMock.mockReturnValue("NURSE")
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     packetDocumentFindUnique.mockResolvedValue({ id: DOC_ID, packetId: "packet-1", packet: { organizationId: ORG_ID } })
 
     const { setPacketDocumentPortalVisibility } = await import("@/lib/actions/documents")
@@ -72,13 +75,13 @@ describe("setPacketDocumentPortalVisibility", () => {
 
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error).toMatch(/insufficient permissions/i)
+    expect(result.error).toMatch(/access denied/i)
     expect(packetDocumentUpdate).not.toHaveBeenCalled()
   })
 
   it("rejects a document belonging to a different organization", async () => {
     authMock.mockResolvedValue(staffSession())
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     packetDocumentFindUnique.mockResolvedValue({ id: DOC_ID, packetId: "packet-1", packet: { organizationId: "org-OTHER" } })
 
     const { setPacketDocumentPortalVisibility } = await import("@/lib/actions/documents")
