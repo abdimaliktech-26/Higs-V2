@@ -5,16 +5,21 @@ import { headers } from "next/headers"
 import { validate, createSignatureRequestSchema } from "@/lib/validation"
 import { z } from "zod"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import {
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  SIGNATURE_MANAGEMENT_ROLES,
+  requireClientAccess,
+  requireOrganizationRole,
+  requirePacketAccess,
+} from "@/lib/live-authorization"
 import { requirePortalPermission, requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent, createPortalAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import type { Prisma } from "@prisma/client"
 import { limiters, checkRateLimit } from "@/lib/rate-limit"
 import { formatSignedFieldValue, normalizeSignerName, normalizeDisplayName } from "@/lib/actions/signature-formatting"
 
-const REQUEST_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
+const REQUEST_ROLES: readonly UserRole[] = SIGNATURE_MANAGEMENT_ROLES
 
 // Step 5a.1 — the only approved role set for actually executing (not just
 // requesting) a signature. Reuses REQUEST_ROLES' exact membership per the
@@ -55,7 +60,7 @@ async function getSignatureRequestMeta() {
 export async function getEligibleSignatureFields(packetId: string) {
   const packet = await prisma.packet.findUnique({ where: { id: packetId }, select: { organizationId: true } })
   if (!packet) throw new Error("Packet not found")
-  await requireOrgAccess(packet.organizationId)
+  await requirePacketAccess(packetId, "signature:manage", "list eligible signature fields")
 
   const fields = await prisma.pdfField.findMany({
     where: {
@@ -88,7 +93,8 @@ export async function getEligibleSignatureFields(packetId: string) {
 export async function getEligiblePortalSigningGrants(clientId: string) {
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { organizationId: true } })
   if (!client) throw new Error("Client not found")
-  await requireOrgAccess(client.organizationId)
+  const authorization = await requireClientAccess(clientId, "manage", "list eligible portal signers")
+  if (!REQUEST_ROLES.includes(authorization.role)) throw new Error("Access denied")
 
   const now = new Date()
   const grants = await prisma.portalClientAccess.findMany({
@@ -147,18 +153,12 @@ export async function createSignatureRequest(raw: Record<string, unknown>): Prom
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const rl = checkRateLimit(limiters.signature, user.id as string)
-    if (rl) return rl
-    const orgId = user.activeOrganizationId as string
-    await requireOrgAccess(orgId)
-    if (!REQUEST_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
-
     const packet = await prisma.packet.findUnique({ where: { id: data.packetId } })
-    if (!packet || packet.organizationId !== orgId) return { success: false, error: "Packet not found" }
+    if (!packet) return { success: false, error: "Packet not found" }
+    const authorization = await requirePacketAccess(packet.id, "signature:manage", "create signature request")
+    const rl = checkRateLimit(limiters.signature, authorization.userId)
+    if (rl) return rl
+    const orgId = authorization.organizationId
 
     const packetDocument = await prisma.packetDocument.findUnique({ where: { id: data.packetDocumentId } })
     if (!packetDocument || packetDocument.packetId !== packet.id) {
@@ -261,12 +261,12 @@ export async function createSignatureRequest(raw: Record<string, unknown>): Prom
         ...signerFields,
         status: "pending", dueDate: data.dueDate ? new Date(data.dueDate) : null,
         consentText: data.consentText, notes: data.notes || null,
-        requestedById: user.id as string,
+        requestedById: authorization.userId,
       },
     })
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string,
+      organizationId: orgId, actorId: authorization.userId,
       action: "SIGNATURE_REQUESTED", targetType: "signature_request", targetId: req.id,
       metadata: { signerName: signerFields.signerName, signerEmail: signerFields.signerEmail, packetId: packet.id, assignmentType: data.assignmentType },
     })
@@ -288,13 +288,11 @@ export async function updateSignatureStatus(requestId: string, rawStatus: NonSig
   const statusParsed = validate(z.object({ status: z.enum(NON_SIGNING_STATUSES) }), { status: rawStatus })
   if (!statusParsed.success) return { success: false as const, error: statusParsed.error }
   const { status } = statusParsed.data
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-
   const req = await prisma.signatureRequest.findUnique({ where: { id: requestId } })
   if (!req) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(req.organizationId)
+  if (!req.packetId) return { success: false as const, error: "This request is not linked to a packet." }
+  const authorization = await requirePacketAccess(req.packetId, "signature:manage", "update signature request status")
+  if (authorization.organizationId !== req.organizationId) return { success: false as const, error: "Access denied" }
 
   const updateData: Record<string, unknown> = { status }
   if (status === "declined" && metadata?.declineReason) updateData.declineReason = metadata.declineReason
@@ -302,7 +300,7 @@ export async function updateSignatureStatus(requestId: string, rawStatus: NonSig
   await prisma.signatureRequest.update({ where: { id: requestId }, data: updateData as any })
 
   await prisma.signatureEvent.create({
-    data: { signatureRequestId: requestId, eventType: status, metadata: (metadata || {}) as any, createdById: user.id as string },
+    data: { signatureRequestId: requestId, eventType: status, metadata: (metadata || {}) as any, createdById: authorization.userId },
   })
 
   const actionMap: Record<string, string> = {
@@ -312,7 +310,7 @@ export async function updateSignatureStatus(requestId: string, rawStatus: NonSig
   const auditAction = actionMap[status]
   if (auditAction) {
     await createAuditEvent({
-      organizationId: req.organizationId, actorId: user.id as string,
+      organizationId: req.organizationId, actorId: authorization.userId,
       action: auditAction as any, targetType: "signature_request", targetId: requestId,
       metadata: { signerName: req.signerName, ...metadata },
     })
@@ -489,13 +487,13 @@ export async function executeStaffSignature(
   input: { signerName: string; consentAccepted: boolean }
 ): Promise<{ success: true; data: ExecuteStaffSignatureResult } | { success: false; error: string }> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const actorId = user.id as string
+    const target = await prisma.signatureRequest.findUnique({ where: { id: requestId }, select: { packetId: true } })
+    if (!target?.packetId) return { success: false, error: "Signature request not found" }
+    const authorization = await requirePacketAccess(target.packetId, "signature:manage", "execute staff signature")
+    const actorId = authorization.userId
     const rl = checkRateLimit(limiters.signature, actorId)
     if (rl) return rl
-    const actorEmail = ((user.email as string) || "").trim().toLowerCase()
+    const actorEmail = authorization.email.trim().toLowerCase()
 
     const req = await prisma.signatureRequest.findUnique({
       where: { id: requestId },
@@ -503,9 +501,7 @@ export async function executeStaffSignature(
     })
     if (!req) return { success: false, error: "Signature request not found" }
 
-    await requireOrgAccess(req.organizationId)
-    const role = getActiveRole(user as any)
-    if (!EXECUTION_ROLES.includes(role) && !(user.isSuperAdmin as boolean)) {
+    if (authorization.organizationId !== req.organizationId || !EXECUTION_ROLES.includes(authorization.role)) {
       return { success: false, error: "Insufficient permissions" }
     }
 
@@ -763,9 +759,25 @@ export async function executePortalSignature(
 export async function getSignatureRequests(orgId: string, raw?: Record<string, unknown>) {
   const p = validate(z.object({ status: z.string().max(30).optional(), packetId: z.string().max(50).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20) }), raw || {})
   const params = p.success ? p.data : { page: 1, pageSize: 20 }
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, SIGNATURE_MANAGEMENT_ROLES, "list signature requests")
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 20
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    const now = new Date()
+    where.packet = {
+      client: {
+        assignments: {
+          some: {
+            staffUserId: authorization.userId,
+            AND: [
+              { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+              { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+            ],
+          },
+        },
+      },
+    }
+  }
   if (params?.status && params.status !== "all") where.status = params.status
   if (params?.packetId) where.packetId = params.packetId
 
@@ -785,6 +797,11 @@ export async function getSignatureRequests(orgId: string, raw?: Record<string, u
 }
 
 export async function getSignatureDetail(requestId: string) {
+  const target = await prisma.signatureRequest.findUnique({ where: { id: requestId }, select: { packetId: true, organizationId: true } })
+  if (!target?.packetId) return null
+  const authorization = await requirePacketAccess(target.packetId, "signature:manage", "view signature request")
+  if (authorization.organizationId !== target.organizationId) return null
+
   const req = await prisma.signatureRequest.findUnique({
     where: { id: requestId },
     include: {
@@ -796,7 +813,6 @@ export async function getSignatureDetail(requestId: string) {
     },
   })
   if (!req) return null
-  await requireOrgAccess(req.organizationId)
   return req
 }
 

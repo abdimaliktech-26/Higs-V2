@@ -12,6 +12,7 @@ export const CLIENT_CREATION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_A
 export const PACKET_CREATION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 export const APPROVAL_SUBMISSION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 export const APPROVAL_DECISION_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
+export const SIGNATURE_MANAGEMENT_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 export const CLIENT_ASSIGNMENT_ROLES: readonly UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
 export class StaffAuthorizationError extends Error {
@@ -42,7 +43,7 @@ export interface LiveResourceAuthorization extends LiveOrganizationAuthorization
 }
 
 export type ClientAccessCapability = "read" | "manage" | "archive" | "assign" | "packet:create"
-export type PacketAccessCapability = "read" | "manage" | "submit:approval"
+export type PacketAccessCapability = "read" | "manage" | "approval:read" | "submit:approval" | "signature:manage"
 export type DocumentAccessCapability = "read" | "write"
 
 async function deny(userId?: string, organizationId?: string, reason = "live authorization denied"): Promise<never> {
@@ -192,10 +193,13 @@ export async function requirePacketAccess(
   if (packet.client.organizationId !== packet.organizationId) {
     return deny(identity.userId, packet.organizationId, "packet organization chain mismatch")
   }
-  const clientCapability: ClientAccessCapability = capability === "read" ? "read" : "packet:create"
+  const clientCapability: ClientAccessCapability = capability === "read" || capability === "approval:read" ? "read" : "packet:create"
   const authorization = await authorizeClient(identity, packet.organizationId, packet.clientId, clientCapability, superAdminReason)
-  if (capability === "submit:approval" && !APPROVAL_SUBMISSION_ROLES.includes(authorization.role)) {
+  if ((capability === "approval:read" || capability === "submit:approval") && !APPROVAL_SUBMISSION_ROLES.includes(authorization.role)) {
     return deny(authorization.userId, packet.organizationId, "approval submission capability denied")
+  }
+  if (capability === "signature:manage" && !SIGNATURE_MANAGEMENT_ROLES.includes(authorization.role)) {
+    return deny(authorization.userId, packet.organizationId, "signature management capability denied")
   }
   return { ...authorization, packetId: packet.id }
 }

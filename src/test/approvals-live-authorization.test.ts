@@ -5,6 +5,8 @@ const packetUpdate = vi.fn()
 const signatureRequestCount = vi.fn()
 const approvalRequestCreate = vi.fn()
 const approvalRequestFindUnique = vi.fn()
+const approvalRequestFindMany = vi.fn()
+const approvalRequestCount = vi.fn()
 const approvalRequestUpdate = vi.fn()
 const approvalEventCreate = vi.fn()
 const requirePacketAccess = vi.fn()
@@ -22,6 +24,8 @@ vi.mock("@/lib/db", () => ({
     approvalRequest: {
       create: (...args: unknown[]) => approvalRequestCreate(...args),
       findUnique: (...args: unknown[]) => approvalRequestFindUnique(...args),
+      findMany: (...args: unknown[]) => approvalRequestFindMany(...args),
+      count: (...args: unknown[]) => approvalRequestCount(...args),
       update: (...args: unknown[]) => approvalRequestUpdate(...args),
     },
     approvalEvent: { create: (...args: unknown[]) => approvalEventCreate(...args) },
@@ -29,6 +33,8 @@ vi.mock("@/lib/db", () => ({
 }))
 vi.mock("@/lib/live-authorization", () => ({
   APPROVAL_DECISION_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  APPROVAL_SUBMISSION_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"],
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
   requirePacketAccess: (...args: unknown[]) => requirePacketAccess(...args),
   requireOrganizationRole: (...args: unknown[]) => requireOrganizationRole(...args),
   requireActiveOrganizationMembership: (...args: unknown[]) => requireActiveOrganizationMembership(...args),
@@ -61,6 +67,8 @@ beforeEach(() => {
   signatureRequestCount.mockResolvedValue(0)
   approvalRequestCreate.mockResolvedValue({ id: "approval-1" })
   approvalRequestFindUnique.mockResolvedValue(requestRow())
+  approvalRequestFindMany.mockResolvedValue([])
+  approvalRequestCount.mockResolvedValue(0)
   approvalRequestUpdate.mockResolvedValue({})
   approvalEventCreate.mockResolvedValue({})
   packetUpdate.mockResolvedValue({})
@@ -68,6 +76,29 @@ beforeEach(() => {
   requireOrganizationRole.mockResolvedValue(authorization(APPROVER_ID))
   requireActiveOrganizationMembership.mockResolvedValue(authorization(SUBMITTER_ID, "CASE_MANAGER"))
   createAuditEvent.mockResolvedValue(undefined)
+})
+
+describe("approval reads use live role and assignment scope", () => {
+  it("limits a Case Manager list to currently assigned clients", async () => {
+    requireOrganizationRole.mockResolvedValue(authorization(SUBMITTER_ID, "CASE_MANAGER"))
+    const { getApprovalRequests } = await import("@/lib/actions/approvals")
+    await getApprovalRequests(ORG_ID)
+    const where = approvalRequestFindMany.mock.calls[0][0].where
+    expect(where.packet.client.assignments.some.staffUserId).toBe(SUBMITTER_ID)
+    expect(where.packet.client.assignments.some.AND).toHaveLength(2)
+  })
+
+  it("keeps organization-wide approval lists unfiltered by assignment", async () => {
+    const { getApprovalRequests } = await import("@/lib/actions/approvals")
+    await getApprovalRequests(ORG_ID)
+    expect(approvalRequestFindMany.mock.calls[0][0].where).not.toHaveProperty("packet")
+  })
+
+  it("authorizes detail from the owning packet before returning PHI", async () => {
+    const { getApprovalDetail } = await import("@/lib/actions/approvals")
+    await getApprovalDetail("approval-1")
+    expect(requirePacketAccess).toHaveBeenCalledWith(PACKET_ID, "approval:read", "view approval request")
+  })
 })
 
 describe("approval pilot actions use live target-organization authorization", () => {

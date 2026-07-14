@@ -5,11 +5,12 @@ import { prisma } from "@/lib/db"
 import { createAuditEvent } from "@/lib/audit"
 import {
   APPROVAL_DECISION_ROLES,
+  APPROVAL_SUBMISSION_ROLES,
+  ORGANIZATION_WIDE_CLIENT_ROLES,
   requireActiveOrganizationMembership,
   requireOrganizationRole,
   requirePacketAccess,
 } from "@/lib/live-authorization"
-import { requireOrgAccess } from "@/lib/permissions"
 
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
 
@@ -119,9 +120,25 @@ export async function cancelApproval(requestId: string): Promise<ActionResult> {
 }
 
 export async function getApprovalRequests(orgId: string, params?: { status?: string; packetId?: string; page?: number; pageSize?: number }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, APPROVAL_SUBMISSION_ROLES, "list approval requests")
   const page = params?.page ?? 1; const pageSize = params?.pageSize ?? 20
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    const now = new Date()
+    where.packet = {
+      client: {
+        assignments: {
+          some: {
+            staffUserId: authorization.userId,
+            AND: [
+              { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+              { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+            ],
+          },
+        },
+      },
+    }
+  }
   if (params?.status && params.status !== "all") where.status = params.status
   if (params?.packetId) where.packetId = params.packetId
 
@@ -141,6 +158,11 @@ export async function getApprovalRequests(orgId: string, params?: { status?: str
 }
 
 export async function getApprovalDetail(requestId: string) {
+  const target = await prisma.approvalRequest.findUnique({ where: { id: requestId }, select: { packetId: true, organizationId: true } })
+  if (!target) return null
+  const authorization = await requirePacketAccess(target.packetId, "approval:read", "view approval request")
+  if (authorization.organizationId !== target.organizationId) return null
+
   const req = await prisma.approvalRequest.findUnique({
     where: { id: requestId },
     include: {
@@ -157,7 +179,6 @@ export async function getApprovalDetail(requestId: string) {
     },
   })
   if (!req) return null
-  await requireOrgAccess(req.organizationId)
 
   const pendingSignatures = await prisma.signatureRequest.count({
     where: { packetId: req.packetId, status: { in: ["pending", "sent", "viewed"] } },

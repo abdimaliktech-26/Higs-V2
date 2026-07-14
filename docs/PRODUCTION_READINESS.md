@@ -112,4 +112,18 @@ The next PHI-bearing staff paths now use PR-1 live authorization:
 
 Assignment-scoped DSP and Nurse roles remain read-only for client/packet/document resources. Case Managers receive manage access only for currently assigned clients. Client creation, client archival, assignment administration, packet archival, and approval decisions retain their more restrictive organization-wide policies.
 
+## PR-2C — Approval Reads and Staff Signature Administration
+
+Approval and staff-signature administration now use the same live target-resource boundary:
+
+- approval lists require a current approval-workflow role; Case Manager results are limited to packets for currently assigned clients, while organization-wide roles retain organization-wide results;
+- approval detail loads only the minimal target identity first, then authorizes against the owning packet before loading names, Medicaid identifiers, documents, validation results, or events;
+- eligible signature fields are authorized through the owning packet, and eligible portal-signing grants through the owning client;
+- signature-request creation derives the actor, organization, role, and assignment scope from the live packet authorization result rather than JWT organization or role claims;
+- signature status transitions and staff signature execution require live access to the request's owning packet, preserve the staff-self-signature identity check, and record the live database actor;
+- staff signature lists require a current signature-management role and limit Case Managers to currently assigned clients; and
+- staff signature detail authorizes the owning packet before loading signer, client, document, field, or event details.
+
+`SUPER_ADMIN`, `ORG_ADMIN`, and `COMPLIANCE_DIRECTOR` retain organization-wide approval/signature administration. `CASE_MANAGER` is assignment-scoped. `DSP` and `NURSE` cannot administer approval or signature workflows. Portal signature discovery and execution remain on the separate live portal session, grant, permission, and accepted-authorization checks; PR-2C does not weaken or replace them.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requirePacketAccessMock = vi.fn()
+const requireClientAccessMock = vi.fn()
 const createAuditEventMock = vi.fn()
 const checkRateLimitMock = vi.fn()
 
@@ -52,6 +54,13 @@ vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
 vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
+}))
+vi.mock("@/lib/live-authorization", () => ({
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  SIGNATURE_MANAGEMENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"],
+  requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
+  requireClientAccess: (...a: unknown[]) => requireClientAccessMock(...a),
+  requireOrganizationRole: vi.fn(),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
@@ -110,6 +119,8 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue(staffSession().user)
   getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+  requirePacketAccessMock.mockResolvedValue({ userId: STAFF_ID, email: "case.manager@example.com", organizationId: ORG_ID, role: "CASE_MANAGER" })
+  requireClientAccessMock.mockResolvedValue({ userId: STAFF_ID, email: "case.manager@example.com", organizationId: ORG_ID, role: "CASE_MANAGER" })
   checkRateLimitMock.mockReturnValue(undefined)
   packetFindUnique.mockResolvedValue(packetRow())
   packetDocumentFindUnique.mockResolvedValue(packetDocumentRow())
@@ -189,7 +200,7 @@ describe("createSignatureRequest — staff-assigned", () => {
   })
 
   it("rejects an unauthorized staff role", async () => {
-    getActiveRoleMock.mockReturnValue("UNKNOWN_ROLE")
+    requirePacketAccessMock.mockRejectedValue(new Error("Access denied"))
     const { createSignatureRequest } = await import("@/lib/actions/signatures")
     const result = await createSignatureRequest(staffPayload())
     expect(result.success).toBe(false)

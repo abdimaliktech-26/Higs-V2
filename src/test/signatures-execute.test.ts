@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
+const requirePacketAccessMock = vi.fn()
 const createAuditEventMock = vi.fn()
 const checkRateLimitMock = vi.fn()
 const headersMock = vi.fn()
@@ -60,6 +61,13 @@ vi.mock("@/lib/auth", () => ({ auth: (...a: unknown[]) => authMock(...a) }))
 vi.mock("@/lib/permissions", () => ({
   requireOrgAccess: (...a: unknown[]) => requireOrgAccessMock(...a),
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
+}))
+vi.mock("@/lib/live-authorization", () => ({
+  ORGANIZATION_WIDE_CLIENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"],
+  SIGNATURE_MANAGEMENT_ROLES: ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"],
+  requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
+  requireClientAccess: vi.fn(),
+  requireOrganizationRole: vi.fn(),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
@@ -114,6 +122,9 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue({})
   getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+  requirePacketAccessMock.mockResolvedValue({
+    userId: STAFF_ID, email: STAFF_EMAIL, organizationId: ORG_ID, role: "CASE_MANAGER",
+  })
   checkRateLimitMock.mockReturnValue(null)
   headersMock.mockReturnValue({
     get: (name: string) => (name === "x-forwarded-for" ? "203.0.113.5, 70.41.3.18" : name === "user-agent" ? "TestAgent/1.0" : null),
@@ -297,14 +308,16 @@ describe("executeStaffSignature — validation rejections", () => {
   })
 
   it("accepts a case/whitespace-insensitive email match", async () => {
-    authMock.mockResolvedValue(staffSession({ email: "  Case.Manager@Example.com  " }))
+    requirePacketAccessMock.mockResolvedValue({
+      userId: STAFF_ID, email: "  Case.Manager@Example.com  ", organizationId: ORG_ID, role: "CASE_MANAGER",
+    })
     const { executeStaffSignature } = await import("@/lib/actions/signatures")
     const result = await executeStaffSignature(REQUEST_ID, VALID_INPUT)
     expect(result.success).toBe(true)
   })
 
   it("11. an unauthorized role is rejected", async () => {
-    getActiveRoleMock.mockReturnValue("DSP")
+    requirePacketAccessMock.mockResolvedValue({ userId: STAFF_ID, email: STAFF_EMAIL, organizationId: ORG_ID, role: "DSP" })
     const { executeStaffSignature } = await import("@/lib/actions/signatures")
     const result = await executeStaffSignature(REQUEST_ID, VALID_INPUT)
     expect(result.success).toBe(false)
@@ -312,7 +325,7 @@ describe("executeStaffSignature — validation rejections", () => {
   })
 
   it("12. cross-organization access is rejected", async () => {
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requirePacketAccessMock.mockRejectedValue(new Error("Access denied"))
     const { executeStaffSignature } = await import("@/lib/actions/signatures")
     const result = await executeStaffSignature(REQUEST_ID, VALID_INPUT)
     expect(result.success).toBe(false)
