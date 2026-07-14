@@ -1,21 +1,22 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { validate } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import {
+  CLIENT_READ_ROLES,
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  SIGNATURE_MANAGEMENT_ROLES,
+  requireActiveOrganizationMembership,
+  requireOrganizationRole,
+} from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
-import { UserRole } from "@prisma/client"
-
-const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
 
 export async function getNotifications(orgId: string, params?: { type?: string; unreadOnly?: boolean; page?: number }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireActiveOrganizationMembership(orgId, "list notifications")
   const page = params?.page ?? 1; const pageSize = 50
-  const where: Record<string, unknown> = { organizationId: orgId }
+  const where: Record<string, unknown> = { organizationId: orgId, userId: authorization.userId }
 
   if (params?.type) where.type = params.type
   if (params?.unreadOnly) where.readAt = null
@@ -27,25 +28,22 @@ export async function getNotifications(orgId: string, params?: { type?: string; 
       skip: (page - 1) * pageSize, take: pageSize,
     }),
     prisma.notification.count({ where: where as any }),
-    prisma.notification.count({ where: { organizationId: orgId, readAt: null, dismissedAt: null } }),
+    prisma.notification.count({ where: { organizationId: orgId, userId: authorization.userId, readAt: null, dismissedAt: null } }),
   ])
   return { notifications, total, unreadCount, page, pageSize, totalPages: Math.ceil(total / pageSize) }
 }
 
 export async function markNotificationRead(notificationId: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const n = await prisma.notification.findUnique({ where: { id: notificationId } })
     if (!n) return { success: false, error: "Not found" }
-    await requireOrgAccess(n.organizationId)
+    const authorization = await requireActiveOrganizationMembership(n.organizationId, "mark notification read")
+    if (n.userId !== authorization.userId) return { success: false, error: "Not found" }
 
     await prisma.notification.update({ where: { id: notificationId }, data: { readAt: new Date() } })
 
     await createAuditEvent({
-      organizationId: n.organizationId, actorId: user.id as string,
+      organizationId: n.organizationId, actorId: authorization.userId,
       action: "NOTIFICATION_MARKED_READ", targetType: "notification", targetId: notificationId,
     })
 
@@ -58,12 +56,10 @@ export async function markNotificationRead(notificationId: string): Promise<Acti
 
 export async function dismissNotification(notificationId: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-
     const n = await prisma.notification.findUnique({ where: { id: notificationId } })
     if (!n) return { success: false, error: "Not found" }
-    await requireOrgAccess(n.organizationId)
+    const authorization = await requireActiveOrganizationMembership(n.organizationId, "dismiss notification")
+    if (n.userId !== authorization.userId) return { success: false, error: "Not found" }
 
     await prisma.notification.update({ where: { id: notificationId }, data: { dismissedAt: new Date(), readAt: new Date() } })
 
@@ -75,32 +71,39 @@ export async function dismissNotification(notificationId: string): Promise<Actio
 }
 
 export async function generateNotifications(orgId: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  await requireOrgAccess(orgId)
-
-  const role = getActiveRole(user as any)
-  const isAdmin = (user.isSuperAdmin as boolean) || ADMIN_ROLES.includes(role)
+  const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "generate notifications")
+  const role = authorization.role
+  const isAdmin = ORGANIZATION_WIDE_CLIENT_ROLES.includes(role)
+  const actorId = authorization.userId
 
   const now = new Date()
   let count = 0
+  const assignmentWhere = {
+    some: {
+      staffUserId: actorId,
+      AND: [
+        { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+        { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+      ],
+    },
+  }
+  const clientScope = isAdmin ? {} : { client: { assignments: assignmentWhere } }
 
   // Overdue packet alerts
   const overduePackets = await prisma.packet.findMany({
-    where: { organizationId: orgId, dueDate: { lt: now }, status: { notIn: ["approved", "archived"] } },
+    where: { organizationId: orgId, dueDate: { lt: now }, status: { notIn: ["approved", "archived"] }, ...clientScope },
     include: { client: { select: { firstName: true, lastName: true } } },
     take: 20,
   })
 
   for (const pkt of overduePackets) {
     const existing = await prisma.notification.findFirst({
-      where: { organizationId: orgId, type: "overdue", metadata: { path: ["packetId"], equals: pkt.id } },
+      where: { organizationId: orgId, userId: actorId, type: "overdue", metadata: { path: ["packetId"], equals: pkt.id } },
     })
     if (!existing) {
       await prisma.notification.create({
         data: {
-          organizationId: orgId, userId: user.id as string, type: "overdue",
+          organizationId: orgId, userId: actorId, type: "overdue",
           title: "Packet Overdue",
           message: `Packet for ${pkt.client.firstName} ${pkt.client.lastName} is overdue (due ${pkt.dueDate?.toLocaleDateString()})`,
           link: `/packets/${pkt.id}`,
@@ -121,13 +124,13 @@ export async function generateNotifications(orgId: string) {
 
     for (const v of failedValidations) {
       const existing = await prisma.notification.findFirst({
-        where: { organizationId: orgId, type: "validation_failure", metadata: { path: ["resultId"], equals: v.id } },
+        where: { organizationId: orgId, userId: actorId, type: "validation_failure", metadata: { path: ["resultId"], equals: v.id } },
       })
       if (!existing) {
         const client = v.packet?.client
         await prisma.notification.create({
           data: {
-            organizationId: orgId, userId: user.id as string, type: "validation_failure",
+            organizationId: orgId, userId: actorId, type: "validation_failure",
             title: "Validation Failed",
             message: `${v.criticalCount} critical issue${v.criticalCount > 1 ? "s" : ""} found for ${client?.firstName} ${client?.lastName}`,
             link: `/validation/${v.id}`,
@@ -140,21 +143,23 @@ export async function generateNotifications(orgId: string) {
   }
 
   // Pending signatures
-  const pendingSigs = await prisma.signatureRequest.findMany({
-    where: { organizationId: orgId, status: { in: ["pending", "sent"] } },
-    include: { packet: { include: { client: { select: { firstName: true, lastName: true } } } } },
-    take: 10,
-  })
+  const pendingSigs = SIGNATURE_MANAGEMENT_ROLES.includes(role)
+    ? await prisma.signatureRequest.findMany({
+        where: { organizationId: orgId, status: { in: ["pending", "sent"] }, ...(isAdmin ? {} : { packet: clientScope }) },
+        include: { packet: { include: { client: { select: { firstName: true, lastName: true } } } } },
+        take: 10,
+      })
+    : []
 
   for (const sig of pendingSigs) {
     const existing = await prisma.notification.findFirst({
-      where: { organizationId: orgId, type: "pending_signature", metadata: { path: ["requestId"], equals: sig.id } },
+      where: { organizationId: orgId, userId: actorId, type: "pending_signature", metadata: { path: ["requestId"], equals: sig.id } },
     })
     if (!existing) {
       const client = sig.packet?.client
       await prisma.notification.create({
         data: {
-          organizationId: orgId, userId: user.id as string, type: "pending_signature",
+          organizationId: orgId, userId: actorId, type: "pending_signature",
           title: "Signature Pending",
           message: `Signature needed from ${sig.signerName} for ${client?.firstName} ${client?.lastName}`,
           link: `/signatures/${sig.id}`,
@@ -175,13 +180,13 @@ export async function generateNotifications(orgId: string) {
 
     for (const ap of pendingApprovals) {
       const existing = await prisma.notification.findFirst({
-        where: { organizationId: orgId, type: "pending_approval", metadata: { path: ["requestId"], equals: ap.id } },
+        where: { organizationId: orgId, userId: actorId, type: "pending_approval", metadata: { path: ["requestId"], equals: ap.id } },
       })
       if (!existing) {
         const client = ap.packet?.client
         await prisma.notification.create({
           data: {
-            organizationId: orgId, userId: user.id as string, type: "pending_approval",
+            organizationId: orgId, userId: actorId, type: "pending_approval",
             title: "Approval Pending",
             message: `Packet for ${client?.firstName} ${client?.lastName} is awaiting approval`,
             link: `/approvals/${ap.id}`,

@@ -193,4 +193,17 @@ Organization user administration now enforces current database-backed management
 
 This makes membership disablement and role changes effective on the next protected action through the shared live authorization layer; no JWT membership or role snapshot is trusted for these administration operations.
 
+## PR-2I — Staff Notification Privacy Boundary
+
+Staff notifications are now private to their live database owner:
+
+- list, total, and unread queries always include both the target organization and the live actor's user ID;
+- read and dismiss mutations derive the organization from the notification and reject a notification owned by another user, even if that user shares the organization;
+- notification generation uses the current target-organization role and live actor;
+- Case Manager, DSP, and Nurse source queries are limited to currently assigned clients;
+- signature-administration notifications are generated only for signature-management roles, and validation/approval notifications remain organization-wide-role-only; and
+- duplicate detection includes the recipient user ID so another user's existing alert cannot suppress the current user's alert.
+
+This closes the prior organization-wide notification read and mutation exposure and prevents generated PHI-bearing messages from including unassigned clients.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
