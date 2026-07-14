@@ -1,5 +1,5 @@
 import { getLibraryDocuments, getLibraryDashboardSummary, uploadSupportingDocument } from "@/lib/actions/library"
-import { signUrl } from "@/lib/storage"
+import { signStaffFileUrl, type StaffFileResourceType } from "@/lib/storage"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
 import { Badge } from "@/components/ui/badge"
@@ -179,10 +179,10 @@ function UploadForm({ orgId }: { orgId: string }) {
   )
 }
 
-function DownloadLink({ fileKey }: { fileKey: string | null | undefined }) {
+function DownloadLink({ resourceType, resourceId, fileKey }: { resourceType: StaffFileResourceType; resourceId: string; fileKey: string | null | undefined }) {
   if (!fileKey) return <Button variant="ghost" size="icon-sm" disabled title="No file on record"><Download className="h-4 w-4" /></Button>
   return (
-    <a href={signUrl(fileKey)} target="_blank" rel="noopener noreferrer" title="Download (signed link, expires in 5 minutes)">
+    <a href={signStaffFileUrl(resourceType, resourceId)} target="_blank" rel="noopener noreferrer" title="Download (signed link, expires in 5 minutes)">
       <Button variant="ghost" size="icon-sm" type="button"><Download className="h-4 w-4" /></Button>
     </a>
   )
@@ -218,7 +218,7 @@ function TemplateSection({ templates }: { templates: any[] }) {
                 <td className="py-3 pr-4 text-xs text-surface-600">v{tpl.version}</td>
                 <td className="py-3 pr-4"><StatusChip status={tpl.status} size="sm" /></td>
                 <td className="py-3 pr-4 text-xs text-surface-500">{tpl.uploadedBy?.name || "—"}</td>
-                <td className="py-3 pr-6"><DownloadLink fileKey={tpl.fileKey} /></td>
+                <td className="py-3 pr-6"><DownloadLink resourceType="document_template" resourceId={tpl.id} fileKey={tpl.fileKey} /></td>
               </tr>
             ))}
           </tbody>
@@ -278,7 +278,7 @@ function PacketDocSection({ docs, tab }: { docs: any[]; tab: string }) {
                     <Link href={`/documents/${doc.id}/edit`}>
                       <Button variant="ghost" size="icon-sm" title="Open in PDF Editor"><Eye className="h-4 w-4" /></Button>
                     </Link>
-                    <DownloadLink fileKey={doc.documentTemplate.fileKey} />
+                    <DownloadLink resourceType="packet_document" resourceId={doc.id} fileKey={doc.documentTemplate.fileKey} />
                   </div>
                 </td>
               </tr>
@@ -321,7 +321,7 @@ function SupportingSection({ docs }: { docs: any[] }) {
                 <td className="py-3 pr-4 text-sm text-surface-600">{doc.client ? `${doc.client.firstName} ${doc.client.lastName}` : "—"}</td>
                 <td className="py-3 pr-4 text-xs text-surface-500">{doc.uploadedBy?.name || "—"}</td>
                 <td className="py-3 pr-4 text-xs text-surface-500">{formatDate(doc.createdAt)}</td>
-                <td className="py-3 pr-6"><DownloadLink fileKey={doc.fileKey} /></td>
+                <td className="py-3 pr-6"><DownloadLink resourceType="supporting_document" resourceId={doc.id} fileKey={doc.fileKey} /></td>
               </tr>
             ))}
           </tbody>

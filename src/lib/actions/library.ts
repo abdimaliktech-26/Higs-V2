@@ -7,7 +7,7 @@ import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole, type Prisma } from "@prisma/client"
-import { storeFile, signUrl } from "@/lib/storage"
+import { storeFile, signStaffFileUrl } from "@/lib/storage"
 
 const MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
 
@@ -162,7 +162,7 @@ export async function getDocumentDetail(documentType: string, documentId: string
     })
     if (!doc) return null
     await requireOrgAccess(doc.packet.organizationId)
-    return { ...doc, type: "packet" as const, signedUrl: doc.documentTemplate.fileKey ? signUrl(doc.documentTemplate.fileKey) : null }
+    return { ...doc, type: "packet" as const, signedUrl: doc.documentTemplate.fileKey ? signStaffFileUrl("packet_document", doc.id) : null }
   }
 
   if (documentType === "template") {
@@ -172,7 +172,7 @@ export async function getDocumentDetail(documentType: string, documentId: string
     })
     if (!doc) return null
     await requireOrgAccess(doc.organizationId)
-    return { ...doc, type: "template" as const, signedUrl: doc.fileKey ? signUrl(doc.fileKey) : null }
+    return { ...doc, type: "template" as const, signedUrl: doc.fileKey ? signStaffFileUrl("document_template", doc.id) : null }
   }
 
   if (documentType === "supporting") {
@@ -182,7 +182,7 @@ export async function getDocumentDetail(documentType: string, documentId: string
     })
     if (!doc) return null
     await requireOrgAccess(doc.organizationId)
-    return { ...doc, type: "supporting" as const, signedUrl: doc.fileKey ? signUrl(doc.fileKey) : null }
+    return { ...doc, type: "supporting" as const, signedUrl: doc.fileKey ? signStaffFileUrl("supporting_document", doc.id) : null }
   }
 
   return null

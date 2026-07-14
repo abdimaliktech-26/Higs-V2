@@ -12,11 +12,13 @@ const SIGNED_URL_TTL_MS = 5 * 60 * 1000 // 5 minutes
 export interface FileRecord {
   key: string
   url: string
-  signedUrl: string
   size: number
   mimeType: string
   originalName: string
 }
+
+export const STAFF_FILE_RESOURCE_TYPES = ["document_template", "packet_document", "pdf_version", "supporting_document"] as const
+export type StaffFileResourceType = (typeof STAFF_FILE_RESOURCE_TYPES)[number]
 
 function ensureDir(dir: string) {
   return fs.mkdir(dir, { recursive: true })
@@ -43,7 +45,27 @@ export function verifySignedUrl(fileKey: string, expires: number, signature: str
   const payload = `${fileKey}:${expires}`
   const expected = crypto.createHmac("sha256", SIGNING_KEY).update(payload).digest("hex").slice(0, 16)
   const isExpired = Date.now() > expires
+  if (signature.length !== expected.length) return false
   return !isExpired && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
+}
+
+/**
+ * Staff file links identify a database resource, never a raw storage key.
+ * The route resolves the current file key and live authorization on every
+ * request; the signature is only an anti-tampering/expiry control.
+ */
+export function signStaffFileUrl(resourceType: StaffFileResourceType, resourceId: string): string {
+  const expires = Date.now() + SIGNED_URL_TTL_MS
+  const payload = `${resourceType}:${resourceId}:${expires}`
+  const signature = crypto.createHmac("sha256", SIGNING_KEY).update(payload).digest("hex").slice(0, 16)
+  return `/api/files/${resourceType}/${resourceId}?expires=${expires}&sig=${signature}`
+}
+
+export function verifyStaffFileUrl(resourceType: StaffFileResourceType, resourceId: string, expires: number, signature: string): boolean {
+  const payload = `${resourceType}:${resourceId}:${expires}`
+  const expected = crypto.createHmac("sha256", SIGNING_KEY).update(payload).digest("hex").slice(0, 16)
+  if (signature.length !== expected.length) return false
+  return Date.now() <= expires && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
 }
 
 export type PortalFileMode = "view" | "download"
@@ -87,7 +109,6 @@ export async function storeFile(
   return {
     key,
     url: `/api/files/${key}?direct=1`,
-    signedUrl: signUrl(key),
     size: stat.size,
     mimeType,
     originalName,
@@ -109,7 +130,6 @@ export async function storeFileFromStream(
   return {
     key,
     url: `/api/files/${key}?direct=1`,
-    signedUrl: signUrl(key),
     size: stat.size,
     mimeType,
     originalName,

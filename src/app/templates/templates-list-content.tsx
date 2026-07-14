@@ -1,5 +1,6 @@
 import Link from "next/link"
 import type React from "react"
+import { signStaffFileUrl } from "@/lib/storage"
 import { UserRole } from "@prisma/client"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
@@ -28,7 +29,6 @@ import {
   Upload,
 } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
-import { signUrl } from "@/lib/storage"
 import { getDocumentTemplates, getPacketTemplates, getProgramsForOrg, getTemplateActivity } from "@/lib/actions/templates"
 import { TemplateVersionUpload } from "./template-version-upload"
 import { PacketTemplateRequiredToggle } from "./packet-template-required-toggle"
@@ -492,7 +492,7 @@ export async function TemplatesListContent({
                             <td className="py-3 pr-4 text-xs text-surface-500">{formatDate(template.updatedAt)}</td>
                             <td className="py-3 pr-6">
                               <div className="flex justify-end gap-1">
-                                <a href={signUrl(template.fileKey)} target="_blank" rel="noopener noreferrer" title="Download template">
+                                <a href={signStaffFileUrl("document_template", template.id)} target="_blank" rel="noopener noreferrer" title="Download template">
                                   <Button variant="ghost" size="icon-sm" type="button"><Download className="h-4 w-4" /></Button>
                                 </a>
                                 <Link href={`/library?tab=templates&search=${encodeURIComponent(template.name)}`} title="View in library">
@@ -843,7 +843,7 @@ function SelectedTemplatePanel({
         )}
 
         <div className="mt-4 flex gap-2">
-          <a href={signUrl(template.fileKey)} target="_blank" rel="noopener noreferrer" className="flex-1">
+          <a href={signStaffFileUrl("document_template", template.id)} target="_blank" rel="noopener noreferrer" className="flex-1">
             <Button variant="secondary" size="sm" className="w-full"><Download className="h-4 w-4" /> Download</Button>
           </a>
           <Link href={`/library?tab=templates&search=${encodeURIComponent(template.name)}`} className="flex-1">

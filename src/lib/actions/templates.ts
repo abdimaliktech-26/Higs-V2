@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
-import { signUrl } from "@/lib/storage"
+import { signStaffFileUrl } from "@/lib/storage"
 import { validateTemplateConditions, validatePacketTemplateConditions } from "@/lib/actions/template-conditions"
 import { buildPacketConditionDefinition, evaluateInitialPacketApplicability, deriveIsMinor } from "@/lib/conditions/runtime"
 import { CONDITION_RUNTIME_VERSION } from "@/lib/conditions/runtime-types"
@@ -49,9 +49,9 @@ export async function getDocumentTemplateById(id: string) {
   })
   if (!tpl) return null
   await requireOrgAccess(tpl.organizationId)
-  // signUrl lives in a server-only module (fs/promises) — computed here so
+  // The resource-bound URL is computed here so
   // client components (the Template Field Editor) never import it directly.
-  return { ...tpl, signedFileUrl: signUrl(tpl.fileKey) }
+  return { ...tpl, signedFileUrl: signStaffFileUrl("document_template", tpl.id) }
 }
 
 // Document upload (initial creation and new-version uploads) happens via

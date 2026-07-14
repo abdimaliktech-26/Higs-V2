@@ -63,5 +63,21 @@ describe("storage", () => {
     expect(verifySignedUrl(fileKey, expires, sig)).toBe(true)
     expect(verifySignedUrl(fileKey, expires + 999999999, sig)).toBe(false)
     expect(verifySignedUrl("wrong-key", expires, sig)).toBe(false)
+    expect(verifySignedUrl(fileKey, expires, "short")).toBe(false)
+  })
+
+  it("staff file links sign a database resource identity instead of a storage key", async () => {
+    const { signStaffFileUrl, verifyStaffFileUrl } = await import("@/lib/storage")
+    const signedUrl = signStaffFileUrl("packet_document", "document-1")
+    expect(signedUrl).toContain("/api/files/packet_document/document-1")
+    expect(signedUrl).not.toContain("templates/test.pdf")
+
+    const url = new URL(signedUrl, "http://localhost")
+    const expires = parseInt(url.searchParams.get("expires") || "0")
+    const signature = url.searchParams.get("sig") || ""
+    expect(verifyStaffFileUrl("packet_document", "document-1", expires, signature)).toBe(true)
+    expect(verifyStaffFileUrl("packet_document", "document-2", expires, signature)).toBe(false)
+    expect(verifyStaffFileUrl("pdf_version", "document-1", expires, signature)).toBe(false)
+    expect(verifyStaffFileUrl("packet_document", "document-1", expires, "short")).toBe(false)
   })
 })

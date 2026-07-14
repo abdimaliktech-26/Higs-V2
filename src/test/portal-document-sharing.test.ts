@@ -22,7 +22,7 @@ vi.mock("@/lib/permissions", () => ({
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
-vi.mock("@/lib/storage", () => ({ signUrl: vi.fn() }))
+vi.mock("@/lib/storage", () => ({ signStaffFileUrl: vi.fn() }))
 vi.mock("@/lib/validation", () => ({ validate: vi.fn(), saveFieldsSchema: {}, addFieldSchema: {} }))
 
 const ORG_ID = "org-1"

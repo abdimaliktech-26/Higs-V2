@@ -80,6 +80,20 @@ PR-1 is a foundation and pilot, not a repository-wide conversion. Server actions
 
 Portal grant/token authorization and portal signing remain separate, purpose-built authorization paths and were not replaced by staff authorization helpers in PR-1. Their regression suites must remain green.
 
-Signed storage keys alone are not sufficient staff authorization. The later file-access conversion must resolve the owning resource and organization, client assignment, current membership, current role, and file-level permission from the database at request time.
+## PR-2A — Live Staff File Authorization
 
-Before a controlled PHI pilot, all PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, file access must be converted, and the other Production Readiness Audit findings must be closed and re-verified.
+Staff file delivery no longer treats a signed storage key as authorization. New staff file URLs sign only a database resource type and resource ID (`document_template`, `packet_document`, `pdf_version`, or `supporting_document`). On every request, the file route:
+
+- validates the resource-bound signature and expiry;
+- loads the current database resource and derives its owning organization;
+- resolves packet/document/client parent chains and rejects inconsistent ownership;
+- applies current membership, current role, and current client assignment through the PR-1 live authorization helpers;
+- resolves the storage key only after authorization succeeds;
+- rate-limits by the live database actor;
+- closes the file handle after reading;
+- returns `private, no-store` and `nosniff` response headers; and
+- records an organization-scoped `DOCUMENT_DOWNLOADED` audit event without placing the storage key or PHI in metadata.
+
+Legacy raw-storage-key URLs are rejected. The unused generic upload endpoint is disabled because it created files without an owning database resource; template, supporting-document, and portal uploads continue through their resource-specific workflows. Portal file delivery remains on its separate live portal-grant authorization path.
+
+Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

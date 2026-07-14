@@ -48,7 +48,7 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
-vi.mock("@/lib/storage", () => ({ signUrl: () => "https://example.com/signed" }))
+vi.mock("@/lib/storage", () => ({ signStaffFileUrl: () => "https://example.com/signed" }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 const ORG_ID = "org-1"

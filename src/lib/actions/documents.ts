@@ -7,7 +7,7 @@ import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
-import { signUrl } from "@/lib/storage"
+import { signStaffFileUrl } from "@/lib/storage"
 import { requireDocumentAccess } from "@/lib/live-authorization"
 import {
   reconcilePacketDocumentApplicability,
@@ -171,10 +171,10 @@ export async function getEditableDocument(documentId: string) {
     conditionIntegrityErrorCount: conditionState.conditionIntegrityErrorCount,
     conditionConfigurationError: conditionState.hasConditionIntegrityError,
     reconciliationPending: conditionState.reconciliationPending,
-    pdfUrl: doc.documentTemplate.fileKey ? signUrl(doc.documentTemplate.fileKey) : null,
+    pdfUrl: doc.documentTemplate.fileKey ? signStaffFileUrl("packet_document", doc.id) : null,
     versions: doc.versions.map((v) => ({
       ...v,
-      signedUrl: v.fileKey ? signUrl(v.fileKey) : null,
+      signedUrl: v.fileKey ? signStaffFileUrl("pdf_version", v.id) : null,
     })),
   }
 }
