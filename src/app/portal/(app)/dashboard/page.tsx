@@ -3,11 +3,12 @@ import { resolvePortalPageContext } from "@/lib/portal/page-context"
 import { getPortalDashboard, generatePortalDueDateReminders } from "@/lib/actions/portal-dashboard"
 import { getPortalAccessAuthorizationForClient } from "@/lib/actions/portal-access-authorizations"
 import { derivePortalAuthorizationState } from "@/lib/portal/authorization-status"
+import { getPendingPortalSignatureRequest } from "@/lib/actions/signatures"
 import { PortalShell } from "@/app/portal/portal-shell"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/states"
-import { Building2, FolderOpen, Activity, ShieldCheck } from "lucide-react"
+import { Building2, FolderOpen, Activity, ShieldCheck, PenSquare } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
@@ -44,6 +45,38 @@ export async function PendingAuthorizationPrompt({ clientId }: { clientId: strin
   )
 }
 
+// Step 5c.3 — shown only when getPendingPortalSignatureRequest finds at
+// least one eligible, open (sent/viewed) request assigned to the caller's
+// own active grant, with an accepted/effective authorization and
+// canSignDocuments already enabled — the exact same live checks
+// executePortalSignature itself re-verifies at submit time. Links directly
+// to the one ceremony route this step builds; no signature list exists.
+export async function PendingSignaturePrompt({ clientId }: { clientId: string }) {
+  const pending = await getPendingPortalSignatureRequest(clientId)
+  if (!pending) return null
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <PenSquare className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
+          <div>
+            <p className="text-sm font-medium text-surface-900">Document ready to sign</p>
+            <p className="mt-0.5 text-sm text-surface-600">
+              {pending.count === 1
+                ? "You have a document waiting for your electronic signature."
+                : `You have ${pending.count} documents waiting for your electronic signature.`}
+            </p>
+          </div>
+        </div>
+        <Link href={`/portal/signatures/${pending.requestId}/sign?client=${clientId}`} className={buttonVariants({ variant: "primary", size: "sm" })}>
+          Review and sign
+        </Link>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default async function PortalDashboardPage({ searchParams }: { searchParams: Promise<{ client?: string }> }) {
   const { client } = await searchParams
   const { clients, currentClientId } = await resolvePortalPageContext(client)
@@ -71,6 +104,7 @@ export default async function PortalDashboardPage({ searchParams }: { searchPara
         </div>
 
         <PendingAuthorizationPrompt clientId={currentClientId} />
+        <PendingSignaturePrompt clientId={currentClientId} />
 
         <Card>
           <CardHeader>

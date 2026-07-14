@@ -98,8 +98,16 @@ describe("AuthorizationAcceptanceForm — server error handling", () => {
     fireEvent.click(checkbox())
     submit()
 
-    await waitFor(() => expect(screen.getByRole("alert")).toBe(document.activeElement))
-  })
+    // Focus is queued via requestAnimationFrame in the component (real
+    // timers, deliberately, matching this repo's own convention for
+    // async-timing tests). waitFor's 1000ms default is tight under full-
+    // suite parallel CI load, where it has intermittently lost this race
+    // across multiple unrelated commits — raised to match the same
+    // generous-margin precedent already used for the analogous rAF/timer
+    // race in signature-execution-form.test.tsx. No production behavior
+    // changed; this only widens how long the assertion is willing to wait.
+    await waitFor(() => expect(screen.getByRole("alert")).toBe(document.activeElement), { timeout: 5000 })
+  }, 7000)
 
   it("15. the checkbox remains checked after a server error", async () => {
     acceptPortalAccessAuthorizationMock.mockResolvedValue({ success: false, error: "Some server error." })

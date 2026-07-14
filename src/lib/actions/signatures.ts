@@ -6,7 +6,7 @@ import { validate, createSignatureRequestSchema } from "@/lib/validation"
 import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
-import { requirePortalPermission } from "@/lib/portal/auth"
+import { requirePortalPermission, requirePortalClientAccess } from "@/lib/portal/auth"
 import { createAuditEvent, createPortalAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
@@ -798,4 +798,114 @@ export async function getSignatureDetail(requestId: string) {
   if (!req) return null
   await requireOrgAccess(req.organizationId)
   return req
+}
+
+// ── Step 5c.3 — portal read models (discovery + the signing ceremony) ──
+//
+// "Eligible" here mirrors the exact live checks executePortalSignature
+// itself re-verifies at submit time (canSignDocuments + an accepted,
+// effective, non-revoked authorization) — this is a UX convenience only,
+// never a substitute for that action's own authoritative re-checks.
+
+// ── Portal: whether the current client has an actionable pending signature ──
+//
+// Scoped strictly to the caller's own, currently active grant —
+// requirePortalClientAccess re-verifies that live. Returns the oldest
+// eligible request's id (for the dashboard prompt's link) and the total
+// eligible count — never the full list, per the approved "no signature
+// list" scope for this step.
+export interface PortalPendingSignaturePrompt {
+  requestId: string
+  count: number
+}
+
+export async function getPendingPortalSignatureRequest(clientId: string): Promise<PortalPendingSignaturePrompt | null> {
+  const context = await requirePortalClientAccess(clientId)
+  if (!context.permissions.canSignDocuments) return null
+
+  const now = new Date()
+  const authorization = await prisma.portalAccessAuthorization.findFirst({
+    where: {
+      accessGrantId: context.accessId, portalUserId: context.portalUserId, clientId,
+      revokedAt: null, acceptedAt: { not: null },
+      effectiveDate: { lte: now },
+      OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+    },
+  })
+  if (!authorization) return null
+
+  const requests = await prisma.signatureRequest.findMany({
+    where: { portalUserId: context.portalUserId, accessGrantId: context.accessId, status: { in: ["sent", "viewed"] } },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  })
+  if (requests.length === 0) return null
+
+  return { requestId: requests[0].id, count: requests.length }
+}
+
+// ── Portal: the full detail for one request's signing ceremony ──
+//
+// Scoped by a single query to exactly the caller's own portalUserId +
+// accessGrantId — a request belonging to a different portal user, a
+// different grant, or a different client than the one requested is
+// structurally unreachable here (the query returns nothing), never
+// revealed and never distinguished from "not found".
+export interface PortalSignatureRequestDetail {
+  id: string
+  status: string
+  signerName: string
+  consentText: string
+  dueDate: Date | null
+  clientDisplayName: string
+  documentName: string
+  packetType: string | null
+  isOverdue: boolean
+  eligible: boolean
+  ineligibleReason: "not_enabled" | "not_authorized" | null
+}
+
+export async function getPortalSignatureRequestForClient(requestId: string, clientId: string): Promise<PortalSignatureRequestDetail | null> {
+  const context = await requirePortalClientAccess(clientId)
+
+  const req = await prisma.signatureRequest.findFirst({
+    where: { id: requestId, portalUserId: context.portalUserId, accessGrantId: context.accessId },
+    include: {
+      packet: { select: { packetType: true, client: { select: { firstName: true, lastName: true } } } },
+      packetDocument: { select: { documentTemplate: { select: { name: true } } } },
+    },
+  })
+  if (!req) return null
+
+  let eligible = context.permissions.canSignDocuments
+  let ineligibleReason: "not_enabled" | "not_authorized" | null = eligible ? null : "not_enabled"
+  if (eligible) {
+    const now = new Date()
+    const authorization = await prisma.portalAccessAuthorization.findFirst({
+      where: {
+        accessGrantId: context.accessId, portalUserId: context.portalUserId, clientId,
+        revokedAt: null, acceptedAt: { not: null },
+        effectiveDate: { lte: now },
+        OR: [{ expirationDate: null }, { expirationDate: { gt: now } }],
+      },
+    })
+    if (!authorization) {
+      eligible = false
+      ineligibleReason = "not_authorized"
+    }
+  }
+
+  return {
+    id: req.id,
+    status: req.status,
+    signerName: req.signerName,
+    consentText: req.consentText ?? "",
+    dueDate: req.dueDate,
+    clientDisplayName: req.packet ? `${req.packet.client.firstName} ${req.packet.client.lastName}` : "",
+    documentName: req.packetDocument?.documentTemplate.name ?? "",
+    packetType: req.packet?.packetType ?? null,
+    isOverdue: Boolean(req.dueDate && req.dueDate < new Date()),
+    eligible,
+    ineligibleReason,
+  }
 }
