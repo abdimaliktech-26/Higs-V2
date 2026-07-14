@@ -1,13 +1,16 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { validate } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import {
+  ORGANIZATION_WIDE_CLIENT_ROLES,
+  requireDocumentAccess,
+  requireOrganizationRole,
+  requirePacketAccess,
+} from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { UserRole, type Prisma } from "@prisma/client"
-import { runExtraction, generatePacketRecommendations, type AiSuggestion } from "@/lib/ai-engine"
+import { runExtraction, generatePacketRecommendations } from "@/lib/ai-engine"
 import { limiters, checkRateLimit } from "@/lib/rate-limit"
 
 const USE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
@@ -15,10 +18,8 @@ const USE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
 
 export async function runDocumentExtraction(documentId: string) {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  const rl = checkRateLimit(limiters.ai, user.id as string)
+  const authorization = await requireDocumentAccess(documentId, "write", "run AI document extraction")
+  const rl = checkRateLimit(limiters.ai, authorization.userId)
   if (rl) return rl
 
   const doc = await prisma.packetDocument.findUnique({
@@ -26,8 +27,7 @@ export async function runDocumentExtraction(documentId: string) {
     include: { packet: true, fields: true },
   })
   if (!doc) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(doc.packet.organizationId)
-  if (!USE_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
+  if (authorization.organizationId !== doc.packet.organizationId || !USE_ROLES.includes(authorization.role))
     return { success: false as const, error: "Insufficient permissions" }
 
   const startTime = Date.now()
@@ -44,7 +44,7 @@ export async function runDocumentExtraction(documentId: string) {
       overallConfidence,
       status: "completed",
       processingTime,
-      ranById: user.id as string,
+      ranById: authorization.userId,
     },
   })
 
@@ -65,7 +65,7 @@ export async function runDocumentExtraction(documentId: string) {
 
   await createAuditEvent({
     organizationId: doc.packet.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "AI_EXTRACTION_RUN",
     targetType: "packet_document",
     targetId: documentId,
@@ -78,10 +78,8 @@ export async function runDocumentExtraction(documentId: string) {
 
 export async function runPacketAnalysis(packetId: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const rl = checkRateLimit(limiters.ai, user.id as string)
+    const authorization = await requirePacketAccess(packetId, "manage", "run AI packet analysis")
+    const rl = checkRateLimit(limiters.ai, authorization.userId)
     if (rl) return rl
 
     const packet = await prisma.packet.findUnique({
@@ -93,8 +91,7 @@ export async function runPacketAnalysis(packetId: string): Promise<ActionResult>
       },
     })
     if (!packet) return { success: false, error: "Not found" }
-    await requireOrgAccess(packet.organizationId)
-    if (!USE_ROLES.includes(getActiveRole(user as any)) && !(user.isSuperAdmin as boolean))
+    if (authorization.organizationId !== packet.organizationId || !USE_ROLES.includes(authorization.role))
       return { success: false, error: "Insufficient permissions" }
 
     const suggestions = generatePacketRecommendations(
@@ -120,7 +117,7 @@ export async function runPacketAnalysis(packetId: string): Promise<ActionResult>
 
     await createAuditEvent({
       organizationId: packet.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "AI_RECOMMENDATION_GENERATED",
       targetType: "packet",
       targetId: packetId,
@@ -135,27 +132,30 @@ export async function runPacketAnalysis(packetId: string): Promise<ActionResult>
 }
 
 export async function applyRecommendation(recommendationId: string, status: "applied" | "dismissed") {
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-
   const rec = await prisma.aiRecommendation.findUnique({ where: { id: recommendationId } })
   if (!rec) return { success: false as const, error: "Not found" }
-  await requireOrgAccess(rec.organizationId)
+  const authorization = rec.packetDocumentId
+    ? await requireDocumentAccess(rec.packetDocumentId, "write", "apply AI recommendation")
+    : rec.packetId
+      ? await requirePacketAccess(rec.packetId, "manage", "apply AI recommendation")
+      : await requireOrganizationRole(rec.organizationId, USE_ROLES, "apply AI recommendation")
+  if (authorization.organizationId !== rec.organizationId || !USE_ROLES.includes(authorization.role)) {
+    return { success: false as const, error: "Access denied" }
+  }
 
   await prisma.aiRecommendation.update({
     where: { id: recommendationId },
-    data: { status, appliedAt: status === "applied" ? new Date() : null, appliedById: status === "applied" ? user.id as string : null },
+    data: { status, appliedAt: status === "applied" ? new Date() : null, appliedById: status === "applied" ? authorization.userId : null },
   })
 
   if (status === "applied") {
     await createAuditEvent({
       organizationId: rec.organizationId,
-      actorId: user.id as string,
+      actorId: authorization.userId,
       action: "AI_RECOMMENDATION_APPLIED",
       targetType: "ai_recommendation",
       targetId: recommendationId,
-      metadata: { type: rec.type, message: rec.message },
+      metadata: { type: rec.type },
     })
   }
 
@@ -164,9 +164,27 @@ export async function applyRecommendation(recommendationId: string, status: "app
 }
 
 export async function getAiExtractions(orgId: string, params?: { documentId?: string; page?: number }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, USE_ROLES, "list AI extractions")
   const page = params?.page ?? 1; const pageSize = 20
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    const now = new Date()
+    where.packetDocument = {
+      packet: {
+        client: {
+          assignments: {
+            some: {
+              staffUserId: authorization.userId,
+              AND: [
+                { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+                { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+              ],
+            },
+          },
+        },
+      },
+    }
+  }
   if (params?.documentId) where.packetDocumentId = params.documentId
 
   const [extractions, total] = await Promise.all([
@@ -183,8 +201,24 @@ export async function getAiExtractions(orgId: string, params?: { documentId?: st
 }
 
 export async function getAiRecommendations(orgId: string, params?: { type?: string; status?: string; packetId?: string }) {
-  await requireOrgAccess(orgId)
+  const authorization = await requireOrganizationRole(orgId, USE_ROLES, "list AI recommendations")
   const where: Record<string, unknown> = { organizationId: orgId }
+  if (!ORGANIZATION_WIDE_CLIENT_ROLES.includes(authorization.role)) {
+    const now = new Date()
+    const assignments = {
+      some: {
+        staffUserId: authorization.userId,
+        AND: [
+          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+          { OR: [{ endDate: null }, { endDate: { gt: now } }] },
+        ],
+      },
+    }
+    where.OR = [
+      { packet: { client: { assignments } } },
+      { packetDocument: { packet: { client: { assignments } } } },
+    ]
+  }
   if (params?.type) where.type = params.type
   if (params?.status) where.status = params.status
   if (params?.packetId) where.packetId = params.packetId

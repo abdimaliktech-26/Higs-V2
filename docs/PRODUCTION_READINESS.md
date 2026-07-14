@@ -206,4 +206,16 @@ Staff notifications are now private to their live database owner:
 
 This closes the prior organization-wide notification read and mutation exposure and prevents generated PHI-bearing messages from including unassigned clients.
 
+## PR-2J — AI Workflow Authorization
+
+AI extraction, analysis, recommendation, and history actions now use live resource authorization:
+
+- document extraction authorizes the owning packet document and client assignment before loading fields, then records the live actor;
+- packet analysis authorizes the owning packet before loading documents, validation results, or signatures;
+- recommendation application derives access from the linked document or packet, falling back to a live organization role only for legacy unlinked recommendations;
+- Case Manager extraction and recommendation lists are restricted to currently assigned clients across both packet-linked and document-linked records; and
+- audit metadata for applied recommendations no longer copies the recommendation message, avoiding unnecessary PHI or generated narrative in audit metadata.
+
+AI use remains restricted to organization-wide roles and assigned Case Managers. DSP and Nurse roles cannot run or administer these AI workflows.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
