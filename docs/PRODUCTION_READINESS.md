@@ -181,4 +181,16 @@ Staff-side portal document-request workflows now derive authorization from the t
 
 The portal user's checklist, upload history, feedback, and request reads remain protected by the separate live portal-client grant boundary. Existing duplicate-request, review-state, upload-provenance, packet-completion, notification, and audit behavior remains intact.
 
+## PR-2H — Organization User and Settings Administration
+
+Organization user administration now enforces current database-backed management roles:
+
+- organization user lists require a live `SUPER_ADMIN` or `ORG_ADMIN` role in the requested organization;
+- user creation treats the session's selected organization only as a new-resource target, then performs a live role check before creating either the user or membership;
+- user role, status, name, and department changes derive authorization from the target membership's organization;
+- role and other membership/user changes record the live actor, with status/name/department changes now producing an explicit `USER_UPDATED` audit event; and
+- organization settings reads require current active membership, while settings writes require the live management role in the selected target organization.
+
+This makes membership disablement and role changes effective on the next protected action through the shared live authorization layer; no JWT membership or role snapshot is trusted for these administration operations.
+
 Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.

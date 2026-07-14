@@ -3,9 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { validate, createUserSchema, orgSettingsSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
+import {
+  getLiveStaffAuthorizationContext,
+  requireActiveOrganizationMembership,
+  requireOrganizationRole,
+} from "@/lib/live-authorization"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
 import { UserRole, MemberStatus } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
@@ -13,8 +16,14 @@ const MANAGE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN"]
 
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
 
+async function requireSelectedManagedOrganization(reason: string) {
+  const identity = await getLiveStaffAuthorizationContext()
+  if (!identity.selectedOrganizationId) throw new Error("Select an organization")
+  return requireOrganizationRole(identity.selectedOrganizationId, MANAGE_ROLES, reason)
+}
+
 export async function getOrgUsers(orgId: string) {
-  await requireOrgAccess(orgId)
+  await requireOrganizationRole(orgId, MANAGE_ROLES, "list organization users")
   return prisma.organizationMember.findMany({
     where: { organizationId: orgId },
     include: { user: { select: { id: true, name: true, email: true, image: true, createdAt: true } } },
@@ -27,14 +36,8 @@ export async function createOrgUser(raw: Record<string, unknown>): Promise<Actio
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!MANAGE_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireSelectedManagedOrganization("create organization user")
+    const orgId = authorization.organizationId
 
     const pw = data.password || "changeme123"
     const passwordHash = await bcrypt.hash(pw, 12)
@@ -60,7 +63,7 @@ export async function createOrgUser(raw: Record<string, unknown>): Promise<Actio
     })
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string,
+      organizationId: orgId, actorId: authorization.userId,
       action: "USER_CREATED", targetType: "user", targetId: userId,
       metadata: { userName: data.name, role: data.role },
     })
@@ -74,17 +77,9 @@ export async function createOrgUser(raw: Record<string, unknown>): Promise<Actio
 
 export async function updateOrgUser(memberId: string, data: { name?: string; role?: UserRole; status?: MemberStatus; departments?: string[] }): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-
     const member = await prisma.organizationMember.findUnique({ where: { id: memberId }, include: { user: true } })
     if (!member) return { success: false, error: "Not found" }
-    await requireOrgAccess(member.organizationId)
-
-    const role = getActiveRole(user as any)
-    if (!MANAGE_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireOrganizationRole(member.organizationId, MANAGE_ROLES, "update organization user")
 
     if (data.name) {
       await prisma.user.update({ where: { id: member.userId }, data: { name: data.name } })
@@ -92,7 +87,7 @@ export async function updateOrgUser(memberId: string, data: { name?: string; rol
     if (data.role) {
       await prisma.organizationMember.update({ where: { id: memberId }, data: { role: data.role } })
       await createAuditEvent({
-        organizationId: member.organizationId, actorId: user.id as string,
+        organizationId: member.organizationId, actorId: authorization.userId,
         action: "ROLE_CHANGED", targetType: "user", targetId: member.userId,
         metadata: { fromRole: member.role, toRole: data.role, userName: member.user.name },
       })
@@ -104,6 +99,17 @@ export async function updateOrgUser(memberId: string, data: { name?: string; rol
       await prisma.organizationMember.update({ where: { id: memberId }, data: { departments: data.departments } })
     }
 
+    if (data.name || data.status || data.departments) {
+      await createAuditEvent({
+        organizationId: member.organizationId,
+        actorId: authorization.userId,
+        action: "USER_UPDATED",
+        targetType: "user",
+        targetId: member.userId,
+        metadata: { fields: [data.name ? "name" : null, data.status ? "status" : null, data.departments ? "departments" : null].filter(Boolean) },
+      })
+    }
+
     revalidatePath("/settings/users")
     return { success: true, data: { id: memberId } }
   } catch (e) {
@@ -112,7 +118,7 @@ export async function updateOrgUser(memberId: string, data: { name?: string; rol
 }
 
 export async function getOrgSettings(orgId: string) {
-  await requireOrgAccess(orgId)
+  await requireActiveOrganizationMembership(orgId, "view organization settings")
   const org = await prisma.organization.findUnique({ where: { id: orgId } })
   return org
 }
@@ -122,14 +128,8 @@ export async function updateOrgSettings(raw: Record<string, unknown>): Promise<A
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!MANAGE_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireSelectedManagedOrganization("update organization settings")
+    const orgId = authorization.organizationId
 
     const current = await prisma.organization.findUnique({ where: { id: orgId } })
     const settings = (current?.settings as Record<string, unknown>) || {}
@@ -146,7 +146,7 @@ export async function updateOrgSettings(raw: Record<string, unknown>): Promise<A
     await prisma.organization.update({ where: { id: orgId }, data: update as any })
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string,
+      organizationId: orgId, actorId: authorization.userId,
       action: "SETTINGS_UPDATED", targetType: "organization", targetId: orgId,
       metadata: { changes: Object.keys(data).join(", ") },
     })
