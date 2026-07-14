@@ -1,5 +1,3 @@
-import "server-only"
-
 const PLACEHOLDER_MARKERS = ["change-me", "your-secret", "your-key", "example"]
 
 function validSecret(value: string | undefined): boolean {
