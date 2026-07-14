@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { acceptPortalAccessAuthorization } from "@/lib/actions/portal-access-authorizations"
 import { Button } from "@/components/ui/button"
@@ -36,6 +36,10 @@ export function AuthorizationAcceptanceForm({ authorizationId, backHref }: Props
 
   const errorRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    if (serverError) errorRef.current?.focus()
+  }, [serverError])
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     // Authoritative client-side guard against a double-click/double-submit
@@ -57,7 +61,6 @@ export function AuthorizationAcceptanceForm({ authorizationId, backHref }: Props
     if (!result.success) {
       setLoading(false)
       setServerError(result.error)
-      requestAnimationFrame(() => errorRef.current?.focus())
       return
     }
 

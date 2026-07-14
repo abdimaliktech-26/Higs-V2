@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { executePortalSignature } from "@/lib/actions/signatures"
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,10 @@ export function SignatureExecutionForm({ requestId, clientId, expectedSignerName
   const nameInputRef = useRef<HTMLInputElement>(null)
   const errorRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    if (serverError) errorRef.current?.focus()
+  }, [serverError])
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (loading || success) return
@@ -83,7 +87,6 @@ export function SignatureExecutionForm({ requestId, clientId, expectedSignerName
     if (!result.success) {
       setLoading(false)
       setServerError(result.error)
-      requestAnimationFrame(() => errorRef.current?.focus())
       return
     }
 

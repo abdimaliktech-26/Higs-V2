@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { executeStaffSignature } from "@/lib/actions/signatures"
@@ -57,6 +57,10 @@ export function SignatureExecutionForm({ requestId, expectedSignerName }: Props)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const errorRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    if (serverError) errorRef.current?.focus()
+  }, [serverError])
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     // Guards against a double-click/double-submit racing this same handler
@@ -92,7 +96,6 @@ export function SignatureExecutionForm({ requestId, expectedSignerName }: Props)
       // Focus the error summary after a failed submission — typed name and
       // consent state are deliberately left exactly as the signer entered
       // them, never cleared.
-      requestAnimationFrame(() => errorRef.current?.focus())
       return
     }
 
