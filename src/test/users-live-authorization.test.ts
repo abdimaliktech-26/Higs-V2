@@ -84,10 +84,24 @@ describe("organization user administration uses live target-organization roles",
     expect(result.success).toBe(true)
     expect(requireOrganizationRole).toHaveBeenCalledWith(ORG_ID, ["SUPER_ADMIN", "ORG_ADMIN"], "update organization user")
     expect(organizationMemberUpdate).toHaveBeenCalledWith({ where: { id: MEMBER_ID }, data: { status: "DISABLED" } })
+    expect(userUpdate).toHaveBeenCalledWith({ where: { id: TARGET_ID }, data: { sessionVersion: { increment: 1 } } })
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
       actorId: ACTOR_ID,
       action: "USER_UPDATED",
       metadata: { fields: ["status"] },
+    }))
+  })
+
+  it("supports an explicit audited session revocation", async () => {
+    organizationMemberFindUnique.mockResolvedValue({ id: MEMBER_ID, organizationId: ORG_ID, userId: TARGET_ID })
+    const { revokeOrgUserSessions } = await import("@/lib/actions/users")
+    const result = await revokeOrgUserSessions(MEMBER_ID)
+    expect(result.success).toBe(true)
+    expect(userUpdate).toHaveBeenCalledWith({ where: { id: TARGET_ID }, data: { sessionVersion: { increment: 1 } } })
+    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: ACTOR_ID,
+      action: "USER_UPDATED",
+      metadata: { fields: ["sessions"] },
     }))
   })
 

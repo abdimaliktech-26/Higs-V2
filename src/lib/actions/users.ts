@@ -11,6 +11,7 @@ import {
 import { createAuditEvent } from "@/lib/audit"
 import { UserRole, MemberStatus } from "@prisma/client"
 import bcrypt from "bcryptjs"
+import { incrementStaffSessionVersion } from "@/lib/staff-session"
 
 const MANAGE_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN"]
 
@@ -98,6 +99,9 @@ export async function updateOrgUser(memberId: string, data: { name?: string; rol
     if (data.departments) {
       await prisma.organizationMember.update({ where: { id: memberId }, data: { departments: data.departments } })
     }
+    if (data.role || data.status) {
+      await incrementStaffSessionVersion(member.userId)
+    }
 
     if (data.name || data.status || data.departments) {
       await createAuditEvent({
@@ -111,6 +115,29 @@ export async function updateOrgUser(memberId: string, data: { name?: string; rol
     }
 
     revalidatePath("/settings/users")
+    return { success: true, data: { id: memberId } }
+  } catch (e) {
+    return { success: false, error: (e as Error).message }
+  }
+}
+
+export async function revokeOrgUserSessions(memberId: string): Promise<ActionResult> {
+  try {
+    const member = await prisma.organizationMember.findUnique({
+      where: { id: memberId },
+      select: { id: true, userId: true, organizationId: true },
+    })
+    if (!member) return { success: false, error: "Not found" }
+    const authorization = await requireOrganizationRole(member.organizationId, MANAGE_ROLES, "revoke organization user sessions")
+    await incrementStaffSessionVersion(member.userId)
+    await createAuditEvent({
+      organizationId: member.organizationId,
+      actorId: authorization.userId,
+      action: "USER_UPDATED",
+      targetType: "user",
+      targetId: member.userId,
+      metadata: { fields: ["sessions"] },
+    })
     return { success: true, data: { id: memberId } }
   } catch (e) {
     return { success: false, error: (e as Error).message }

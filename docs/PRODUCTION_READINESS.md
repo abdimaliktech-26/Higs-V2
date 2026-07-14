@@ -46,7 +46,7 @@ The intentionally restrictive client-creation policy leaves a possible Case Mana
 
 Global Super Admin authorization is derived from the live `User.isSuperAdmin` database field, not the JWT. A global Super Admin may access a target organization without a normal membership under the existing platform model. Resource helpers require a non-empty operational reason, expose whether the access is cross-tenant, and sensitive converted writes preserve organization-scoped audit events with the live actor ID.
 
-Full break-glass approval, time-limited elevation, authorization-version/session revocation, and customer-visible Super Admin access logs remain deferred governance work. Live database checks prevent stale JWT authorization claims from granting access, but a dedicated mechanism for invalidating the identity session itself remains a future hardening item.
+Full break-glass approval, time-limited elevation, and customer-visible Super Admin access logs remain deferred governance work. Versioned staff-session revocation and live Super Admin claim refresh were completed in PR-3.
 
 ### PR-1 pilot conversions
 
@@ -247,4 +247,21 @@ Document- and packet-template administration now uses the live database-backed s
 
 The conversion preserves PDF validation/storage, immutable template version rows, field and condition carry-forward behavior, condition validation and cycle detection, dependency protection, packet materialization, and existing audit behavior. The five focused template suites passed 198/198 tests and the full suite passed 1,270/1,270 tests across 63 files. No legacy `requireOrgAccess`, `getActiveRole`, JWT membership, or JWT selected-role authorization remains under `src/lib/actions` or `src/app/api`; the remaining `isGlobalSuperAdmin` use is the explicit live value returned by the shared authorization layer. No schema or migration change was introduced.
 
-Before a controlled PHI pilot, all remaining PHI-bearing staff paths must use live authorization, remaining Super Admin governance and session-revocation controls must be resolved, and the other Production Readiness Audit findings must be closed and re-verified.
+## PR-3 — Versioned Staff Session Revocation and Live Super Admin Governance
+
+The existing Auth.js JWT strategy is retained, but every staff-session access now revalidates the identity and session version against Postgres:
+
+- deleted users immediately lose the session;
+- a `User.sessionVersion` mismatch clears the JWT cookie, providing deterministic all-session revocation without storing raw session tokens;
+- live `isSuperAdmin` and active-membership claims replace their JWT snapshots on every access;
+- invited and disabled memberships are omitted from refreshed session claims;
+- a non-Super-Admin with no active memberships loses the staff session;
+- a selected organization that is no longer active moves to the first remaining active membership, while resource authorization continues to derive ownership from the target resource;
+- role and membership-status changes increment the affected user's session version; and
+- `revokeOrgUserSessions` provides an explicit, live-role-protected, audited all-session revocation action.
+
+Platform-wide Super Admin data reads no longer trust `session.user.isSuperAdmin`. Each read uses `requireGlobalSuperAdmin` with an explicit operational reason and reloads the current database flag before any cross-tenant query. Full break-glass approval, time-limited elevation, and customer-visible Super Admin access logs remain separate pre-commercial governance work; PR-3 does not claim those controls exist.
+
+Migration `20260714210000_add_staff_session_version` was applied successfully to the real local Postgres database and migration status is current. Ten new tests cover token refresh, deleted identities, version mismatch, sign-in version adoption, no-active-membership revocation, stale organization selection, version increments, explicit audited revocation, explicit platform-read reasons, and live Super Admin demotion. Focused authorization/session tests passed 63/63; the full suite passed 1,280/1,280 tests across 65 files.
+
+Before a controlled PHI pilot, the remaining Production Readiness Audit findings and deferred Super Admin governance controls must be closed and re-verified.

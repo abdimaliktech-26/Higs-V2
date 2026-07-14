@@ -1,10 +1,8 @@
 import { prisma } from "@/lib/db"
-import { requireAuth } from "@/lib/permissions"
+import { requireGlobalSuperAdmin } from "@/lib/live-authorization"
 
-async function requireSuperAdmin() {
-  const user = await requireAuth()
-  if (!user.isSuperAdmin) throw new Error("Access denied")
-  return user
+async function requireSuperAdmin(reason: string) {
+  return requireGlobalSuperAdmin(reason)
 }
 
 export interface PlatformOrganizationRow {
@@ -26,7 +24,7 @@ export interface PlatformOrganizationRow {
  * Read-only — no mutation, no schema change.
  */
 export async function getPlatformOrganizations(): Promise<PlatformOrganizationRow[]> {
-  await requireSuperAdmin()
+  await requireSuperAdmin("view platform organizations")
   const orgs = await prisma.organization.findMany({
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { members: true, clients: true, packets: true } } },
@@ -53,7 +51,7 @@ export interface PlatformActivityEvent {
 }
 
 export async function getPlatformActivity(limit = 15): Promise<PlatformActivityEvent[]> {
-  await requireSuperAdmin()
+  await requireSuperAdmin("view platform audit activity")
   const events = await prisma.auditEvent.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -75,7 +73,7 @@ export interface PlatformAiUsage {
 }
 
 export async function getPlatformAiUsage(): Promise<PlatformAiUsage> {
-  await requireSuperAdmin()
+  await requireSuperAdmin("view platform AI usage")
   const startOfToday = new Date()
   startOfToday.setHours(0, 0, 0, 0)
 
@@ -94,7 +92,7 @@ export interface PlatformUserTotals {
 }
 
 export async function getPlatformUserTotals(): Promise<PlatformUserTotals> {
-  await requireSuperAdmin()
+  await requireSuperAdmin("view platform user totals")
   const [totalUsers, totalClients] = await Promise.all([
     prisma.user.count(),
     prisma.client.count(),

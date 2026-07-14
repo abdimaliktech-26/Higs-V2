@@ -119,6 +119,13 @@ export async function requireActiveOrganizationMembership(
   return resolveOrganizationAuthorization(identity, organizationId, superAdminReason)
 }
 
+export async function requireGlobalSuperAdmin(reason: string): Promise<LiveStaffIdentity> {
+  const identity = await getLiveStaffAuthorizationContext()
+  if (!reason.trim()) return deny(identity.userId, undefined, "global super admin reason missing")
+  if (!identity.isGlobalSuperAdmin) return deny(identity.userId, undefined, "global super admin access required")
+  return identity
+}
+
 export async function requireOrganizationRole(
   organizationId: string,
   allowedRoles: readonly UserRole[],

@@ -4,6 +4,7 @@ import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "./db"
 import { limiters, getClientIp } from "./rate-limit"
+import { refreshStaffSessionToken } from "./staff-session"
 
 export class TooManyAttemptsError extends CredentialsSignin {
   code = "too_many_attempts"
@@ -61,8 +62,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: user.name,
           image: user.image,
           isSuperAdmin: user.isSuperAdmin,
+          staffSessionVersion: user.sessionVersion,
           activeOrganizationId: activeMembership?.organizationId ?? undefined,
-          memberships: user.memberships.map((m) => ({
+          memberships: user.memberships.filter((m) => m.status === "ACTIVE").map((m) => ({
             id: m.id,
             organizationId: m.organizationId,
             organizationName: m.organization.name,
@@ -82,12 +84,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         t.isSuperAdmin = u.isSuperAdmin
         t.activeOrganizationId = u.activeOrganizationId
         t.memberships = u.memberships
+        t.staffSessionVersion = u.staffSessionVersion
       }
       if (trigger === "update" && session) {
         const t = token as unknown as Record<string, unknown>
         t.activeOrganizationId = (session as unknown as Record<string, unknown>).activeOrganizationId
       }
-      return token
+      return refreshStaffSessionToken(token as unknown as Record<string, unknown>, Boolean(user))
     },
     async session({ session, token }) {
       const t = token as unknown as Record<string, unknown>

@@ -226,15 +226,16 @@ model Organization {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  image         String?
-  passwordHash  String?
-  emailVerified DateTime?
-  isSuperAdmin  Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  image          String?
+  passwordHash   String?
+  emailVerified  DateTime?
+  isSuperAdmin   Boolean   @default(false)
+  sessionVersion Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   accounts                        Account[]
   sessions                        Session[]
