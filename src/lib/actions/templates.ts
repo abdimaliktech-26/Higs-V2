@@ -10,6 +10,7 @@ import { signUrl } from "@/lib/storage"
 import { validateTemplateConditions, validatePacketTemplateConditions } from "@/lib/actions/template-conditions"
 import { buildPacketConditionDefinition, evaluateInitialPacketApplicability, deriveIsMinor } from "@/lib/conditions/runtime"
 import { CONDITION_RUNTIME_VERSION } from "@/lib/conditions/runtime-types"
+import { requireActiveAssignableStaff, requireClientAccess, requirePacketAccess } from "@/lib/live-authorization"
 import { AuditAction, UserRole, type Prisma } from "@prisma/client"
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
@@ -305,9 +306,9 @@ export async function getPacketById(packetId: string) {
     },
   })
   if (!packet) return null
-  await requireOrgAccess(packet.organizationId)
+  const authorization = await requirePacketAccess(packetId, "read", "view packet details")
 
-  await createAuditEvent({ organizationId: packet.organizationId, actorId: undefined, action: "PACKET_VIEWED", targetType: "packet", targetId: packetId, metadata: { clientName: `${packet.client.firstName} ${packet.client.lastName}` } })
+  await createAuditEvent({ organizationId: packet.organizationId, actorId: authorization.userId, action: "PACKET_VIEWED", targetType: "packet", targetId: packetId, metadata: { clientName: `${packet.client.firstName} ${packet.client.lastName}` } })
   return packet
 }
 
@@ -330,21 +331,22 @@ export async function getPacketById(packetId: string) {
 export async function createPacket(data: {
   clientId: string; packetTemplateId: string; dueDate?: string; assignedToId?: string
 }) {
-  // Deliberately open to any authenticated org member — not gated by
-  // canManage() — matching the pre-existing packet-creation behavior
-  // (case managers/DSPs routinely create client packets as normal work,
-  // unlike template administration). A dedicated packet-creation permission
-  // or configurable role matrix is a separate, later design, not something
-  // to hardcode here as template-management roles.
-  const session = await auth()
-  if (!session?.user) return { success: false as const, error: "Unauthorized" }
-  const user = session.user as Record<string, unknown>
-  const orgId = user.activeOrganizationId as string
-  if (!orgId) return { success: false as const, error: "No org" }
-  await requireOrgAccess(orgId)
-
   const client = await prisma.client.findUnique({ where: { id: data.clientId }, select: { id: true, organizationId: true, dateOfBirth: true } })
-  if (!client || client.organizationId !== orgId) return { success: false as const, error: "Client not found" }
+  if (!client) return { success: false as const, error: "Client not found" }
+  let authorization
+  try {
+    authorization = await requireClientAccess(data.clientId, "packet:create", "create packet for client")
+  } catch (error) {
+    return { success: false as const, error: error instanceof Error ? error.message : "Access denied" }
+  }
+  const orgId = authorization.organizationId
+  if (data.assignedToId) {
+    try {
+      await requireActiveAssignableStaff(orgId, data.assignedToId)
+    } catch (error) {
+      return { success: false as const, error: error instanceof Error ? error.message : "Access denied" }
+    }
+  }
 
   const pt = await prisma.packetTemplate.findUnique({
     where: { id: data.packetTemplateId },
@@ -400,7 +402,7 @@ export async function createPacket(data: {
         createdAt: referenceAt,
         conditionSnapshotId: snapshot.id,
         conditionRuntimeVersion: CONDITION_RUNTIME_VERSION,
-        metadata: { createdBy: user.id } as Prisma.InputJsonValue,
+        metadata: { createdBy: authorization.userId } as Prisma.InputJsonValue,
       },
     })
 
@@ -444,7 +446,7 @@ export async function createPacket(data: {
 
       await createAuditEvent({
         organizationId: orgId,
-        actorId: user.id as string,
+        actorId: authorization.userId,
         action: "PACKET_DOCUMENT_INITIAL_APPLICABILITY_SET",
         targetType: "packet_document",
         targetId: packetDocument.id,
@@ -458,13 +460,13 @@ export async function createPacket(data: {
     }
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string, action: "PACKET_CONDITION_SNAPSHOT_CREATED",
+      organizationId: orgId, actorId: authorization.userId, action: "PACKET_CONDITION_SNAPSHOT_CREATED",
       targetType: "packet_condition_snapshot", targetId: snapshot.id,
       metadata: { packetId: createdPacket.id, packetTemplateId: pt.id, snapshotId: snapshot.id, runtimeVersion: CONDITION_RUNTIME_VERSION, trigger: "packet_creation" },
     }, tx)
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string, action: "PACKET_CREATED", targetType: "packet", targetId: createdPacket.id,
+      organizationId: orgId, actorId: authorization.userId, action: "PACKET_CREATED", targetType: "packet", targetId: createdPacket.id,
       metadata: { clientId: data.clientId, packetTemplateId: pt.id },
     }, tx)
 

@@ -1,31 +1,23 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { validate } from "@/lib/validation"
 import { prisma } from "@/lib/db"
-import { requireOrgAccess, getActiveRole } from "@/lib/permissions"
 import { createAuditEvent } from "@/lib/audit"
-import { auth } from "@/lib/auth"
-import { UserRole } from "@prisma/client"
-
-const APPROVER_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
-const SUBMITTER_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
+import {
+  APPROVAL_DECISION_ROLES,
+  requireActiveOrganizationMembership,
+  requireOrganizationRole,
+  requirePacketAccess,
+} from "@/lib/live-authorization"
+import { requireOrgAccess } from "@/lib/permissions"
 
 type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
 
 export async function submitForApproval(packetId: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!SUBMITTER_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
-
     const packet = await prisma.packet.findUnique({ where: { id: packetId }, include: { documents: true } })
     if (!packet) return { success: false, error: "Packet not found" }
+    const authorization = await requirePacketAccess(packetId, "submit:approval", "submit packet for approval")
 
     const pendingSignatures = await prisma.signatureRequest.count({
       where: { packetId, status: { in: ["pending", "sent", "viewed"] } },
@@ -35,15 +27,15 @@ export async function submitForApproval(packetId: string): Promise<ActionResult>
     }
 
     const req = await prisma.approvalRequest.create({
-      data: { organizationId: orgId, packetId, submittedById: user.id as string, status: "pending" },
+      data: { organizationId: packet.organizationId, packetId, submittedById: authorization.userId, status: "pending" },
     })
 
     await prisma.approvalEvent.create({
-      data: { approvalRequestId: req.id, eventType: "submitted", createdById: user.id as string },
+      data: { approvalRequestId: req.id, eventType: "submitted", createdById: authorization.userId },
     })
 
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string,
+      organizationId: packet.organizationId, actorId: authorization.userId,
       action: "APPROVAL_SUBMITTED", targetType: "approval_request", targetId: req.id,
       metadata: { packetId },
     })
@@ -58,27 +50,24 @@ export async function submitForApproval(packetId: string): Promise<ActionResult>
 
 export async function decideApproval(requestId: string, decision: "approved" | "rejected" | "changes_requested", notes?: string, correctionReason?: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const role = getActiveRole(user as any)
-    if (!APPROVER_ROLES.includes(role) && !(user.isSuperAdmin as boolean))
-      return { success: false, error: "Insufficient permissions" }
-
     const req = await prisma.approvalRequest.findUnique({
       where: { id: requestId }, include: { packet: { include: { documents: true } } },
     })
     if (!req) return { success: false, error: "Not found" }
     if (req.status !== "pending") return { success: false, error: `Request is already ${req.status}` }
-    await requireOrgAccess(req.organizationId)
+    if (req.packet.organizationId !== req.organizationId) return { success: false, error: "Access denied" }
+    const authorization = await requireOrganizationRole(req.organizationId, APPROVAL_DECISION_ROLES, "decide approval request")
+    if (req.submittedById === authorization.userId) {
+      return { success: false, error: "You cannot decide an approval request that you submitted" }
+    }
 
     await prisma.approvalRequest.update({
       where: { id: requestId },
-      data: { status: decision, approverId: user.id as string, decisionNotes: notes || null, correctionReason: correctionReason || null, decidedAt: new Date() },
+      data: { status: decision, approverId: authorization.userId, decisionNotes: notes || null, correctionReason: correctionReason || null, decidedAt: new Date() },
     })
 
     await prisma.approvalEvent.create({
-      data: { approvalRequestId: requestId, eventType: decision, notes: notes || null, createdById: user.id as string },
+      data: { approvalRequestId: requestId, eventType: decision, notes: notes || null, createdById: authorization.userId },
     })
 
     // Update packet status
@@ -92,7 +81,7 @@ export async function decideApproval(requestId: string, decision: "approved" | "
       approved: "APPROVAL_APPROVED", rejected: "APPROVAL_REJECTED", changes_requested: "APPROVAL_CHANGES_REQUESTED",
     }
     await createAuditEvent({
-      organizationId: req.organizationId, actorId: user.id as string,
+      organizationId: req.organizationId, actorId: authorization.userId,
       action: auditMap[decision] as any, targetType: "approval_request", targetId: requestId,
       metadata: { packetId: req.packetId, notes },
     })
@@ -107,18 +96,18 @@ export async function decideApproval(requestId: string, decision: "approved" | "
 
 export async function cancelApproval(requestId: string): Promise<ActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const req = await prisma.approvalRequest.findUnique({ where: { id: requestId } })
+    const req = await prisma.approvalRequest.findUnique({ where: { id: requestId }, include: { packet: { select: { organizationId: true } } } })
     if (!req) return { success: false, error: "Not found" }
-    await requireOrgAccess(req.organizationId)
+    if (req.packet.organizationId !== req.organizationId) return { success: false, error: "Access denied" }
+    const authorization = await requireActiveOrganizationMembership(req.organizationId, "cancel approval request")
+    const canCancel = req.submittedById === authorization.userId || APPROVAL_DECISION_ROLES.includes(authorization.role)
+    if (!canCancel) return { success: false, error: "Access denied" }
 
     await prisma.approvalRequest.update({ where: { id: requestId }, data: { status: "cancelled" } })
-    await prisma.approvalEvent.create({ data: { approvalRequestId: requestId, eventType: "cancelled", createdById: user.id as string } })
+    await prisma.approvalEvent.create({ data: { approvalRequestId: requestId, eventType: "cancelled", createdById: authorization.userId } })
 
     await createAuditEvent({
-      organizationId: req.organizationId, actorId: user.id as string,
+      organizationId: req.organizationId, actorId: authorization.userId,
       action: "APPROVAL_CANCELLED", targetType: "approval_request", targetId: requestId,
     })
 

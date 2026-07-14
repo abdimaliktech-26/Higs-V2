@@ -2,6 +2,8 @@
 
 Last updated: July 14, 2026
 
+Production hardening has superseded feature expansion. The accepted launch-readiness baseline and PR-1 Live Staff Authorization Foundation are tracked in [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md). Higsi V2 remains a PHI no-go after PR-1; the pilot conversion is not a production-readiness approval.
+
 ## Checkpoint Results
 
 - `npm run build`: passed

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { canAccessModule, filterNavByRole } from "@/lib/utils"
+import type { UserRole } from "@prisma/client"
 
 describe("RBAC — role permission checks", () => {
   it("SUPER_ADMIN can access everything (role in allowed list)", () => {
@@ -33,7 +34,7 @@ describe("RBAC — role permission checks", () => {
 })
 
 describe("filterNavByRole", () => {
-  const items = [
+  const items: { title: string; roles: UserRole[] }[] = [
     { title: "Dashboard", roles: ["ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER", "DSP", "NURSE"] },
     { title: "Clients", roles: ["ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER", "DSP", "NURSE"] },
     { title: "Packets", roles: ["ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"] },

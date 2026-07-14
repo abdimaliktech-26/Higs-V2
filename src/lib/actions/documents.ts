@@ -8,6 +8,7 @@ import { createAuditEvent } from "@/lib/audit"
 import { auth } from "@/lib/auth"
 import { UserRole } from "@prisma/client"
 import { signUrl } from "@/lib/storage"
+import { requireDocumentAccess } from "@/lib/live-authorization"
 import {
   reconcilePacketDocumentApplicability,
   buildPacketConditionContext,
@@ -62,10 +63,6 @@ function normalizeFieldValue(value: string | null | undefined): string | null {
 // still loads (for historical/inspection access) but is forced read-only —
 // neither state blocks the page, and neither ever mutates anything on read.
 export async function getEditableDocument(documentId: string) {
-  const session = await auth()
-  if (!session?.user) throw new Error("Unauthorized")
-  const user = session.user as Record<string, unknown>
-
   const doc = await prisma.packetDocument.findUnique({
     where: { id: documentId },
     include: {
@@ -88,13 +85,9 @@ export async function getEditableDocument(documentId: string) {
   })
 
   if (!doc) throw new Error("Document not found")
-  await requireOrgAccess(doc.packet.organizationId)
-
-  const role = getActiveRole(user as any)
-  const isSuperAdmin = user.isSuperAdmin as boolean
-  const hasAccess = isSuperAdmin || EDIT_ROLES.includes(role) || READ_ROLES.includes(role)
-
-  if (!hasAccess) throw new Error("Access denied: insufficient permissions")
+  const authorization = await requireDocumentAccess(documentId, "read", "open staff document editor")
+  const role = authorization.role
+  const isSuperAdmin = authorization.isGlobalSuperAdmin
 
   // One buildPacketConditionContext call per request — never per field. Also
   // independently re-verifies organization/parent-chain consistency
@@ -129,7 +122,7 @@ export async function getEditableDocument(documentId: string) {
 
   await createAuditEvent({
     organizationId: doc.packet.organizationId,
-    actorId: user.id as string,
+    actorId: authorization.userId,
     action: "DOCUMENT_VIEWED",
     targetType: "packet_document",
     targetId: documentId,

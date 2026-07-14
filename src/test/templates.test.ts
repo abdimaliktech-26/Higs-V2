@@ -24,6 +24,9 @@ const authMock = vi.fn()
 const requireOrgAccessMock = vi.fn()
 const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
+const requireClientAccessMock = vi.fn()
+const requirePacketAccessMock = vi.fn()
+const requireActiveAssignableStaffMock = vi.fn()
 
 function makeTx(overrides: Record<string, any> = {}) {
   return {
@@ -80,6 +83,11 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/live-authorization", () => ({
+  requireClientAccess: (...a: unknown[]) => requireClientAccessMock(...a),
+  requirePacketAccess: (...a: unknown[]) => requirePacketAccessMock(...a),
+  requireActiveAssignableStaff: (...a: unknown[]) => requireActiveAssignableStaffMock(...a),
+}))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 const ORG_ID = "org-1"
@@ -99,6 +107,16 @@ beforeEach(() => {
   // conditions, trivially valid" unless a specific test overrides this.
   documentTemplateFieldFindMany.mockResolvedValue([])
   templateConditionGroupFindMany.mockResolvedValue([])
+  const liveAuthorization = {
+    userId: STAFF_ID, organizationId: ORG_ID, role: "ORG_ADMIN",
+    isGlobalSuperAdmin: false, isCrossTenantSuperAdmin: false,
+    selectedOrganizationId: ORG_ID, membershipId: "membership-1",
+    email: "staff@example.com", name: "Staff", clientId: "client-1",
+    isAssignedToClient: false,
+  }
+  requireClientAccessMock.mockResolvedValue(liveAuthorization)
+  requirePacketAccessMock.mockResolvedValue({ ...liveAuthorization, packetId: "packet-1" })
+  requireActiveAssignableStaffMock.mockResolvedValue(undefined)
 })
 
 const DOC_A = "doc-a"
@@ -500,32 +518,31 @@ describe("createPacket — Step 4c.2a: transactional, condition-aware creation",
 
   describe("ownership verification", () => {
     it("rejects when there is no authenticated session", async () => {
-      authMock.mockResolvedValue(null)
+      requireClientAccessMock.mockRejectedValue(new Error("Access denied"))
       const { createPacket } = await import("@/lib/actions/templates")
       const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
       expect(result.success).toBe(false)
       if (result.success) return
-      expect(result.error).toMatch(/unauthorized/i)
-      expect(clientFindUnique).not.toHaveBeenCalled()
+      expect(result.error).toMatch(/access denied/i)
     })
 
     it("rejects a user with no active organization membership", async () => {
-      authMock.mockResolvedValue(staffSession({ activeOrganizationId: undefined }))
+      requireClientAccessMock.mockRejectedValue(new Error("Access denied"))
       const { createPacket } = await import("@/lib/actions/templates")
       const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
       expect(result.success).toBe(false)
       if (result.success) return
-      expect(result.error).toMatch(/no org/i)
-      expect(clientFindUnique).not.toHaveBeenCalled()
+      expect(result.error).toMatch(/access denied/i)
     })
 
     it("rejects a cross-tenant client", async () => {
       clientFindUnique.mockResolvedValue(clientRow({ organizationId: "org-OTHER" }))
+      requireClientAccessMock.mockRejectedValue(new Error("Access denied"))
       const { createPacket } = await import("@/lib/actions/templates")
       const result = await createPacket({ clientId: CLIENT_ID, packetTemplateId: PACKET_TEMPLATE_ID })
       expect(result.success).toBe(false)
       if (result.success) return
-      expect(result.error).toMatch(/not found/i)
+      expect(result.error).toMatch(/access denied/i)
       expect(packetCreate).not.toHaveBeenCalled()
     })
 

@@ -8,6 +8,13 @@ import { createAuditEvent } from "@/lib/audit"
 import type { ClientFormData } from "@/lib/types"
 import { UserRole } from "@prisma/client"
 import { auth } from "@/lib/auth"
+import {
+  CLIENT_ASSIGNMENT_ROLES,
+  CLIENT_CREATION_ROLES,
+  getLiveStaffAuthorizationContext,
+  requireActiveAssignableStaff,
+  requireOrganizationRole,
+} from "@/lib/live-authorization"
 
 const FULL_ACCESS_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"]
 const ASSIGNED_ROLES: UserRole[] = ["CASE_MANAGER", "DSP", "NURSE"]
@@ -103,15 +110,10 @@ export async function createClient(raw: Record<string, unknown>): Promise<Client
   if (!parsed.success) return { success: false, error: parsed.error }
   const data = parsed.data
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
-    const orgId = user.activeOrganizationId as string | undefined
+    const identity = await getLiveStaffAuthorizationContext()
+    const orgId = identity.selectedOrganizationId ?? undefined
     if (!orgId) return { success: false, error: "No organization selected" }
-    await requireOrgAccess(orgId)
-    const role = getActiveRole(user as any)
-    if (!FULL_ACCESS_ROLES.includes(role) && role !== "CASE_MANAGER")
-      return { success: false, error: "Insufficient permissions" }
+    const authorization = await requireOrganizationRole(orgId, CLIENT_CREATION_ROLES, "create client in selected organization")
 
     const client = await prisma.client.create({
       data: {
@@ -128,7 +130,7 @@ export async function createClient(raw: Record<string, unknown>): Promise<Client
       },
     })
     await createAuditEvent({
-      organizationId: orgId, actorId: user.id as string,
+      organizationId: orgId, actorId: authorization.userId,
       action: "CLIENT_CREATED", targetType: "client", targetId: client.id,
       metadata: { clientName: `${client.firstName} ${client.lastName}` },
     })
@@ -216,19 +218,17 @@ export async function getAvailableStaff(orgId: string) {
 
 export async function assignStaff(clientId: string, staffUserId: string, role: string, isPrimary: boolean): Promise<ClientActionResult> {
   try {
-    const session = await auth()
-    if (!session?.user) return { success: false, error: "Unauthorized" }
-    const user = session.user as Record<string, unknown>
     const client = await prisma.client.findUnique({ where: { id: clientId } })
     if (!client) return { success: false, error: "Client not found" }
-    await requireOrgAccess(client.organizationId)
+    const authorization = await requireOrganizationRole(client.organizationId, CLIENT_ASSIGNMENT_ROLES, "assign staff to client")
+    await requireActiveAssignableStaff(client.organizationId, staffUserId)
     await prisma.staffAssignment.upsert({
       where: { clientId_staffUserId_role: { clientId, staffUserId, role } },
       update: { isPrimary, endDate: null },
       create: { clientId, staffUserId, role, isPrimary, startDate: new Date() },
     })
     await createAuditEvent({
-      organizationId: client.organizationId, actorId: user.id as string,
+      organizationId: client.organizationId, actorId: authorization.userId,
       action: "STAFF_ASSIGNED", targetType: "assignment", targetId: clientId,
       metadata: { staffUserId, role },
     })

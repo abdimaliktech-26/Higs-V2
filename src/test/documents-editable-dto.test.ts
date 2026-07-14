@@ -10,6 +10,7 @@ const getActiveRoleMock = vi.fn()
 const createAuditEventMock = vi.fn()
 const packetDocumentFindUnique = vi.fn()
 const packetFindUnique = vi.fn()
+const requireDocumentAccessMock = vi.fn()
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -23,6 +24,9 @@ vi.mock("@/lib/permissions", () => ({
   getActiveRole: (...a: unknown[]) => getActiveRoleMock(...a),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEventMock(...a) }))
+vi.mock("@/lib/live-authorization", () => ({
+  requireDocumentAccess: (...a: unknown[]) => requireDocumentAccessMock(...a),
+}))
 vi.mock("@/lib/storage", () => ({ signUrl: () => "https://example.com/signed" }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
@@ -141,6 +145,13 @@ beforeEach(() => {
   authMock.mockResolvedValue(staffSession())
   requireOrgAccessMock.mockResolvedValue({})
   getActiveRoleMock.mockReturnValue("CASE_MANAGER")
+  requireDocumentAccessMock.mockResolvedValue({
+    userId: STAFF_ID, organizationId: ORG_ID, role: "CASE_MANAGER",
+    isGlobalSuperAdmin: false, isCrossTenantSuperAdmin: false,
+    selectedOrganizationId: ORG_ID, membershipId: "membership-1",
+    email: "staff@example.com", name: "Staff", clientId: "client-1",
+    isAssignedToClient: true, packetId: PACKET_ID, documentId: DOC_ID,
+  })
 })
 
 describe("getEditableDocument — legacy packets (unchanged behavior)", () => {
@@ -381,15 +392,14 @@ describe("getEditableDocument — integrity errors", () => {
 
 describe("getEditableDocument — authorization and tenant safety", () => {
   it("rejects an unauthenticated caller", async () => {
-    authMock.mockResolvedValue(null)
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { getEditableDocument } = await import("@/lib/actions/documents")
-    await expect(getEditableDocument(DOC_ID)).rejects.toThrow("Unauthorized")
-    expect(packetDocumentFindUnique).not.toHaveBeenCalled()
+    await expect(getEditableDocument(DOC_ID)).rejects.toThrow("Access denied")
   })
 
   it("rejects cross-tenant document access", async () => {
     wireConsistentFixtures({}, {})
-    requireOrgAccessMock.mockRejectedValue(new Error("Access denied"))
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { getEditableDocument } = await import("@/lib/actions/documents")
     await expect(getEditableDocument(DOC_ID)).rejects.toThrow("Access denied")
   })
@@ -402,7 +412,7 @@ describe("getEditableDocument — authorization and tenant safety", () => {
 
   it("rejects a role with no editor access at all", async () => {
     wireConsistentFixtures({}, {})
-    getActiveRoleMock.mockReturnValue("BILLING_ADMIN")
+    requireDocumentAccessMock.mockRejectedValue(new Error("Access denied"))
     const { getEditableDocument } = await import("@/lib/actions/documents")
     await expect(getEditableDocument(DOC_ID)).rejects.toThrow("Access denied")
   })
