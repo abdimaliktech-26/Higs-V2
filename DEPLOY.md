@@ -411,6 +411,24 @@ Existing call sites still store and read from `./private/data/` through `src/lib
 
 `src/lib/storage/` now contains the structured contract, safe errors and keys, local/memory adapters, and the AWS S3 adapter. Production validation requires separate durable/quarantine buckets and SSE-KMS configuration and relies on the AWS SDK workload-identity credential chain. It does not accept static access-key variables as application requirements.
 
+### PR-5B.1 upload foundation (not active)
+
+`src/lib/uploads/` contains the additive upload-attempt lifecycle, 25 MB typed profiles, permission-restricted streaming spool/checksum primitive, strict PDF/JPEG/PNG/DOCX validators, scanner interface, strict transaction-aware audit boundary, capability check, and read-only reconciliation report. These modules are not called by an active upload or download route. Existing writers and readers still use `src/lib/storage.ts`; no `StoredObject` relation is authoritative yet.
+
+Production upload capability is deliberately unavailable unless all of the following are proven at runtime/operations review:
+
+- S3 is the production storage provider and the PR-5A fail-closed configuration is valid;
+- a separately approved scanner reports available (the current disabled scanner never reports clean); and
+- the selected host, reverse proxy/load balancer, and runtime are verified for 25 MB request bodies, streaming behavior, execution duration, and cancellation.
+
+Receipt is designed to stream to a mode-`0600` temporary spool, calculate SHA-256 and actual size in the same pass, then feed quarantine storage with a known checksum and length. Temporary directories are mode `0700` and are removed after both success and failure. This is a foundation only: no active endpoint accepts bytes through it and no automatic quarantine deletion runs.
+
+Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seven days for infected or suspected-malicious quarantine. They are not approved legal retention rules and are not enforced. The new portal validation profile excludes HEIC until PR-5B.3 approves or rejects a bounded decoder strategy; the current portal route is unchanged.
+
+The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
+
+PR-5B.2 is reserved for scanner approval plus template/template-version writer migration; PR-5B.3 for the HEIC decision plus staff/portal writer migration; PR-5B.4 for approved cleanup/reconciliation operations and hosting/load verification. PR-5C remains the read cutover. Do not enable production PHI uploads based on PR-5B.1.
+
 No native signed URL is delivered to a user in PR-5A. The approved initial PR-5C design is application-authorized, application-proxied streaming. The dormant S3 capability requires a version-bound read and caps TTL at 60 seconds.
 
 ### Bucket Structure

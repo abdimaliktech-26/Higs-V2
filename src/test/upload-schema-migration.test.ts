@@ -1,0 +1,49 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+import { describe, expect, it } from "vitest"
+
+const schemaPath = path.join(process.cwd(), "prisma", "schema.prisma")
+const migrationPath = path.join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20260715120000_add_upload_lifecycle_foundation",
+  "migration.sql",
+)
+
+describe("PR-5B.1 additive upload lifecycle schema", () => {
+  it("adds bounded UploadAttempt state, actors, lifecycle metadata, and indexes", async () => {
+    const schema = await fs.readFile(schemaPath, "utf8")
+    const block = schema.slice(schema.indexOf("model UploadAttempt {"), schema.indexOf("model AiExtraction {"))
+    expect(block).toContain("idempotencyKeyHash")
+    expect(block).toContain("actorIdentityId")
+    expect(block).toContain("quarantineObjectKey")
+    expect(block).toContain("plannedDurableObjectKey")
+    expect(block).toContain("storedObjectId")
+    expect(block).not.toContain("originalFileName")
+    expect(block).not.toContain("ipAddress")
+    expect(block).not.toContain("rawProvider")
+    expect(schema).toContain("@@unique([organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash]")
+  })
+
+  it("uses a compatibility-safe actor uniqueness boundary and one template successor", async () => {
+    const schema = await fs.readFile(schemaPath, "utf8")
+    expect(schema).toMatch(/previousVersionId\s+String\?\s+@unique @map\("previous_version_id"\)/)
+    expect(schema).toContain("staffUserId")
+    expect(schema).toContain("portalUserId")
+    expect(schema).toContain("actorIdentityId")
+  })
+
+  it("is additive, preflights existing successors, and creates no lifecycle rows or backfill", async () => {
+    const migration = await fs.readFile(migrationPath, "utf8")
+    expect(migration).toContain('CREATE TABLE "upload_attempts"')
+    expect(migration).toContain('HAVING COUNT(*) > 1')
+    expect(migration).toContain('CREATE UNIQUE INDEX "document_templates_previous_version_id_key"')
+    expect(migration).not.toMatch(/\bINSERT\b/i)
+    expect(migration).not.toMatch(/^\s*UPDATE\s/im)
+    expect(migration).not.toContain('ALTER TABLE "stored_objects"')
+    expect(migration).not.toContain('ALTER TABLE "document_templates" ADD COLUMN')
+    expect(migration).not.toContain('ALTER TABLE "supporting_documents" ADD COLUMN')
+    expect(migration).not.toContain('ALTER TABLE "pdf_versions" ADD COLUMN')
+  })
+})

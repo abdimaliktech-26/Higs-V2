@@ -210,6 +210,77 @@ enum StoredObjectMalwareStatus {
   ERROR
 }
 
+enum UploadKind {
+  TEMPLATE
+  TEMPLATE_VERSION
+  STAFF_SUPPORTING
+  PORTAL_REQUEST
+}
+
+enum UploadStatus {
+  INITIATED
+  RECEIVING
+  QUARANTINED
+  VALIDATING
+  VALIDATED
+  SCANNING
+  PROMOTING
+  PROMOTED
+  LINKING
+  LINKED_CLEANUP_PENDING
+  COMPLETED
+  FAILED
+}
+
+enum UploadOwnerType {
+  DOCUMENT_TEMPLATE
+  SUPPORTING_DOCUMENT
+}
+
+enum UploadActorType {
+  STAFF
+  PORTAL
+}
+
+enum UploadFailureStage {
+  AUTHORIZATION
+  RECEIVE
+  QUARANTINE
+  VALIDATION
+  SCAN
+  PROMOTION
+  LINKAGE
+  AUDIT
+  CLEANUP
+  INTERNAL
+}
+
+enum UploadFailureCategory {
+  AUTHORIZATION_REVOKED
+  SIZE_LIMIT
+  SIZE_MISMATCH
+  TYPE_MISMATCH
+  MALFORMED_CONTENT
+  ENCRYPTED_PDF
+  ACTIVE_CONTENT
+  SCAN_UNAVAILABLE
+  SCAN_INFECTED
+  SCAN_ERROR
+  STORAGE_FAILURE
+  PROMOTION_FAILURE
+  DATABASE_FAILURE
+  CONFLICT
+  REQUEST_CANCELLED
+  INTERNAL_FAILURE
+}
+
+enum UploadCleanupStatus {
+  NOT_REQUIRED
+  PENDING
+  COMPLETED
+  FAILED
+}
+
 model Organization {
   id        String             @id @default(cuid())
   name      String
@@ -244,6 +315,7 @@ model Organization {
   portalDocumentRequests   PortalDocumentRequest[]
   packetConditionSnapshots PacketConditionSnapshot[]
   storedObjects            StoredObject[]
+  uploadAttempts           UploadAttempt[]
 
   @@map("organizations")
 }
@@ -292,6 +364,7 @@ model User {
   portalDocumentRequestsCancelled PortalDocumentRequest[]        @relation("PortalDocumentRequestCancelledBy")
   portalDocumentTimelineEvents    PortalDocumentTimelineEvent[]
   portalDocumentReviewFeedback    PortalDocumentReviewFeedback[]
+  uploadAttempts                  UploadAttempt[]
 
   @@map("users")
 }
@@ -530,7 +603,7 @@ model DocumentTemplate {
   program           String?
   status            String   @default("draft")
   version           Int      @default(1)
-  previousVersionId String?  @map("previous_version_id")
+  previousVersionId String?  @unique @map("previous_version_id")
   fileUrl           String   @map("file_url")
   fileKey           String   @map("file_key")
   fileSize          Int?     @map("file_size")
@@ -1142,12 +1215,69 @@ model StoredObject {
   documentTemplate   DocumentTemplate?   @relation("DocumentTemplateStoredObject")
   pdfVersion         PdfVersion?         @relation("PdfVersionStoredObject")
   supportingDocument SupportingDocument? @relation("SupportingDocumentStoredObject")
+  uploadAttempt      UploadAttempt?
 
   @@unique([provider, bucket, objectKey])
   @@index([organizationId, lifecycleStatus])
   @@index([organizationId, malwareStatus])
   @@index([deletedAt])
   @@map("stored_objects")
+}
+
+// PR-5B.1: durable control-plane state for quarantine-first uploads. This row
+// contains opaque identifiers and bounded lifecycle data only; it never stores
+// filenames, PHI, raw idempotency tokens, credentials, or provider errors.
+// No active upload route uses this model until the later PR-5B migration slices.
+model UploadAttempt {
+  id                        String                    @id @default(cuid())
+  organizationId            String                    @map("organization_id")
+  uploadKind                UploadKind                @map("upload_kind")
+  status                    UploadStatus              @default(INITIATED)
+  intendedOwnerType         UploadOwnerType           @map("intended_owner_type")
+  intendedOwnerId           String                    @map("intended_owner_id")
+  parentResourceId          String?                   @map("parent_resource_id")
+  actorType                 UploadActorType           @map("actor_type")
+  actorIdentityId           String                    @map("actor_identity_id")
+  staffUserId               String?                   @map("staff_user_id")
+  portalUserId              String?                   @map("portal_user_id")
+  idempotencyKeyHash        String                    @map("idempotency_key_hash")
+  artifactId                String                    @map("artifact_id")
+  declaredMimeType          String?                   @map("declared_mime_type")
+  expectedSizeBytes         BigInt?                   @map("expected_size_bytes")
+  actualSizeBytes           BigInt?                   @map("actual_size_bytes")
+  checksumSha256            String?                   @map("checksum_sha256")
+  quarantineProvider        StorageProvider?          @map("quarantine_provider")
+  quarantineBucket          String?                   @map("quarantine_bucket")
+  quarantineObjectKey       String?                   @map("quarantine_object_key")
+  quarantineObjectVersionId String?                   @map("quarantine_object_version_id")
+  quarantineEtag            String?                   @map("quarantine_etag")
+  plannedDurableObjectKey   String                    @map("planned_durable_object_key")
+  storedObjectId            String?                   @unique @map("stored_object_id")
+  malwareStatus             StoredObjectMalwareStatus @default(NOT_SCANNED) @map("malware_status")
+  failureStage              UploadFailureStage?       @map("failure_stage")
+  failureCategory           UploadFailureCategory?    @map("failure_category")
+  cleanupStatus             UploadCleanupStatus       @default(NOT_REQUIRED) @map("cleanup_status")
+  expiresAt                 DateTime                  @map("expires_at")
+  quarantinedAt             DateTime?                 @map("quarantined_at")
+  validatedAt               DateTime?                 @map("validated_at")
+  scannedAt                 DateTime?                 @map("scanned_at")
+  promotedAt                DateTime?                 @map("promoted_at")
+  linkedAt                  DateTime?                 @map("linked_at")
+  cleanupCompletedAt        DateTime?                 @map("cleanup_completed_at")
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffUser    User?         @relation(fields: [staffUserId], references: [id], onDelete: SetNull)
+  portalUser   PortalUser?   @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+  storedObject StoredObject? @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash], map: "upload_attempts_idempotency_boundary_key")
+  @@index([organizationId, status])
+  @@index([status, expiresAt])
+  @@index([cleanupStatus])
+  @@index([createdAt])
+  @@map("upload_attempts")
 }
 
 model AiExtraction {
@@ -1259,6 +1389,7 @@ model PortalUser {
   emailChangeTokens           PortalEmailChangeToken[]
   uploadedSupportingDocuments SupportingDocument[]
   documentTimelineEvents      PortalDocumentTimelineEvent[]
+  uploadAttempts              UploadAttempt[]
 
   @@map("portal_users")
 }

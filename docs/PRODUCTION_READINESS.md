@@ -319,10 +319,36 @@ Higsi remains a PHI no-go after PR-5A. Real PHI requires an executed AWS BAA, ap
 
 Deferred boundaries:
 
-- PR-5B: migrate upload call sites and implement quarantine/validation/scanner integration boundaries, promotion, idempotency, and orphan handling;
+- PR-5B: staged upload migration using the PR-5B.1 lifecycle foundation described below;
 - PR-5C: migrate staff and portal reads to live-authorized, application-proxied object streaming;
 - PR-5D: existing-file migration, object/database backup provisioning, restore automation, rehearsal, and evidence; and
 - PR-5E: immutable finalized artifacts, Object Lock, legal hold, and retention enforcement after finalization and legal policy approval.
+
+## PR-5B.1 — Upload Lifecycle and Validation Foundation
+
+PR-5B.1 adds only the control-plane foundation for a future quarantine-first upload migration. No active template, template-version, staff-supporting, or portal upload route uses it yet; no read route changed; the local compatibility façade remains authoritative for current behavior. Higsi remains a PHI no-go and production uploads must not be described as available or malware-safe.
+
+`UploadAttempt` is separate from `StoredObject`. It records an opaque attempt identity, intended owner, exactly one staff-or-portal actor, SHA-256 hash of a required client UUID idempotency token, quarantine metadata, planned durable key, bounded failure/cleanup state, and stage timestamps. The raw token, filename, names, titles, email, SSN, IP address, credentials, and provider errors are not stored. The database idempotency boundary is `(organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash)`, avoiding nullable-actor uniqueness gaps while retaining nullable staff and portal foreign keys. Completed keys return the completed result, active keys remain in-progress/conflict, failed keys remain terminal, and intentional retry requires a new UUID. There is no cross-tenant or checksum-based deduplication.
+
+The legal progression is `INITIATED → RECEIVING → QUARANTINED → VALIDATING → VALIDATED → SCANNING → PROMOTING → PROMOTED → LINKING → LINKED_CLEANUP_PENDING/COMPLETED`; any non-terminal stage can become `FAILED` with bounded stage/category evidence. `FAILED` and `COMPLETED` cannot return to an active state. Promotion requires a real `CLEAN` scanner result. A durable `StoredObject` row is created only after the promoted object checksum, size, provider, and encryption metadata match; it starts `PENDING` and cannot become `AVAILABLE` until a later owner-link transaction succeeds with strict audit evidence. PR-5B.1 creates no production owner links or object rows.
+
+Receipt primitives stream once into a mode-`0600` ephemeral spool under a mode-`0700` directory, enforce actual bytes, compare declared and actual size, and calculate SHA-256 during that same pass. The spool supplies the precomputed length/checksum required by the current S3 adapter and is deleted deterministically after success or failure. Parser work operates only on this already bounded spool. All three profiles use a typed 25 MB limit: templates accept strict PDF only; staff supporting and the new portal profile accept PDF, JPEG, PNG, and DOCX. The new portal profile explicitly rejects HEIC pending the PR-5B.3 decoder decision; the existing portal route still behaves exactly as before.
+
+Deep validation returns bounded categories rather than parser messages. PDF validation rejects encrypted, malformed, zero-page, embedded-file, JavaScript, launch-action, executable-attachment, XFA, and other prohibited active content. JPEG/PNG validation decodes structure with dimension, pixel, frame, and malformed/truncation limits without transforming the image. DOCX validation bounds ZIP entries and compressed/decompressed size and ratio, rejects traversal, macros, executable payloads, and external relationships, and requires `[Content_Types].xml`, `_rels/.rels`, and `word/document.xml`. `sharp@0.34.5` is a direct runtime image-validation dependency; `fflate@0.8.2` is the small runtime ZIP parser. `pdfjs-dist`, already present, supplies PDF structural parsing.
+
+The scanner boundary contains a disabled implementation and deterministic clean/infected/error test implementations only. Disabled or unavailable scanners never report `CLEAN`. Application startup is not blocked when a scanner is absent because no endpoint is migrated, but the typed production capability result remains unavailable without an available scanner, production-safe S3 selection, and verified host body-size, duration, proxy/load-balancer, and streaming limits. No vendor, network call, or malware-clean claim exists.
+
+Future final linkage must use the narrow strict transaction-aware audit helpers, which propagate database failures and roll back the owning transaction; existing best-effort audit behavior is unchanged. Read-only reconciliation reports bounded opaque findings for stale attempts/quarantine, stuck promotion, durable objects without metadata, pending/available unowned metadata, unavailable or missing provider objects, cleanup-pending and owner-link inconsistencies, and legacy `PdfVersion` placeholders. It performs no write, repair, scheduling, or deletion. Provisional expiry planning is 24 hours for ordinary abandoned/failed quarantine and seven days for infected or suspected-malicious objects; no retention or cleanup job enforces those values.
+
+One direct successor per `DocumentTemplate.previousVersionId` is now database-enforced, with the additive migration refusing to proceed if populated data contains a conflict. No version row is rewritten. Future migrated writers may create opaque compatibility copies and dual-write verified legacy metadata through PR-5C; PR-5B.1 creates no copy and adds no façade-level S3 read bridge.
+
+Remaining PR-5B boundaries:
+
+- PR-5B.2: approve and integrate a production scanner, then migrate template and template-version writers through quarantine, promotion, strict linkage/audit, and temporary compatibility copies;
+- PR-5B.3: make the HEIC decoder decision and migrate staff-supporting and portal-request writers with their live authorization behavior preserved; and
+- PR-5B.4: operationalize non-destructive reconciliation, approve cleanup execution and retention handling, remove upload migration leftovers, and complete upload-platform/load verification before PR-5C read cutover.
+
+PR-5B.1 does not provision S3, malware scanning, cleanup jobs, backups, restore automation, final PDFs, Object Lock, or retention enforcement. It does not change signatures, billing, MFA, notifications, or product features. AWS BAA and infrastructure controls remain required, and the unverified RPO/RTO targets remain 15 minutes/four hours.
 
 ### Unresolved dependency-security advisories at PR-5A closeout
 
@@ -335,3 +361,5 @@ Deferred boundaries:
 - `@hono/node-server@1.19.11` is transitive development tooling through `@prisma/dev` and is affected by GHSA-92pp-h63x-v22m (repeated-slash `serveStatic` middleware bypass). A patched 1.x release exists (`>=1.19.13`), but `@prisma/dev@0.24.3` pins 1.19.11 exactly. Higsi does not use this package as its production application server.
 
 These findings remain production-readiness dependency-security work. Reassess supported Next.js and Prisma releases before a controlled PHI pilot; do not treat the current audit result as PHI-ready.
+
+PR-5B.1 adds direct runtime declarations for `fflate@0.8.2` and `sharp@0.34.5` (`sharp` was already present transitively through Next.js). The install audit remains five moderate findings; neither declaration added a new reported advisory. The existing five findings above remain unresolved and require a fresh registry-backed audit during closeout verification.
