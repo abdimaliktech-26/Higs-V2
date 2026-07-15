@@ -302,3 +302,36 @@ Unsupported HIPAA-readiness claims were removed from the public staff login, por
 PR-4 does **not** make local filesystem storage, in-memory rate limits, database/file backups, malware scanning, MFA, legal consent text, deployment/vendor BAAs, incident response, or disaster recovery production-ready. Those remain explicit controlled-PHI blockers or external operational controls.
 
 Before a controlled PHI pilot, the remaining Production Readiness Audit findings and deferred Super Admin governance controls must be closed and re-verified.
+
+## PR-5A — Storage Abstraction and Object Metadata
+
+PR-5A establishes the adapter-first foundation for production file storage without changing any live upload or download path. AWS S3 is the approved production provider architecture, with environment-configured region (`us-east-2` is the current example), separate durable and quarantine buckets, SSE-KMS with a customer-managed key, and workload identity rather than static application credentials. AWS accounts, buckets, policies, KMS keys, Block Public Access, TLS-only enforcement, backup services, and a BAA are not provisioned or verified by this code step.
+
+The provider-neutral contract supports structured streaming puts/gets, metadata, existence, copy, deletion, and future signed operations. Development uses a filesystem adapter, tests use a deterministic version-aware memory adapter, and production configuration accepts only S3. Native S3 signed methods are implemented as dormant adapter capabilities: no staff or portal call site uses them, signed reads require a version ID, and their TTL is capped at 60 seconds. The approved initial delivery model remains application-authorized, application-proxied streaming for PR-5C.
+
+Central tenant-safe builders accept only opaque CUID/UUID resource identifiers and cover template sources, packet versions, client/organization supporting documents, portal request uploads, quarantine, and reserved future final/signature artifacts. Names, filenames, emails, SSNs, Medicaid IDs, dates of birth, titles, separators, and arbitrary path fragments are not accepted as key inputs.
+
+The additive `StoredObject` model records provider/bucket/key/version, checksum, size, MIME type, encryption reference, lifecycle and scan state, and future-facing immutable/retention/legal-hold fields. Its optional one-to-one links from `DocumentTemplate`, `SupportingDocument`, and `PdfVersion` are nullable and not authoritative in PR-5A. The migration performs no backfill, creates no object rows, preserves every legacy file column, and adds no `PacketDocument` storage relation. `PENDING` and `NOT_SCANNED` are metadata defaults only; they do not represent a malware scan, quarantine promotion, finalization, or retention control.
+
+The existing `src/lib/storage.ts` exports remain a compatibility façade over local storage. Template uploads, template versions, staff supporting uploads, portal uploads, staff delivery, portal delivery, placeholder PDF-version behavior, and signatures are not cut over. The 14 generic synthetic seed PDFs now live under `prisma/fixtures/templates`; runtime `private/data`, local quarantine, backups, and migration working outputs are ignored by Git.
+
+Higsi remains a PHI no-go after PR-5A. Real PHI requires an executed AWS BAA, approved production/staging accounts and regions, provisioned private buckets and KMS controls, and completion of the remaining production-readiness work. The preliminary RPO of 15 minutes and RTO of four hours are planning targets only, not tested guarantees.
+
+Deferred boundaries:
+
+- PR-5B: migrate upload call sites and implement quarantine/validation/scanner integration boundaries, promotion, idempotency, and orphan handling;
+- PR-5C: migrate staff and portal reads to live-authorized, application-proxied object streaming;
+- PR-5D: existing-file migration, object/database backup provisioning, restore automation, rehearsal, and evidence; and
+- PR-5E: immutable finalized artifacts, Object Lock, legal hold, and retention enforcement after finalization and legal policy approval.
+
+### Unresolved dependency-security advisories at PR-5A closeout
+
+`npm audit` reports five moderate package-level findings from two underlying advisories. All five affected versions were already present in the pre-PR-5A lockfile; neither `@aws-sdk/client-s3` nor `@aws-sdk/s3-request-presigner` introduced an advisory. No broad dependency override, downgrade, or major-version change is included in PR-5A.
+
+- `next@16.2.10` is a direct runtime dependency reported through its exact `postcss@8.4.31` dependency. The current stable Next.js release is still 16.2.10, so no supported non-breaking parent-package update is available. npm's proposed `next@9.3.3` resolution is a breaking downgrade and is not acceptable.
+- `postcss@8.4.31` is transitive through Next.js and is affected by GHSA-qx2v-qp2m-jg93 (unescaped `</style>` during CSS stringify). PostCSS has a patched 8.x release (`>=8.5.10`), but Next.js pins 8.4.31 exactly. The vulnerable functionality is part of the production dependency graph but Higsi does not stringify user-supplied CSS at runtime; it remains tracked until Next.js publishes a supported update.
+- `prisma@7.8.0` is a direct development dependency reported through `@prisma/dev`. The current stable Prisma release remains 7.8.0. npm proposes `prisma@6.19.3`, which is a breaking downgrade rather than a compatible patch.
+- `@prisma/dev@0.24.3` is transitive development tooling and inherits the `@hono/node-server` finding. No non-breaking Prisma parent-package release currently resolves the pinned dependency.
+- `@hono/node-server@1.19.11` is transitive development tooling through `@prisma/dev` and is affected by GHSA-92pp-h63x-v22m (repeated-slash `serveStatic` middleware bypass). A patched 1.x release exists (`>=1.19.13`), but `@prisma/dev@0.24.3` pins 1.19.11 exactly. Higsi does not use this package as its production application server.
+
+These findings remain production-readiness dependency-security work. Reassess supported Next.js and Prisma releases before a controlled PHI pilot; do not treat the current audit result as PHI-ready.

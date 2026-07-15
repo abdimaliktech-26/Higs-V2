@@ -3,7 +3,7 @@
 > Version 1.1 — updated 2026-07-08  
 > Target platform: Vercel (frontend) + Railway / Render / Fly.io (backend)  
 > Database: PostgreSQL 16  
-> File storage: S3-compatible (MinIO / AWS S3 / Cloudflare R2) — **not yet implemented, see gap below**
+> File storage target: AWS S3 — PR-5A adapter/metadata foundation implemented; live call-site cutover deferred
 
 ---
 
@@ -11,7 +11,7 @@
 
 These are current-state facts about the codebase, not aspirational architecture. Provision infra to match what's actually wired, not what's documented as "target."
 
-- **Object storage is local filesystem only.** `src/lib/storage.ts` writes to `./private/data/` on the running instance. The S3 code in [Section 7](#7-object-storage-setup-for-pdfs) is a reference implementation, not yet integrated — do not provision S3 expecting the app to use it, and do not deploy to multiple/ephemeral instances (e.g. multiple Vercel serverless regions) until storage is externalized, or uploaded files will not be consistently reachable.
+- **Live object storage remains local filesystem in PR-5A.** A typed AWS S3 adapter, fail-closed production configuration, tenant-safe keys, and additive `StoredObject` metadata now exist, but existing writers/readers intentionally remain on the `src/lib/storage.ts` compatibility façade until PR-5B/PR-5C. Do not deploy multiple/ephemeral instances or use real PHI yet.
 - **Rate limiting is in-memory only.** `src/lib/rate-limit.ts` does not read `REDIS_URL`/Upstash env vars yet — the Redis migration in [Section 6](#6-redis-setup-for-rate-limiting) is documented but not coded. Same multi-instance caveat as above: limits are per-instance, not global.
 - **The `auth` rate limiter is defined but never invoked.** `checkRateLimit(limiters.auth, ...)` has no call site in `src/lib/auth.ts` or anywhere else — login currently has no brute-force throttling. The limiter also keys on `userId`, which doesn't exist pre-authentication, so it needs to be re-keyed on email or IP before it can protect the login route (see Section 6 table note).
 - **`scripts/backup.sh` only backs up the database.** It does not archive `private/data/` (the local file storage root). Until storage moves to S3, add the manual `tar` step in [Section 4](#4-backup-and-restore-process) to any backup automation, or uploaded PDFs are not covered by RPO.
@@ -52,7 +52,7 @@ A staging environment must mirror production as closely as possible.
 │                    Railway / Render                          │
 │  PostgreSQL 16 (512MB RAM, 1GB storage)                     │
 │  Redis 7 (optional for rate limiting testing)                │
-│  S3-compatible storage (MinIO or R2 free tier)              │
+│  Dedicated staging AWS S3 quarantine and durable buckets    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -102,6 +102,12 @@ vercel --prod
 | `DATABASE_URL` | `postgresql://user:pass@host:6543/db?schema=public&pgbouncer=true&connection_limit=5` | Railway / Render |
 | `AUTH_SECRET` | `openssl rand -hex 32` output | Generate at deploy time |
 | `FILE_SIGNING_KEY` | `openssl rand -hex 32` output | Generate at deploy time |
+| `STORAGE_PROVIDER` | `s3` | Required in production; local/memory rejected |
+| `AWS_REGION` | `us-east-2` | Environment-configurable; final region needs approval |
+| `S3_DURABLE_BUCKET` | `higsi-production-durable` | Private environment-specific durable bucket |
+| `S3_QUARANTINE_BUCKET` | `higsi-production-quarantine` | Must differ from durable bucket |
+| `S3_KMS_KEY_ARN` | customer-managed KMS key ARN | Required; provisioned outside the app |
+| `S3_SIGNED_URL_TTL_SECONDS` | `60` | Integer 1–60; native delivery remains unused |
 | `AUTH_URL` | `https://app.higsi.com` | Your production domain |
 
 ### Optional but Recommended
@@ -134,12 +140,13 @@ SENTRY_DSN="${NEXT_PUBLIC_SENTRY_DSN}"
 # ── Redis (rate limiting) ──
 REDIS_URL="rediss://default:pass@host:6379"
 
-# ── Object Storage (S3) ──
-S3_ENDPOINT="https://s3.us-east-1.amazonaws.com"
-S3_REGION="us-east-1"
-S3_BUCKET="higsi-production"
-S3_ACCESS_KEY_ID="<IAM key>"
-S3_SECRET_ACCESS_KEY="<IAM secret>"
+# ── Object Storage (AWS S3; workload identity, no static keys) ──
+STORAGE_PROVIDER="s3"
+AWS_REGION="us-east-2"
+S3_DURABLE_BUCKET="higsi-production-durable"
+S3_QUARANTINE_BUCKET="higsi-production-quarantine"
+S3_KMS_KEY_ARN="arn:aws:kms:us-east-2:<account-id>:key/<key-id>"
+S3_SIGNED_URL_TTL_SECONDS="60"
 
 # ── Feature Flags ──
 DB_LOG_QUERIES="false"
@@ -396,59 +403,26 @@ export const limiters = {
 
 ## 7. Object Storage Setup for PDFs
 
-### Current: Local Filesystem
+### Current live behavior: Local compatibility façade
 
-Files are stored at `./private/data/` using the local storage service (`src/lib/storage.ts`).
-**This works for single-instance deployments only.**
+Existing call sites still store and read from `./private/data/` through `src/lib/storage.ts`. This remains single-instance-only and is intentional until PR-5B/PR-5C.
 
-### Target: S3-Compatible Storage
+### PR-5A foundation and AWS S3 target
 
-Replace `src/lib/storage.ts` with an S3 implementation:
+`src/lib/storage/` now contains the structured contract, safe errors and keys, local/memory adapters, and the AWS S3 adapter. Production validation requires separate durable/quarantine buckets and SSE-KMS configuration and relies on the AWS SDK workload-identity credential chain. It does not accept static access-key variables as application requirements.
 
-```typescript
-// src/lib/storage-s3.ts (future implementation)
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
-
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT,
-  region: process.env.S3_REGION,
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  },
-})
-
-const BUCKET = process.env.S3_BUCKET!
-
-export async function storeFile(key: string, buffer: Buffer, mimeType: string) {
-  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: buffer, ContentType: mimeType }))
-  return { key, url: `https://${BUCKET}.s3.amazonaws.com/${key}`, size: buffer.length, mimeType, originalName: "" }
-}
-
-export async function getSignedDownloadUrl(key: string, expiresIn = 300) {
-  const command = new GetObjectCommand({ Bucket: BUCKET, Key: key })
-  return getSignedUrl(s3, command, { expiresIn })
-}
-```
+No native signed URL is delivered to a user in PR-5A. The approved initial PR-5C design is application-authorized, application-proxied streaming. The dormant S3 capability requires a version-bound read and caps TTL at 60 seconds.
 
 ### Bucket Structure
 
 ```
-higsi-production/
-├── templates/          # Uploaded DHS PDF templates
-│   └── *.pdf
-├── documents/          # Packet documents + versions
-│   └── {documentId}/
-│       ├── v1.pdf
-│       ├── v2.pdf
-│       └── ...
-├── uploads/            # User-uploaded files
-│   └── {userId}/
-│       └── *.pdf
-└── supporting/         # Supporting documents
-    └── {orgId}/
-        └── *.pdf
+separate durable/quarantine buckets per environment/account
+└── organizations/{organizationId}/...
+    ├── templates/{documentTemplateId}/source/{artifactId}.pdf
+    ├── clients/{clientId}/packets/{packetId}/documents/{packetDocumentId}/versions/{pdfVersionId}.pdf
+    ├── clients/{clientId}/supporting/{supportingDocumentId}/{artifactId}
+    ├── clients/{clientId}/portal-requests/{requestId}/uploads/{supportingDocumentId}/{artifactId}
+    └── uploads/{uploadAttemptId}/{artifactId}   # quarantine bucket only
 ```
 
 ### Bucket Policies
@@ -471,9 +445,12 @@ higsi-production/
 ```
 
 - Block all public access (bucket policy + block public access settings)
-- Access only through pre-signed URLs generated by the application
-- Enable S3 server-side encryption (AES-256)
+- Access through application-authorized, application-proxied streaming initially
+- Enable SSE-KMS with the approved customer-managed key
 - Enable S3 versioning for document recovery
+- Disable ACLs, require TLS, and use workload identity
+
+These controls are required infrastructure work and are not provisioned by PR-5A. Malware scanning, backup/restore, Object Lock, finalization, and retention enforcement remain deferred. Preliminary planning targets are RPO 15 minutes and RTO four hours; neither is yet verified. An executed AWS BAA and confirmation of covered services remain mandatory before PHI.
 
 ---
 
@@ -751,7 +728,7 @@ User → DNS (Vercel) → Edge Network
                         │           │
                         ▼           ▼
                   PostgreSQL     S3 Storage
-                  (Prisma)    (Signed URLs)
+                  (Prisma)    (App-proxied target)
                         │
                         ▼
                   Redis (rate limiting)

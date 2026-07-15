@@ -2,8 +2,9 @@ import "dotenv/config"
 import { PrismaClient, UserRole, OrganizationStatus, MemberStatus } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
+import fs from "fs/promises"
+import path from "path"
 import { storeFile } from "../src/lib/storage"
-import { generateMinimalPDF } from "../src/lib/sample-pdf"
 
 function createPrismaClient() {
   try {
@@ -83,8 +84,11 @@ async function main() {
 
   const docTemplates = await Promise.all(
     formData.map(async (f, i) => {
-      const key = `templates/${f.name.toLowerCase().replace(/\s+/g, "-")}.pdf`
-      const pdfBuffer = generateMinimalPDF(f.name)
+      const fixtureName = `${f.name.toLowerCase().replace(/\s+/g, "-")}.pdf`
+      const key = `templates/${fixtureName}`
+      // Synthetic one-page fixtures are tracked outside the runtime storage
+      // root so seeding never relies on or commits private/data contents.
+      const pdfBuffer = await fs.readFile(path.join(process.cwd(), "prisma", "fixtures", "templates", fixtureName))
       const record = await storeFile(key, pdfBuffer, "application/pdf", `${f.name}.pdf`)
 
       return prisma.documentTemplate.create({

@@ -11,6 +11,12 @@ env:
   AUTH_SECRET: "test-auth-secret-for-ci-at-least-32-chars"
   AUTH_URL: "http://localhost:3000"
   FILE_SIGNING_KEY: "test-file-signing-key-for-ci-at-least-32-chars"
+  STORAGE_PROVIDER: "s3"
+  AWS_REGION: "us-east-2"
+  S3_DURABLE_BUCKET: "higsi-ci-durable"
+  S3_QUARANTINE_BUCKET: "higsi-ci-quarantine"
+  S3_KMS_KEY_ARN: "arn:aws:kms:us-east-2:000000000000:key/ci-storage-key"
+  S3_SIGNED_URL_TTL_SECONDS: "60"
 
 jobs:
   quality:

@@ -1,12 +1,12 @@
 import fs from "fs/promises"
 import path from "path"
 import crypto from "crypto"
-import { pipeline } from "stream/promises"
-import { createReadStream, createWriteStream } from "fs"
 import { Readable } from "stream"
 import { assertProductionSecurityEnvironment } from "./security-environment"
+import { LocalStorageAdapter } from "./storage/local-adapter"
 
 const STORAGE_ROOT = path.join(process.cwd(), "private", "data")
+const compatibilityStorage = new LocalStorageAdapter({ root: STORAGE_ROOT, separateLocations: false })
 assertProductionSecurityEnvironment()
 const SIGNING_KEY = process.env.FILE_SIGNING_KEY || crypto.randomBytes(32).toString("hex")
 const SIGNED_URL_TTL_MS = 5 * 60 * 1000 // 5 minutes
@@ -21,10 +21,6 @@ export interface FileRecord {
 
 export const STAFF_FILE_RESOURCE_TYPES = ["document_template", "packet_document", "pdf_version", "supporting_document"] as const
 export type StaffFileResourceType = (typeof STAFF_FILE_RESOURCE_TYPES)[number]
-
-function ensureDir(dir: string) {
-  return fs.mkdir(dir, { recursive: true })
-}
 
 function getFilePath(key: string): string {
   const resolved = path.resolve(STORAGE_ROOT, key)
@@ -103,15 +99,11 @@ export async function storeFile(
   mimeType: string,
   originalName: string
 ): Promise<FileRecord> {
-  const filePath = getFilePath(key)
-  await ensureDir(path.dirname(filePath))
-  await fs.writeFile(filePath, buffer)
-
-  const stat = await fs.stat(filePath)
+  const stored = await compatibilityStorage.putObject({ key, body: buffer, mimeType, expectedContentLength: buffer.length })
   return {
     key,
     url: `/api/files/${key}?direct=1`,
-    size: stat.size,
+    size: stored.size,
     mimeType,
     originalName,
   }
@@ -123,16 +115,11 @@ export async function storeFileFromStream(
   mimeType: string,
   originalName: string
 ): Promise<FileRecord> {
-  const filePath = getFilePath(key)
-  await ensureDir(path.dirname(filePath))
-  const writeStream = createWriteStream(filePath)
-  await pipeline(readable, writeStream)
-
-  const stat = await fs.stat(filePath)
+  const stored = await compatibilityStorage.putObject({ key, body: readable, mimeType })
   return {
     key,
     url: `/api/files/${key}?direct=1`,
-    size: stat.size,
+    size: stored.size,
     mimeType,
     originalName,
   }
@@ -155,7 +142,7 @@ export async function getFileStream(key: string): Promise<{ stream: fs.FileHandl
 
 export async function deleteFile(key: string): Promise<boolean> {
   try {
-    await fs.unlink(getFilePath(key))
+    await compatibilityStorage.deleteObject({ key }, { requireExists: true })
     return true
   } catch {
     return false
@@ -163,12 +150,7 @@ export async function deleteFile(key: string): Promise<boolean> {
 }
 
 export async function fileExists(key: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(getFilePath(key))
-    return stat.isFile()
-  } catch {
-    return false
-  }
+  return compatibilityStorage.objectExists({ key })
 }
 
 export { STORAGE_ROOT }

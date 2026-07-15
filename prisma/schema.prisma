@@ -188,6 +188,28 @@ enum PortalAuditAction {
   PORTAL_EMAIL_CHANGED
 }
 
+enum StorageProvider {
+  LOCAL
+  S3
+}
+
+enum StoredObjectLifecycleStatus {
+  PENDING
+  QUARANTINED
+  AVAILABLE
+  FAILED
+  DELETION_PENDING
+  DELETED
+}
+
+enum StoredObjectMalwareStatus {
+  NOT_SCANNED
+  PENDING
+  CLEAN
+  INFECTED
+  ERROR
+}
+
 model Organization {
   id        String             @id @default(cuid())
   name      String
@@ -221,6 +243,7 @@ model Organization {
   portalAuditEvents        PortalAuditEvent[]
   portalDocumentRequests   PortalDocumentRequest[]
   packetConditionSnapshots PacketConditionSnapshot[]
+  storedObjects            StoredObject[]
 
   @@map("organizations")
 }
@@ -515,6 +538,7 @@ model DocumentTemplate {
   uploadedById      String   @map("uploaded_by_id")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  storedObjectId    String?  @unique @map("stored_object_id")
 
   uploadedBy         User                     @relation("TemplateUploads", fields: [uploadedById], references: [id])
   organization       Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -523,6 +547,7 @@ model DocumentTemplate {
   previousVersion    DocumentTemplate?        @relation("DocumentTemplateVersionChain", fields: [previousVersionId], references: [id], onDelete: SetNull)
   nextVersions       DocumentTemplate[]       @relation("DocumentTemplateVersionChain")
   fields             DocumentTemplateField[]
+  storedObject       StoredObject?            @relation("DocumentTemplateStoredObject", fields: [storedObjectId], references: [id], onDelete: SetNull)
 
   @@map("document_templates")
 }
@@ -851,9 +876,11 @@ model PdfVersion {
   comment          String?
   createdById      String   @map("created_by_id")
   createdAt        DateTime @default(now())
+  storedObjectId   String?  @unique @map("stored_object_id")
 
   packetDocument PacketDocument @relation(fields: [packetDocumentId], references: [id], onDelete: Cascade)
   createdBy      User           @relation(fields: [createdById], references: [id])
+  storedObject   StoredObject?  @relation("PdfVersionStoredObject", fields: [storedObjectId], references: [id], onDelete: SetNull)
 
   @@unique([packetDocumentId, version])
   @@map("pdf_versions")
@@ -1065,6 +1092,7 @@ model SupportingDocument {
   reviewStatus           PortalDocumentReviewOutcomeStatus? @map("review_status")
   createdAt              DateTime                           @default(now())
   updatedAt              DateTime                           @updatedAt
+  storedObjectId         String?                            @unique @map("stored_object_id")
 
   organization         Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   client               Client?                        @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -1076,9 +1104,50 @@ model SupportingDocument {
   portalAuthorizations PortalAccessAuthorization[]
   timelineEvents       PortalDocumentTimelineEvent[]
   reviewFeedback       PortalDocumentReviewFeedback[]
+  storedObject         StoredObject?                  @relation("SupportingDocumentStoredObject", fields: [storedObjectId], references: [id], onDelete: SetNull)
 
   @@index([portalRequestId])
   @@map("supporting_documents")
+}
+
+// PR-5A: provider metadata only. A row grants no download authority and is
+// not authoritative until a live owning resource links to it in PR-5B/PR-5C.
+// Future-facing retention and malware fields record state; this step neither
+// scans files nor activates Object Lock, legal hold, or retention enforcement.
+model StoredObject {
+  id               String                      @id @default(cuid())
+  organizationId   String                      @map("organization_id")
+  provider         StorageProvider
+  bucket           String
+  objectKey        String                      @map("object_key")
+  objectVersionId  String?                     @map("object_version_id")
+  etag             String?
+  checksumSha256   String                      @map("checksum_sha256")
+  sizeBytes        BigInt                      @map("size_bytes")
+  mimeType         String                      @map("mime_type")
+  // Display metadata only. Never use this value to construct an object key.
+  originalFileName String?                     @map("original_file_name")
+  encryptionKeyRef String?                     @map("encryption_key_ref")
+  lifecycleStatus  StoredObjectLifecycleStatus @default(PENDING) @map("lifecycle_status")
+  malwareStatus    StoredObjectMalwareStatus   @default(NOT_SCANNED) @map("malware_status")
+  immutable        Boolean                     @default(false)
+  finalizedAt      DateTime?                   @map("finalized_at")
+  retentionUntil   DateTime?                   @map("retention_until")
+  legalHold        Boolean                     @default(false) @map("legal_hold")
+  deletedAt        DateTime?                   @map("deleted_at")
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documentTemplate   DocumentTemplate?   @relation("DocumentTemplateStoredObject")
+  pdfVersion         PdfVersion?         @relation("PdfVersionStoredObject")
+  supportingDocument SupportingDocument? @relation("SupportingDocumentStoredObject")
+
+  @@unique([provider, bucket, objectKey])
+  @@index([organizationId, lifecycleStatus])
+  @@index([organizationId, malwareStatus])
+  @@index([deletedAt])
+  @@map("stored_objects")
 }
 
 model AiExtraction {

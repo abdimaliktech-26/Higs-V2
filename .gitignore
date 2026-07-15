@@ -20,6 +20,14 @@
 # production
 /build
 
+# runtime file storage and recovery outputs
+/private/data/
+/private/quarantine/
+/backups/
+/storage-migration-reports/
+/storage-migration-tmp/
+*.storage-migration.tmp
+
 # misc
 .DS_Store
 *.pem
