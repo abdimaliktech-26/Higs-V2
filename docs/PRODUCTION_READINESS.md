@@ -345,7 +345,7 @@ One direct successor per `DocumentTemplate.previousVersionId` is now database-en
 Remaining PR-5B boundaries:
 
 - PR-5B.2A: the GuardDuty event/control-plane foundation described below;
-- PR-5B.2B: migrate template and template-version upload/read behavior through the approved asynchronous and compatibility boundary;
+- PR-5B.2B: migrate template and template-version writers through the approved asynchronous and compatibility boundary; all reads remain deferred to PR-5C;
 - PR-5B.3: make the HEIC decoder decision and migrate staff-supporting and portal-request writers with their live authorization behavior preserved; and
 - PR-5B.4: operationalize non-destructive reconciliation, approve cleanup execution and retention handling, remove upload migration leftovers, and complete upload-platform/load verification before PR-5C read cutover.
 
@@ -369,12 +369,28 @@ The current Vercel function path cannot receive the approved 25 MB application-p
 
 Remaining boundaries:
 
-- PR-5B.2B: implement the asynchronous initiate/stream/status UI protocol, narrow template/template-version S3 reads with legacy fallback, and then migrate template writers through quarantine, deep validation, GuardDuty results, promotion, strict linkage/audit, and temporary compatibility metadata;
+- PR-5B.2B: implement the asynchronous initiate/stream/status UI protocol and migrate template writers through quarantine, deep validation, GuardDuty results, promotion, strict linkage/audit, and temporary compatibility metadata without changing any reader;
 - PR-5B.3: decide bounded HEIC handling and migrate staff-supporting and portal-request writers;
 - PR-5B.4: provision and verify cleanup/reconciliation operations and upload-platform/load controls; and
 - PR-5C: complete staff and portal object-read cutover and retire compatibility reads after migration evidence.
 
 PR-5B.2A adds no active scanner network call, public scanner webhook, SQS poller, automatic cleanup, compatibility copy, native S3 URL, backup, restore, finalization, Object Lock, retention, signature, billing, MFA, notification, or product-feature behavior. Higsi remains a PHI no-go.
+
+## PR-5B.2B — Template Upload Migration
+
+PR-5B.2B migrates only the new-template and template-version writers. After live staff authorization and the upload-runtime evidence gate pass, each route requires a client-generated UUID idempotency key, streams the PDF through the bounded 25 MB spool, writes the SHA-256-bound object to the quarantine bucket, performs the strict PDF validation profile, and records `SCANNING` with GuardDuty S3 as the event-driven scanner. The receipt returns only the opaque attempt ID and bounded status. It does not create a `DocumentTemplate`, `StoredObject`, compatibility file, or audit row before a scan result.
+
+GuardDuty remains asynchronous. The existing original-uploader-only status route is polled by the template UI. Only a version-bound GuardDuty `CLEAN` result permits the authenticated completion endpoint to copy the exact quarantine version to the deterministic durable S3 key. Durable checksum, size, MIME type, provider version, and SSE-KMS key evidence are re-read and verified before a `StoredObject` is created as `PENDING`. A single database transaction then creates the `DocumentTemplate`, links the object, changes it to `AVAILABLE`, writes mandatory strict audit evidence, and advances the attempt to cleanup-pending. Audit or linkage failure rolls back that transaction. The exact quarantine version is deleted afterward; deletion failure leaves bounded cleanup-pending state for reconciliation and does not undo the already committed owner.
+
+The additive `TemplateUploadIntent` model carries only the template metadata needed across the asynchronous wait. It is one-to-one with `UploadAttempt`, preallocates the future template ID, and optionally records the prior version ID. Original filenames, storage locations, raw idempotency keys, provider errors, and PHI are not stored there. `UploadAttempt` remains the control-plane record and `StoredObject` remains durable object identity. Migration `20260716120000_migrate_template_uploads` creates only this intent table and indexes; it performs no backfill or existing-row update.
+
+Template-version completion reloads the previous version inside the final transaction, creates version `previous.version + 1`, and preserves field geometry plus field-owned nested condition cloning. The existing unique constraint on `DocumentTemplate.previousVersionId` is the database concurrency control: only one direct successor can commit. Existing packet/template mappings are not repointed.
+
+Readers are deliberately unchanged. Each successful migrated writer creates a temporary opaque local compatibility copy and continues to populate verified legacy `fileKey`, `fileUrl`, `fileSize`, and `mimeType` metadata so current authorized staff delivery keeps working until PR-5C. `StoredObject` is authoritative only for the two migrated writer paths; no current reader follows it, no native S3 URL is exposed, and no browser uploads directly to S3. The compatibility copy remains single-instance and is not a production/PHI-safe read architecture.
+
+The migrated routes fail closed before multipart parsing when S3/GuardDuty configuration, scanner operational approval, or the 25 MB platform verification flag is absent. Application startup may still succeed, but template uploads return unavailable. The operational gates—GuardDuty protection, EventBridge/SQS/DLQ, least-privilege IAM/KMS, deployed worker, alarms, real synthetic end-to-end evidence, dedicated upload runtime, and AWS BAA/service coverage—remain external prerequisites and are not provisioned here.
+
+Staff supporting and portal writers remain on their previous behavior and are deferred. No staff/portal reader, delivery route, scanner vendor integration, SQS poller, cleanup job, backup, restore, final PDF, Object Lock, retention enforcement, signature, notification, billing, MFA, or product feature is added. Higsi remains synthetic-data-only and a PHI no-go.
 
 ### Unresolved dependency-security advisories at PR-5A closeout
 

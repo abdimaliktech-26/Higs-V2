@@ -320,6 +320,7 @@ model Organization {
   packetConditionSnapshots PacketConditionSnapshot[]
   storedObjects            StoredObject[]
   uploadAttempts           UploadAttempt[]
+  templateUploadIntents    TemplateUploadIntent[]
 
   @@map("organizations")
 }
@@ -1275,10 +1276,11 @@ model UploadAttempt {
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  staffUser    User?         @relation(fields: [staffUserId], references: [id], onDelete: SetNull)
-  portalUser   PortalUser?   @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
-  storedObject StoredObject? @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffUser      User?                 @relation(fields: [staffUserId], references: [id], onDelete: SetNull)
+  portalUser     PortalUser?           @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+  storedObject   StoredObject?         @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
+  templateIntent TemplateUploadIntent?
 
   @@unique([organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash], map: "upload_attempts_idempotency_boundary_key")
   @@unique([scannerProvider, scannerReference], map: "upload_attempts_scanner_reference_key")
@@ -1288,6 +1290,30 @@ model UploadAttempt {
   @@index([cleanupStatus])
   @@index([createdAt])
   @@map("upload_attempts")
+}
+
+// PR-5B.2B: non-file template metadata that must survive the asynchronous
+// quarantine/GuardDuty boundary. UploadAttempt remains PHI-free and the
+// DocumentTemplate owner is created only after verified durable promotion.
+model TemplateUploadIntent {
+  id                 String   @id @default(cuid())
+  organizationId     String   @map("organization_id")
+  uploadAttemptId    String   @unique @map("upload_attempt_id")
+  documentTemplateId String   @unique @map("document_template_id")
+  previousVersionId  String?  @map("previous_version_id")
+  name               String
+  description        String?
+  formType           String   @map("form_type")
+  program            String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadAttempt UploadAttempt @relation(fields: [uploadAttemptId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([previousVersionId])
+  @@map("template_upload_intents")
 }
 
 model AiExtraction {

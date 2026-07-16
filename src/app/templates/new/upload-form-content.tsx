@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/states"
 import { ArrowLeft, Upload, Save, FileText } from "lucide-react"
 import Link from "next/link"
 import { Tabs } from "@/components/ui/tabs"
+import { waitForTemplateUpload } from "@/lib/uploads/template-upload-client"
 
 interface Props { orgId: string; initialTab?: "form" | "packet" }
 
@@ -53,10 +54,21 @@ export function UploadFormContent({ orgId, initialTab = "form" }: Props) {
     const form = new FormData(e.currentTarget)
     form.set("file", file)
 
-    const res = await fetch("/api/templates", { method: "POST", body: form })
+    const res = await fetch("/api/templates", {
+      method: "POST",
+      body: form,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    })
     const result = await res.json()
-    if (result.success) { router.push("/templates"); router.refresh() }
-    else { setError(result.error); setLoading(false) }
+    if (!result.success) { setError(result.error); setLoading(false); return }
+    try {
+      if (result.data.status !== "COMPLETED") await waitForTemplateUpload(result.data.attemptId)
+      router.push("/templates")
+      router.refresh()
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Upload processing failed")
+      setLoading(false)
+    }
   }
 
   return (

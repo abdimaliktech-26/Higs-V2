@@ -405,7 +405,7 @@ export const limiters = {
 
 ### Current live behavior: Local compatibility façade
 
-Existing call sites still store and read from `./private/data/` through `src/lib/storage.ts`. This remains single-instance-only and is intentional until PR-5B/PR-5C.
+Existing readers, staff-supporting writers, and portal writers still use `./private/data/` through `src/lib/storage.ts`. PR-5B.2B template/template-version writers now use S3 quarantine and durable storage but also create an opaque local compatibility copy for these unchanged readers. That copy remains single-instance-only and is intentional only until PR-5C.
 
 ### PR-5A foundation and AWS S3 target
 
@@ -427,7 +427,7 @@ Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seve
 
 The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
 
-PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B is reserved for the asynchronous template/template-version upload and narrow read migration. PR-5B.3 remains the HEIC decision plus staff/portal writer migration; PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes the read cutover. Do not enable production PHI uploads based on PR-5B.1 or PR-5B.2A.
+PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrates only asynchronous template/template-version writers. PR-5B.3 remains the HEIC decision plus staff/portal writer migration; PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
 
 ### PR-5B.2A GuardDuty control plane (not active)
 
@@ -449,7 +449,17 @@ Leave both evidence flags false until the scanner path and dedicated upload host
 
 Vercel Functions have a documented 4.5 MB request-body limit and cannot host Higsi's approved 25 MB application-proxied upload path. Provision and validate a dedicated long-running upload runtime—preferably ECS/Fargate in the approved AWS account/region—before PR-5B.2B. Direct browser-to-S3 uploads remain out of scope. See the Vercel body-limit guidance at https://vercel.com/kb/guide/how-to-bypass-vercel-body-size-limit-serverless-functions and the GuardDuty event schema at https://docs.aws.amazon.com/guardduty/latest/ug/monitor-with-eventbridge-s3-malware-protection.html.
 
-PR-5B.2A does not activate template uploads, template-version uploads, scanner calls, SQS polling, compatibility copies, or S3 reads. PR-5B.2B must add the asynchronous upload protocol and a narrow template read cutover with legacy fallback before an S3 writer can safely become active. Higsi remains a PHI no-go.
+PR-5B.2A itself does not activate template uploads, template-version uploads, scanner calls, SQS polling, compatibility copies, or S3 reads. PR-5B.2B adds the asynchronous template-writer protocol described below; it does not change a read path. Higsi remains a PHI no-go.
+
+### PR-5B.2B template writers (active only when all gates pass)
+
+The new-template and template-version routes now require live admin authorization plus a UUID `Idempotency-Key`. Before parsing multipart bytes they require valid S3 configuration, a complete GuardDuty S3 configuration, `MALWARE_SCANNER_OPERATIONALLY_APPROVED=true`, and `UPLOAD_PLATFORM_LIMITS_VERIFIED=true`. If any gate is absent, the application may start but these routes return unavailable without accepting the multipart body.
+
+Receipt streams to the quarantine bucket, verifies actual size and SHA-256, performs deep PDF validation, and stops at `SCANNING`. The browser polls the private original-uploader status route. After the deployed GuardDuty worker records a version-bound clean result, the authenticated completion route copies the exact quarantine version to the durable bucket, verifies S3 version/checksum/size/MIME/SSE-KMS metadata, creates `StoredObject(PENDING)`, and transactionally links the template, makes the object `AVAILABLE`, and writes strict audit evidence. No native S3 URL or storage location is returned to the browser.
+
+Successful writers also make an opaque local compatibility copy because all staff file delivery remains unchanged until PR-5C. Consequently this writer migration is not enough for multi-instance or PHI-safe delivery. Staff supporting uploads, portal uploads, all file readers, cleanup automation, and infrastructure provisioning remain unchanged/deferred.
+
+Operationally deploy these routes only on the verified dedicated upload runtime. The GuardDuty plan, EventBridge rule, SQS/DLQ, worker hosting, IAM/KMS policies, alarms, private bucket controls, and BAA/service-coverage evidence must exist outside this repository. Use synthetic files only until the full PHI gate is approved.
 
 No native signed URL is delivered to a user in PR-5A. The approved initial PR-5C design is application-authorized, application-proxied streaming. The dormant S3 capability requires a version-bound read and caps TTL at 60 seconds.
 

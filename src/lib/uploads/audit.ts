@@ -9,6 +9,7 @@ export interface StrictStaffUploadAuditInput {
   ownerId: string
   sizeBytes: number
   mimeType: string
+  action?: typeof AuditAction.TEMPLATE_UPLOADED | typeof AuditAction.DOCUMENT_TEMPLATE_VERSION_CREATED
 }
 
 export interface StrictPortalUploadAuditInput {
@@ -36,7 +37,7 @@ export async function writeStrictStaffUploadAudit(
     data: {
       organizationId: input.organizationId,
       actorId: input.staffUserId,
-      action: AuditAction.DOCUMENT_UPLOADED,
+      action: input.action ?? AuditAction.DOCUMENT_UPLOADED,
       targetType: input.ownerType,
       targetId: input.ownerId,
       metadata: {
@@ -71,4 +72,3 @@ export async function writeStrictPortalUploadAudit(
     },
   })
 }
-

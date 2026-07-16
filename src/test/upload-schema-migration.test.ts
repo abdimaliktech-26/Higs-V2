@@ -17,6 +17,13 @@ const scannerMigrationPath = path.join(
   "20260715180000_add_guardduty_scan_control_plane",
   "migration.sql",
 )
+const templateMigrationPath = path.join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20260716120000_migrate_template_uploads",
+  "migration.sql",
+)
 
 describe("PR-5B.1 additive upload lifecycle schema", () => {
   it("adds bounded UploadAttempt state, actors, lifecycle metadata, and indexes", async () => {
@@ -76,5 +83,29 @@ describe("PR-5B.2A additive scanner control-plane schema", () => {
     expect(migration).not.toMatch(/^\s*UPDATE\s/im)
     expect(migration).not.toContain('ALTER TABLE "stored_objects"')
     expect(migration).not.toContain('ALTER TABLE "document_templates"')
+  })
+})
+
+describe("PR-5B.2B additive template upload intent schema", () => {
+  it("keeps template metadata separate from the PHI-free UploadAttempt", async () => {
+    const schema = await fs.readFile(schemaPath, "utf8")
+    const attemptBlock = schema.slice(schema.indexOf("model UploadAttempt {"), schema.indexOf("model TemplateUploadIntent {"))
+    const intentBlock = schema.slice(schema.indexOf("model TemplateUploadIntent {"), schema.indexOf("model AiExtraction {"))
+    expect(attemptBlock).not.toContain("originalFileName")
+    expect(attemptBlock).not.toContain("documentTitle")
+    expect(intentBlock).toContain("uploadAttemptId")
+    expect(intentBlock).toContain("documentTemplateId")
+    expect(intentBlock).toContain("previousVersionId")
+    expect(intentBlock).not.toContain("originalFileName")
+  })
+
+  it("is additive and performs no backfill or owner/storage mutation", async () => {
+    const migration = await fs.readFile(templateMigrationPath, "utf8")
+    expect(migration).toContain('CREATE TABLE "template_upload_intents"')
+    expect(migration).not.toMatch(/\bINSERT\b/i)
+    expect(migration).not.toMatch(/^\s*UPDATE\s/im)
+    expect(migration).not.toContain('ALTER TABLE "document_templates"')
+    expect(migration).not.toContain('ALTER TABLE "stored_objects"')
+    expect(migration).not.toContain('ALTER TABLE "upload_attempts"')
   })
 })

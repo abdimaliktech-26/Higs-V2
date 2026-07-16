@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { Alert } from "@/components/ui/alert"
 import { FilePlus2, Upload } from "lucide-react"
+import { waitForTemplateUpload } from "@/lib/uploads/template-upload-client"
 
 interface Props {
   templateId: string
@@ -35,14 +36,26 @@ export function TemplateVersionUpload({ templateId, templateName, currentVersion
     const form = new FormData()
     form.set("file", file)
 
-    const res = await fetch(`/api/templates/${templateId}/versions`, { method: "POST", body: form })
+    const res = await fetch(`/api/templates/${templateId}/versions`, {
+      method: "POST",
+      body: form,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    })
     const result = await res.json()
 
-    setLoading(false)
     if (result.success) {
+      try {
+        if (result.data.status !== "COMPLETED") await waitForTemplateUpload(result.data.attemptId)
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : "Upload processing failed")
+        setLoading(false)
+        return
+      }
+      setLoading(false)
       close()
       router.refresh()
     } else {
+      setLoading(false)
       setError(result.error)
     }
   }
