@@ -242,6 +242,10 @@ enum UploadActorType {
   PORTAL
 }
 
+enum UploadScannerProvider {
+  GUARDDUTY_S3
+}
+
 enum UploadFailureStage {
   AUTHORIZATION
   RECEIVE
@@ -1254,6 +1258,10 @@ model UploadAttempt {
   plannedDurableObjectKey   String                    @map("planned_durable_object_key")
   storedObjectId            String?                   @unique @map("stored_object_id")
   malwareStatus             StoredObjectMalwareStatus @default(NOT_SCANNED) @map("malware_status")
+  scannerProvider           UploadScannerProvider?    @map("scanner_provider")
+  scannerReference          String?                   @map("scanner_reference")
+  scanRequestedAt           DateTime?                 @map("scan_requested_at")
+  scanResultReceivedAt      DateTime?                 @map("scan_result_received_at")
   failureStage              UploadFailureStage?       @map("failure_stage")
   failureCategory           UploadFailureCategory?    @map("failure_category")
   cleanupStatus             UploadCleanupStatus       @default(NOT_REQUIRED) @map("cleanup_status")
@@ -1273,6 +1281,8 @@ model UploadAttempt {
   storedObject StoredObject? @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash], map: "upload_attempts_idempotency_boundary_key")
+  @@unique([scannerProvider, scannerReference], map: "upload_attempts_scanner_reference_key")
+  @@unique([quarantineProvider, quarantineBucket, quarantineObjectKey, quarantineObjectVersionId], map: "upload_attempts_quarantine_object_identity_key")
   @@index([organizationId, status])
   @@index([status, expiresAt])
   @@index([cleanupStatus])

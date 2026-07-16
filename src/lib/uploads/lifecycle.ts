@@ -7,6 +7,7 @@ import {
   UploadCleanupStatus,
   UploadFailureCategory,
   UploadFailureStage,
+  UploadScannerProvider,
   UploadStatus,
   type UploadAttempt,
 } from "@prisma/client"
@@ -246,15 +247,47 @@ export function beginScanning(attemptId: string, client: AttemptClient = prisma)
   })
 }
 
+export function beginEventDrivenScanning(
+  attemptId: string,
+  provider: UploadScannerProvider,
+  requestedAt: Date,
+  client: AttemptClient = prisma,
+): Promise<UploadAttempt> {
+  return transition(client, attemptId, UploadStatus.VALIDATED, UploadStatus.SCANNING, {
+    malwareStatus: StoredObjectMalwareStatus.PENDING,
+    scannerProvider: provider,
+    scanRequestedAt: requestedAt,
+  })
+}
+
+export interface ScannerResultEvidence {
+  provider: UploadScannerProvider
+  reference: string
+  receivedAt: Date
+}
+
 export async function recordScannerResult(
   attemptId: string,
   result: MalwareScanResult,
   client: AttemptClient = prisma,
+  evidence?: ScannerResultEvidence,
 ): Promise<UploadAttempt> {
+  const evidenceData = evidence
+    ? {
+        scannerProvider: evidence.provider,
+        scannerReference: evidence.reference,
+        scanResultReceivedAt: evidence.receivedAt,
+      }
+    : {}
   if (result.outcome === "CLEAN") {
     const updated = await client.uploadAttempt.updateMany({
-      where: { id: attemptId, status: UploadStatus.SCANNING, malwareStatus: StoredObjectMalwareStatus.PENDING },
-      data: { malwareStatus: StoredObjectMalwareStatus.CLEAN, scannedAt: result.scannedAt },
+      where: {
+        id: attemptId,
+        status: UploadStatus.SCANNING,
+        malwareStatus: StoredObjectMalwareStatus.PENDING,
+        ...(evidence ? { scannerProvider: evidence.provider, scannerReference: null } : {}),
+      },
+      data: { malwareStatus: StoredObjectMalwareStatus.CLEAN, scannedAt: result.scannedAt, ...evidenceData },
     })
     if (updated.count !== 1) throw new UploadLifecycleError("CONFLICT", "The scan result cannot be recorded in the current state.")
     const attempt = await client.uploadAttempt.findUnique({ where: { id: attemptId } })
@@ -263,6 +296,32 @@ export async function recordScannerResult(
   }
 
   const infected = result.outcome === "INFECTED"
+  if (evidence) {
+    assertUploadTransition(UploadStatus.SCANNING, UploadStatus.FAILED)
+    const updated = await client.uploadAttempt.updateMany({
+      where: {
+        id: attemptId,
+        status: UploadStatus.SCANNING,
+        malwareStatus: StoredObjectMalwareStatus.PENDING,
+        scannerProvider: evidence.provider,
+        scannerReference: null,
+      },
+      data: {
+        status: UploadStatus.FAILED,
+        malwareStatus: infected ? StoredObjectMalwareStatus.INFECTED : StoredObjectMalwareStatus.ERROR,
+        scannedAt: result.scannedAt,
+        failureStage: UploadFailureStage.SCAN,
+        failureCategory: infected ? UploadFailureCategory.SCAN_INFECTED : UploadFailureCategory.SCAN_ERROR,
+        cleanupStatus: UploadCleanupStatus.PENDING,
+        expiresAt: new Date(result.scannedAt.getTime() + (infected ? SUSPECT_QUARANTINE_RETENTION_MS : ORDINARY_QUARANTINE_RETENTION_MS)),
+        ...evidenceData,
+      },
+    })
+    if (updated.count !== 1) throw new UploadLifecycleError("CONFLICT", "The scan result cannot be recorded in the current state.")
+    const attempt = await client.uploadAttempt.findUnique({ where: { id: attemptId } })
+    if (!attempt) throw new UploadLifecycleError("CONFLICT", "The upload attempt is no longer available.")
+    return attempt
+  }
   return transition(client, attemptId, UploadStatus.SCANNING, UploadStatus.FAILED, {
     malwareStatus: infected ? StoredObjectMalwareStatus.INFECTED : StoredObjectMalwareStatus.ERROR,
     scannedAt: result.scannedAt,
@@ -270,6 +329,7 @@ export async function recordScannerResult(
     failureCategory: infected ? UploadFailureCategory.SCAN_INFECTED : UploadFailureCategory.SCAN_ERROR,
     cleanupStatus: UploadCleanupStatus.PENDING,
     expiresAt: new Date(result.scannedAt.getTime() + (infected ? SUSPECT_QUARANTINE_RETENTION_MS : ORDINARY_QUARANTINE_RETENTION_MS)),
+    ...evidenceData,
   })
 }
 

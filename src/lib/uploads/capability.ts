@@ -1,4 +1,6 @@
-import type { MalwareScanner, MalwareScannerAvailability } from "./scanner"
+import { readUploadScannerConfiguration, type UploadScannerEnvironment } from "./config"
+import { GuardDutyS3EventDrivenScanner, type MalwareScannerAvailability, type MalwareScannerAvailabilitySource } from "./scanner"
+import { productionStorageEnvironmentErrors, type StorageEnvironment } from "../storage/config"
 
 export type UploadCapabilityReason =
   | "SCANNER_DISABLED"
@@ -15,11 +17,17 @@ export interface UploadCapability {
 }
 
 export interface UploadCapabilityInput {
-  scanner: MalwareScanner
+  scanner: MalwareScannerAvailabilitySource
   environment?: string
   storageProvider?: string
   platformLimitsVerified?: boolean
   scannerApprovedForProduction?: boolean
+}
+
+export interface ConfiguredUploadCapabilityInput {
+  environment?: string
+  scannerEnvironment?: UploadScannerEnvironment
+  storageEnvironment?: StorageEnvironment
 }
 
 export async function getUploadCapability(input: UploadCapabilityInput): Promise<UploadCapability> {
@@ -44,4 +52,24 @@ export async function getUploadCapability(input: UploadCapabilityInput): Promise
     reasons,
     syntheticDataOnly: true,
   }
+}
+
+export async function getConfiguredUploadCapability(input: ConfiguredUploadCapabilityInput = {}): Promise<UploadCapability> {
+  const environment = input.environment ?? process.env.NODE_ENV ?? "development"
+  const scannerEnvironment = input.scannerEnvironment ?? process.env as UploadScannerEnvironment
+  const storageEnvironment = input.storageEnvironment ?? process.env as StorageEnvironment
+  const configuration = readUploadScannerConfiguration(scannerEnvironment)
+  const storageProductionSafe = productionStorageEnvironmentErrors(storageEnvironment, environment).length === 0
+    && storageEnvironment.STORAGE_PROVIDER === "s3"
+  const scanner = new GuardDutyS3EventDrivenScanner(
+    configuration.provider === "guardduty-s3",
+    configuration.errors.length === 0,
+  )
+  return getUploadCapability({
+    scanner,
+    environment,
+    storageProvider: storageProductionSafe ? "s3" : "invalid",
+    platformLimitsVerified: configuration.platformLimitsVerified,
+    scannerApprovedForProduction: configuration.operationallyApproved,
+  })
 }

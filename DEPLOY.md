@@ -427,7 +427,29 @@ Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seve
 
 The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
 
-PR-5B.2 is reserved for scanner approval plus template/template-version writer migration; PR-5B.3 for the HEIC decision plus staff/portal writer migration; PR-5B.4 for approved cleanup/reconciliation operations and hosting/load verification. PR-5C remains the read cutover. Do not enable production PHI uploads based on PR-5B.1.
+PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B is reserved for the asynchronous template/template-version upload and narrow read migration. PR-5B.3 remains the HEIC decision plus staff/portal writer migration; PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes the read cutover. Do not enable production PHI uploads based on PR-5B.1 or PR-5B.2A.
+
+### PR-5B.2A GuardDuty control plane (not active)
+
+The selected scanner architecture is GuardDuty Malware Protection for S3 on the quarantine bucket, with version-bound results delivered through EventBridge and SQS. The repository contains the bounded/idempotent message-processing boundary and an original-uploader-only status endpoint; it does not contain or provision the GuardDuty plan, EventBridge rule, SQS queue/DLQ, IAM/KMS policies, alarms, or worker process. Do not expose the worker boundary as an unauthenticated HTTP webhook.
+
+Additional configuration for the future upload runtime is:
+
+```bash
+MALWARE_SCANNER_PROVIDER="guardduty-s3"
+GUARDDUTY_EXPECTED_AWS_ACCOUNT_ID="<12-digit-approved-account>"
+GUARDDUTY_EXPECTED_REGION="us-east-2"
+GUARDDUTY_MALWARE_PROTECTION_PLAN_ARN="arn:aws:guardduty:us-east-2:<account>:malware-protection-plan/<opaque-id>"
+GUARDDUTY_SCAN_QUEUE_URL="https://sqs.us-east-2.amazonaws.com/<account>/<queue-name>"
+MALWARE_SCANNER_OPERATIONALLY_APPROVED="false"
+UPLOAD_PLATFORM_LIMITS_VERIFIED="false"
+```
+
+Leave both evidence flags false until the scanner path and dedicated upload host have passed their operational tests. Missing scanner configuration does not block ordinary application startup in PR-5B.2A because no active writer is migrated. It does keep production upload capability unavailable.
+
+Vercel Functions have a documented 4.5 MB request-body limit and cannot host Higsi's approved 25 MB application-proxied upload path. Provision and validate a dedicated long-running upload runtime—preferably ECS/Fargate in the approved AWS account/region—before PR-5B.2B. Direct browser-to-S3 uploads remain out of scope. See the Vercel body-limit guidance at https://vercel.com/kb/guide/how-to-bypass-vercel-body-size-limit-serverless-functions and the GuardDuty event schema at https://docs.aws.amazon.com/guardduty/latest/ug/monitor-with-eventbridge-s3-malware-protection.html.
+
+PR-5B.2A does not activate template uploads, template-version uploads, scanner calls, SQS polling, compatibility copies, or S3 reads. PR-5B.2B must add the asynchronous upload protocol and a narrow template read cutover with legacy fallback before an S3 writer can safely become active. Higsi remains a PHI no-go.
 
 No native signed URL is delivered to a user in PR-5A. The approved initial PR-5C design is application-authorized, application-proxied streaming. The dormant S3 capability requires a version-bound read and caps TTL at 60 seconds.
 

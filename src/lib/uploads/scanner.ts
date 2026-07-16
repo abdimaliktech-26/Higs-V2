@@ -17,6 +17,25 @@ export interface MalwareScanner {
   scan(input: MalwareScanInput): Promise<MalwareScanResult>
 }
 
+export interface MalwareScannerAvailabilitySource {
+  availability(): Promise<MalwareScannerAvailability>
+}
+
+export interface EventDrivenMalwareScanner extends MalwareScannerAvailabilitySource {
+  readonly deliveryMode: "event-driven"
+}
+
+export class GuardDutyS3EventDrivenScanner implements EventDrivenMalwareScanner {
+  readonly deliveryMode = "event-driven" as const
+
+  constructor(private readonly configured: boolean, private readonly configurationValid: boolean) {}
+
+  async availability(): Promise<MalwareScannerAvailability> {
+    if (!this.configured) return "disabled"
+    return this.configurationValid ? "available" : "unavailable"
+  }
+}
+
 export class DisabledMalwareScanner implements MalwareScanner {
   async availability(): Promise<"disabled"> {
     return "disabled"

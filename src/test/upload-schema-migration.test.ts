@@ -10,6 +10,13 @@ const migrationPath = path.join(
   "20260715120000_add_upload_lifecycle_foundation",
   "migration.sql",
 )
+const scannerMigrationPath = path.join(
+  process.cwd(),
+  "prisma",
+  "migrations",
+  "20260715180000_add_guardduty_scan_control_plane",
+  "migration.sql",
+)
 
 describe("PR-5B.1 additive upload lifecycle schema", () => {
   it("adds bounded UploadAttempt state, actors, lifecycle metadata, and indexes", async () => {
@@ -45,5 +52,29 @@ describe("PR-5B.1 additive upload lifecycle schema", () => {
     expect(migration).not.toContain('ALTER TABLE "document_templates" ADD COLUMN')
     expect(migration).not.toContain('ALTER TABLE "supporting_documents" ADD COLUMN')
     expect(migration).not.toContain('ALTER TABLE "pdf_versions" ADD COLUMN')
+  })
+})
+
+describe("PR-5B.2A additive scanner control-plane schema", () => {
+  it("adds bounded scanner evidence and unique version-bound event/object identity", async () => {
+    const schema = await fs.readFile(schemaPath, "utf8")
+    const block = schema.slice(schema.indexOf("model UploadAttempt {"), schema.indexOf("model AiExtraction {"))
+    expect(schema).toContain("enum UploadScannerProvider")
+    expect(block).toContain("scannerProvider")
+    expect(block).toContain("scannerReference")
+    expect(block).toContain("scanRequestedAt")
+    expect(block).toContain("scanResultReceivedAt")
+    expect(block).toContain("upload_attempts_scanner_reference_key")
+    expect(block).toContain("upload_attempts_quarantine_object_identity_key")
+  })
+
+  it("is additive and does not modify or backfill existing lifecycle rows", async () => {
+    const migration = await fs.readFile(scannerMigrationPath, "utf8")
+    expect(migration).toContain('ALTER TABLE "upload_attempts"')
+    expect(migration).toContain('CREATE TYPE "UploadScannerProvider"')
+    expect(migration).not.toMatch(/\bINSERT\b/i)
+    expect(migration).not.toMatch(/^\s*UPDATE\s/im)
+    expect(migration).not.toContain('ALTER TABLE "stored_objects"')
+    expect(migration).not.toContain('ALTER TABLE "document_templates"')
   })
 })

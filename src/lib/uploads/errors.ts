@@ -42,3 +42,21 @@ export class UploadValidationError extends UploadLifecycleError {
     this.safeDiagnostic = safeDiagnostic
   }
 }
+
+export type UploadScanEventErrorCode =
+  | "INVALID_EVENT"
+  | "UNTRUSTED_EVENT"
+  | "ATTEMPT_NOT_READY"
+  | "EVENT_CONFLICT"
+
+export class UploadScanEventError extends Error {
+  readonly code: UploadScanEventErrorCode
+  readonly retryable: boolean
+
+  constructor(code: UploadScanEventErrorCode, message: string, retryable = false) {
+    super(message)
+    this.name = "UploadScanEventError"
+    this.code = code
+    this.retryable = retryable
+  }
+}

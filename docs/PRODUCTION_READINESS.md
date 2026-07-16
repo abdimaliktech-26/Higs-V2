@@ -344,11 +344,37 @@ One direct successor per `DocumentTemplate.previousVersionId` is now database-en
 
 Remaining PR-5B boundaries:
 
-- PR-5B.2: approve and integrate a production scanner, then migrate template and template-version writers through quarantine, promotion, strict linkage/audit, and temporary compatibility copies;
+- PR-5B.2A: the GuardDuty event/control-plane foundation described below;
+- PR-5B.2B: migrate template and template-version upload/read behavior through the approved asynchronous and compatibility boundary;
 - PR-5B.3: make the HEIC decoder decision and migrate staff-supporting and portal-request writers with their live authorization behavior preserved; and
 - PR-5B.4: operationalize non-destructive reconciliation, approve cleanup execution and retention handling, remove upload migration leftovers, and complete upload-platform/load verification before PR-5C read cutover.
 
 PR-5B.1 does not provision S3, malware scanning, cleanup jobs, backups, restore automation, final PDFs, Object Lock, or retention enforcement. It does not change signatures, billing, MFA, notifications, or product features. AWS BAA and infrastructure controls remain required, and the unverified RPO/RTO targets remain 15 minutes/four hours.
+
+## PR-5B.2A — GuardDuty Upload Scan Control Plane
+
+PR-5B.2A adds the approved event-driven malware-scan control plane without migrating an active upload or read path. AWS GuardDuty Malware Protection for S3 is the selected production scanner architecture for the quarantine bucket. This selection remains subject to an executed AWS BAA, confirmation of the covered production services, approved accounts/regions, provisioned private S3/KMS/IAM controls, and an end-to-end operational test. It does not make Higsi PHI-ready.
+
+GuardDuty scan results are asynchronous. The approved infrastructure path is GuardDuty → EventBridge → SQS with a dead-letter queue → an idempotent worker. The repository now exposes the worker processing boundary but does not provision EventBridge, SQS, a DLQ, GuardDuty plans, IAM roles, KMS policies, alarms, or a worker runtime. The worker caller must delete an SQS message only after processing succeeds; lifecycle races are retryable, while malformed, untrusted, and conflicting events must be dead-lettered without logging the raw event or object location.
+
+Only the exact configured AWS account, region, Malware Protection plan ARN, quarantine bucket, and supported GuardDuty event type are accepted. Results are matched to one `UploadAttempt` by provider, bucket, opaque object key, and required S3 version ID; ETag mismatches fail closed. `NO_THREATS_FOUND` is the only result mapped to `CLEAN`. `THREATS_FOUND` maps to `INFECTED`; `UNSUPPORTED`, `ACCESS_DENIED`, and `FAILED` map to bounded scan failure. Status/result pairs are validated, duplicate EventBridge event IDs are acknowledged idempotently, and a different second result conflicts. Threat names, status reasons, raw AWS payloads, bucket/key data, and provider errors are not persisted as scanner evidence.
+
+Migration `20260715180000_add_guardduty_scan_control_plane` is additive. It adds `UploadScannerProvider`, nullable scanner provider/reference/request/result timestamps, a unique scanner-event identity, and a unique populated quarantine-object identity. PostgreSQL still permits multiple all-null pre-lifecycle tuples. The migration performs no backfill and changes no `StoredObject`, owner, legacy storage, or active file row.
+
+Production scanner capability remains fail-closed unless the GuardDuty configuration is internally consistent, `MALWARE_SCANNER_OPERATIONALLY_APPROVED=true` records a completed operational review, the storage provider is S3, and `UPLOAD_PLATFORM_LIMITS_VERIFIED=true` records successful 25 MB body/streaming/duration/cancellation/proxy/load tests. These flags are evidence gates, not infrastructure provisioning or compliance guarantees. Scanner configuration does not block application startup because no active writer uses it in PR-5B.2A.
+
+The staff status route returns only bounded lifecycle state to the original staff uploader after live identity and current target-organization authorization are rechecked. Responses are private/no-store. It never returns organization IDs, buckets, object keys, versions, ETags, checksums, idempotency hashes, or scanner references. Portal status remains deferred with portal-writer migration.
+
+The current Vercel function path cannot receive the approved 25 MB application-proxied upload because Vercel documents a 4.5 MB function request-body limit. The approved production direction is a dedicated long-running upload runtime, preferably AWS ECS/Fargate in the same approved account and region. Its network, workload identity, BAA, request limits, streaming, cancellation, timeout, concurrency, and load behavior remain operational prerequisites. Direct browser-to-S3 upload remains unapproved.
+
+Remaining boundaries:
+
+- PR-5B.2B: implement the asynchronous initiate/stream/status UI protocol, narrow template/template-version S3 reads with legacy fallback, and then migrate template writers through quarantine, deep validation, GuardDuty results, promotion, strict linkage/audit, and temporary compatibility metadata;
+- PR-5B.3: decide bounded HEIC handling and migrate staff-supporting and portal-request writers;
+- PR-5B.4: provision and verify cleanup/reconciliation operations and upload-platform/load controls; and
+- PR-5C: complete staff and portal object-read cutover and retire compatibility reads after migration evidence.
+
+PR-5B.2A adds no active scanner network call, public scanner webhook, SQS poller, automatic cleanup, compatibility copy, native S3 URL, backup, restore, finalization, Object Lock, retention, signature, billing, MFA, notification, or product-feature behavior. Higsi remains a PHI no-go.
 
 ### Unresolved dependency-security advisories at PR-5A closeout
 
