@@ -11,6 +11,7 @@ import { Alert } from "@/components/ui/alert"
 import { EmptyState } from "@/components/ui/states"
 import { UploadCloud, FileCheck2, Lock, Clock, History } from "lucide-react"
 import { formatDate, formatDateTime } from "@/lib/utils"
+import { waitForPortalUpload } from "@/lib/uploads/supporting-upload-client"
 
 interface SupportingDocRow { id: string; originalFileName: string | null; fileSize: number | null; mimeType: string; reviewStatus: string | null; createdAt: string | Date }
 interface RequestRow {
@@ -52,7 +53,9 @@ const timelineLabels: Record<string, string> = {
 }
 
 const UPLOADABLE_STATUSES = ["PENDING", "NEEDS_REPLACEMENT"]
-const ACCEPT = ".pdf,.jpg,.jpeg,.png,.heic,.docx"
+// HEIC is not accepted: deep server-side structural validation for HEIC is
+// not available yet, and every accepted format must pass it (PR-5B.3 decision).
+const ACCEPT = ".pdf,.jpg,.jpeg,.png,.docx"
 
 function formatBytes(bytes: number | null): string {
   if (!bytes) return ""
@@ -92,20 +95,29 @@ export function UploadCenterManager({ requests }: Props) {
 
     const xhr = new XMLHttpRequest()
     xhr.open("POST", `/api/portal-upload/${requestId}`)
+    xhr.setRequestHeader("Idempotency-Key", crypto.randomUUID())
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) setProgress((prev) => ({ ...prev, [requestId]: Math.round((e.loaded / e.total) * 100) }))
     }
-    xhr.onload = () => {
+    xhr.onload = async () => {
       try {
         const body = JSON.parse(xhr.responseText)
-        if (xhr.status === 200 && body.success) {
+        if ((xhr.status === 200 || xhr.status === 202) && body.success) {
+          // Receipt is complete; the document becomes visible only after
+          // secure processing (malware scan + verified storage) finishes.
+          if (body.data?.status !== "COMPLETED" && body.data?.attemptId) {
+            await waitForPortalUpload(body.data.attemptId)
+          }
           setSuccess((prev) => ({ ...prev, [requestId]: true }))
           router.refresh()
         } else {
           setErrors((prev) => ({ ...prev, [requestId]: body.error || "Upload failed" }))
         }
-      } catch {
-        setErrors((prev) => ({ ...prev, [requestId]: "Upload failed" }))
+      } catch (uploadError) {
+        setErrors((prev) => ({
+          ...prev,
+          [requestId]: uploadError instanceof Error ? uploadError.message : "Upload failed",
+        }))
       }
       setProgress((prev) => ({ ...prev, [requestId]: 0 }))
     }

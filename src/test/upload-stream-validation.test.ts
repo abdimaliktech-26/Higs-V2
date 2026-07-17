@@ -61,6 +61,27 @@ describe("typed upload validation profiles", () => {
     expect(Object.keys(PORTAL_UPLOAD_PROFILE.formats)).not.toContain("heic")
   })
 
+  it("rejects real HEIC bytes under the migrated portal profile (PR-5B.3 decision)", async () => {
+    const directory = await root()
+    const file = path.join(directory, "photo.heic")
+    // A structurally plausible ISOBMFF header ("ftyp" box, heic brand) — the
+    // shallow legacy check accepted exactly this shape; deep validation must not.
+    const heicBytes = Buffer.concat([
+      Buffer.from([0x00, 0x00, 0x00, 0x18]),
+      Buffer.from("ftypheic"),
+      Buffer.alloc(64, 1),
+    ])
+    await fs.writeFile(file, heicBytes)
+    await expect(
+      validateUpload({
+        source: { path: file, size: heicBytes.length, openStream: () => createReadStream(file) },
+        extension: ".heic",
+        declaredMimeType: "image/heic",
+        policy: PORTAL_UPLOAD_PROFILE,
+      }),
+    ).rejects.toMatchObject({ code: "TYPE_MISMATCH" })
+  })
+
   it("decodes and bounds PNG structure without transforming it", async () => {
     const directory = await root()
     const file = path.join(directory, "image.png")

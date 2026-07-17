@@ -423,11 +423,11 @@ Production upload capability is deliberately unavailable unless all of the follo
 
 Receipt is designed to stream to a mode-`0600` temporary spool, calculate SHA-256 and actual size in the same pass, then feed quarantine storage with a known checksum and length. Temporary directories are mode `0700` and are removed after both success and failure. This is a foundation only: no active endpoint accepts bytes through it and no automatic quarantine deletion runs.
 
-Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seven days for infected or suspected-malicious quarantine. They are not approved legal retention rules and are not enforced. The new portal validation profile excludes HEIC until PR-5B.3 approves or rejects a bounded decoder strategy; the current portal route is unchanged.
+Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seven days for infected or suspected-malicious quarantine. They are not approved legal retention rules and are not enforced. PR-5B.3 decided HEIC: it is rejected for every migrated writer because no accepted format may skip deep server-side structural validation, and the runtime has no approved HEIC decoder. HEIC support is a recorded backlog item requiring an approved decoder, resource limits, malformed-file testing, and production-runtime verification before reconsideration.
 
 The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
 
-PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrates only asynchronous template/template-version writers. PR-5B.3 remains the HEIC decision plus staff/portal writer migration; PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
+PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrated the asynchronous template/template-version writers; PR-5B.3 migrated the staff-supporting and portal-request writers and recorded the HEIC rejection. PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
 
 ### PR-5B.2A GuardDuty control plane (not active)
 
@@ -451,13 +451,15 @@ Vercel Functions have a documented 4.5 MB request-body limit and cannot host Hig
 
 PR-5B.2A itself does not activate template uploads, template-version uploads, scanner calls, SQS polling, compatibility copies, or S3 reads. PR-5B.2B adds the asynchronous template-writer protocol described below; it does not change a read path. Higsi remains a PHI no-go.
 
-### PR-5B.2B template writers (active only when all gates pass)
+### PR-5B.2B/PR-5B.3 migrated writers (active only when all gates pass)
 
 The new-template and template-version routes now require live admin authorization plus a UUID `Idempotency-Key`. Before parsing multipart bytes they require valid S3 configuration, a complete GuardDuty S3 configuration, `MALWARE_SCANNER_OPERATIONALLY_APPROVED=true`, and `UPLOAD_PLATFORM_LIMITS_VERIFIED=true`. If any gate is absent, the application may start but these routes return unavailable without accepting the multipart body.
 
 Receipt streams to the quarantine bucket, verifies actual size and SHA-256, performs deep PDF validation, and stops at `SCANNING`. The browser polls the private original-uploader status route. After the deployed GuardDuty worker records a version-bound clean result, the authenticated completion route copies the exact quarantine version to the durable bucket, verifies S3 version/checksum/size/MIME/SSE-KMS metadata, creates `StoredObject(PENDING)`, and transactionally links the template, makes the object `AVAILABLE`, and writes strict audit evidence. No native S3 URL or storage location is returned to the browser.
 
-Successful writers also make an opaque local compatibility copy because all staff file delivery remains unchanged until PR-5C. Consequently this writer migration is not enough for multi-instance or PHI-safe delivery. Staff supporting uploads, portal uploads, all file readers, cleanup automation, and infrastructure provisioning remain unchanged/deferred.
+Successful writers also make an opaque local compatibility copy because all staff file delivery remains unchanged until PR-5C. Consequently this writer migration is not enough for multi-instance or PHI-safe delivery. All file readers, cleanup automation, and infrastructure provisioning remain unchanged/deferred.
+
+PR-5B.3 moved the remaining two writers onto the same pipeline. Staff supporting uploads now use a dedicated receipt route that runs the full live packet/client/organization authorization branch from query-string binding targets before any multipart byte is parsed, then requires the UUID idempotency key and the staff supporting validation profile (PDF, JPEG, PNG, DOCX); the legacy buffering server action was removed. Portal request uploads keep their request-derived identity, permission, and per-user-and-IP rate limiting at receipt, then stop at SCANNING; the SUBMITTED transition, SupportingDocument (PENDING_REVIEW), timeline event, strict portal audit, and portal notification all move into the portal completion transaction with the same race-safe conditional update as before. Portal-authenticated status and completion routes expose only opaque lifecycle state to the original uploader, and completion reauthorizes against live database state for both actor kinds.
 
 Operationally deploy these routes only on the verified dedicated upload runtime. The GuardDuty plan, EventBridge rule, SQS/DLQ, worker hosting, IAM/KMS policies, alarms, private bucket controls, and BAA/service-coverage evidence must exist outside this repository. Use synthetic files only until the full PHI gate is approved.
 

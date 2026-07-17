@@ -1,12 +1,9 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
-import { extname } from "node:path"
-import { Readable } from "node:stream"
 import {
   AuditAction,
   Prisma,
-  StorageProvider,
   StoredObjectLifecycleStatus,
   UploadActorType,
   UploadCleanupStatus,
@@ -14,33 +11,17 @@ import {
   UploadFailureStage,
   UploadKind,
   UploadOwnerType,
-  UploadScannerProvider,
   UploadStatus,
   type UploadAttempt,
 } from "@prisma/client"
 import { prisma } from "../db"
 import { storeFileFromStream } from "../storage"
-import { createStorageAdapter, readStorageConfiguration, storageKeys, type StorageAdapter } from "../storage/index"
-import { readUploadScannerConfiguration } from "./config"
+import { createStorageAdapter, storageKeys, type StorageAdapter } from "../storage/index"
 import { UploadLifecycleError, UploadValidationError } from "./errors"
-import {
-  beginEventDrivenScanning,
-  beginLinking,
-  beginPromotion,
-  beginReceiving,
-  buildInitiatedUploadData,
-  hashIdempotencyKey,
-  markUploadFailed,
-  recordCompleted,
-  recordQuarantined,
-  recordValidated,
-  recordVerifiedPromotion,
-  beginValidation,
-} from "./lifecycle"
-import { getUploadValidationProfile } from "./profiles"
-import { withUploadSpool } from "./stream"
+import { beginLinking, buildInitiatedUploadData, hashIdempotencyKey, markUploadFailed } from "./lifecycle"
+import { finishQuarantineCleanup, promoteVerifiedCleanUpload } from "./promotion"
+import { assertUploadRuntimeAvailable, receiveValidateAndBeginScan } from "./receipt"
 import { MAX_UPLOAD_BYTES } from "./types"
-import { validateUpload } from "./validation"
 import { writeStrictStaffUploadAudit } from "./audit"
 
 export interface TemplateUploadIntentInput {
@@ -75,26 +56,11 @@ export class TemplateUploadUnavailableError extends Error {
 
 /** Active migrated writers require the complete S3 + GuardDuty operating gate in every environment. */
 export function assertTemplateUploadRuntimeAvailable(): void {
-  const storage = readStorageConfiguration()
-  const scanner = readUploadScannerConfiguration()
-  if (
-    storage.provider !== "s3" ||
-    !storage.region ||
-    !storage.durableBucket ||
-    !storage.quarantineBucket ||
-    !storage.kmsKeyArn ||
-    scanner.provider !== "guardduty-s3" ||
-    scanner.errors.length > 0 ||
-    !scanner.operationallyApproved ||
-    !scanner.platformLimitsVerified
-  ) {
+  try {
+    assertUploadRuntimeAvailable()
+  } catch {
     throw new TemplateUploadUnavailableError()
   }
-}
-
-function asDatabaseProvider(provider: StorageAdapter["provider"]): StorageProvider {
-  if (provider !== "s3") throw new TemplateUploadUnavailableError()
-  return StorageProvider.S3
 }
 
 async function createAttemptAndIntent(input: InitiateTemplateUploadInput): Promise<{ attempt: UploadAttempt; created: boolean }> {
@@ -170,13 +136,6 @@ async function createAttemptAndIntent(input: InitiateTemplateUploadInput): Promi
   }
 }
 
-function safeFailure(error: unknown): { stage: UploadFailureStage; category: UploadFailureCategory } {
-  if (error instanceof UploadValidationError) {
-    return { stage: UploadFailureStage.VALIDATION, category: error.failureCategory ?? UploadFailureCategory.MALFORMED_CONTENT }
-  }
-  return { stage: UploadFailureStage.QUARANTINE, category: UploadFailureCategory.STORAGE_FAILURE }
-}
-
 export async function initiateTemplateUpload(
   input: InitiateTemplateUploadInput,
   adapter: StorageAdapter = createStorageAdapter(),
@@ -195,67 +154,8 @@ export async function initiateTemplateUpload(
     }
   }
 
-  let current: UploadStatus = UploadStatus.INITIATED
-  try {
-    await beginReceiving(attempt.id)
-    current = UploadStatus.RECEIVING
-    const quarantineKey = storageKeys.quarantine({
-      organizationId: input.organizationId,
-      uploadAttemptId: attempt.id,
-      artifactId: attempt.artifactId,
-    })
-    const profile = getUploadValidationProfile(attempt.uploadKind)
-    await withUploadSpool(
-      {
-        stream: Readable.fromWeb(input.file.stream() as never),
-        maxBytes: profile.maxBytes,
-        declaredSize: input.file.size,
-      },
-      async (spool) => {
-        const quarantined = await adapter.putObject({
-          key: quarantineKey,
-          location: "quarantine",
-          body: spool.openStream(),
-          expectedContentLength: spool.size,
-          mimeType: "application/pdf",
-          checksumSha256: spool.checksumSha256,
-          encryption: { mode: "sse-kms" },
-          preconditions: { ifNoneMatch: true },
-          metadata: { uploadAttemptId: attempt.id },
-        })
-        if (!quarantined.versionId || !quarantined.etag) {
-          throw new UploadLifecycleError("INTEGRITY_MISMATCH", "Quarantine storage did not return version-bound identity.")
-        }
-        await recordQuarantined(attempt.id, {
-          provider: asDatabaseProvider(adapter.provider),
-          bucket: quarantined.bucket,
-          objectKey: quarantined.key,
-          objectVersionId: quarantined.versionId,
-          etag: quarantined.etag,
-          actualSizeBytes: spool.size,
-          checksumSha256: spool.checksumSha256,
-          quarantinedAt: new Date(),
-        })
-        current = UploadStatus.QUARANTINED
-        await beginValidation(attempt.id)
-        current = UploadStatus.VALIDATING
-        await validateUpload({
-          source: spool,
-          extension: extname(input.file.name),
-          declaredMimeType: input.file.type,
-          policy: profile,
-        })
-        await recordValidated(attempt.id, new Date())
-        current = UploadStatus.VALIDATED
-      },
-    )
-    await beginEventDrivenScanning(attempt.id, UploadScannerProvider.GUARDDUTY_S3, new Date())
-    return { attemptId: attempt.id, status: UploadStatus.SCANNING }
-  } catch (error) {
-    const failure = safeFailure(error)
-    await markUploadFailed(attempt.id, current, failure.stage, failure.category, new Date()).catch(() => undefined)
-    throw error
-  }
+  await receiveValidateAndBeginScan({ attempt, file: input.file, adapter, quarantineMimeType: "application/pdf" })
+  return { attemptId: attempt.id, status: UploadStatus.SCANNING }
 }
 
 export async function cloneTemplateFieldsAndConditions(
@@ -328,16 +228,6 @@ export async function cloneTemplateFieldsAndConditions(
   }
 }
 
-async function finishQuarantineCleanup(attempt: UploadAttempt, adapter: StorageAdapter): Promise<void> {
-  if (!attempt.quarantineObjectKey || !attempt.quarantineObjectVersionId) return
-  await adapter.deleteObject({
-    key: attempt.quarantineObjectKey,
-    location: "quarantine",
-    versionId: attempt.quarantineObjectVersionId,
-  })
-  await recordCompleted(attempt.id, UploadStatus.LINKED_CLEANUP_PENDING, new Date())
-}
-
 export async function completeTemplateUpload(
   attemptId: string,
   staffUserId: string,
@@ -363,57 +253,9 @@ export async function completeTemplateUpload(
   if (attempt.status !== UploadStatus.SCANNING || attempt.malwareStatus !== "CLEAN") {
     throw new UploadLifecycleError("SCAN_UNAVAILABLE", "The verified malware scan is not complete.")
   }
-  if (!attempt.quarantineObjectKey || !attempt.quarantineObjectVersionId || !attempt.checksumSha256 || attempt.actualSizeBytes === null) {
-    throw new UploadLifecycleError("INTEGRITY_MISMATCH", "The quarantine identity is incomplete.")
-  }
-
-  await beginPromotion(attemptId)
-  const configuration = readStorageConfiguration()
-  let promoted
-  try {
-    promoted = await adapter.copyObject({
-      source: { key: attempt.quarantineObjectKey, location: "quarantine", versionId: attempt.quarantineObjectVersionId },
-      destination: { key: attempt.plannedDurableObjectKey, location: "durable" },
-      mimeType: "application/pdf",
-      checksumSha256: attempt.checksumSha256,
-      encryption: { mode: "sse-kms" },
-      preconditions: { ifNoneMatch: true },
-      metadata: { uploadAttemptId: attempt.id },
-    })
-  } catch (error) {
-    await markUploadFailed(attemptId, UploadStatus.PROMOTING, UploadFailureStage.PROMOTION, UploadFailureCategory.PROMOTION_FAILURE, new Date()).catch(() => undefined)
-    throw error
-  }
-  if (
-    promoted.provider !== "s3" ||
-    !promoted.versionId ||
-    promoted.checksumSha256 !== attempt.checksumSha256 ||
-    promoted.size !== Number(attempt.actualSizeBytes) ||
-    promoted.mimeType !== "application/pdf" ||
-    promoted.encryptionKeyReference !== configuration.kmsKeyArn
-  ) {
-    await markUploadFailed(attemptId, UploadStatus.PROMOTING, UploadFailureStage.PROMOTION, UploadFailureCategory.PROMOTION_FAILURE, new Date())
-    throw new UploadLifecycleError("INTEGRITY_MISMATCH", "Durable object verification failed.")
-  }
-  try {
-    attempt = await recordVerifiedPromotion(attemptId, {
-      provider: StorageProvider.S3,
-      bucket: promoted.bucket,
-      objectKey: promoted.key,
-      objectVersionId: promoted.versionId,
-      etag: promoted.etag,
-      checksumSha256: promoted.checksumSha256,
-      sizeBytes: promoted.size,
-      mimeType: promoted.mimeType,
-      encryptionKeyRef: promoted.encryptionKeyReference,
-      providerVerified: true,
-      encryptionVerified: true,
-      promotedAt: new Date(),
-    })
-  } catch (error) {
-    await markUploadFailed(attemptId, UploadStatus.PROMOTING, UploadFailureStage.PROMOTION, UploadFailureCategory.PROMOTION_FAILURE, new Date()).catch(() => undefined)
-    throw error
-  }
+  const promotion = await promoteVerifiedCleanUpload(attempt, "application/pdf", adapter)
+  attempt = promotion.attempt
+  const promoted = promotion.promoted
 
   const compatibilityKey = `templates/${attempt.organizationId}/${attempt.artifactId}.pdf`
   let compatibility

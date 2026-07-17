@@ -1,24 +1,16 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
 import { prisma } from "@/lib/db"
 import {
   CLIENT_READ_ROLES,
   ORGANIZATION_WIDE_CLIENT_ROLES,
-  getLiveStaffAuthorizationContext,
   requireActiveOrganizationMembership,
   requireClientAccess,
   requireDocumentAccess,
   requireOrganizationRole,
   requirePacketAccess,
 } from "@/lib/live-authorization"
-import { createAuditEvent } from "@/lib/audit"
-import { UserRole } from "@prisma/client"
-import { storeFile, signStaffFileUrl } from "@/lib/storage"
-
-const MANAGER_ROLES: UserRole[] = ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR", "CASE_MANAGER"]
-
-type ActionResult = { success: true; data: Record<string, unknown> } | { success: false; error: string }
+import { signStaffFileUrl } from "@/lib/storage"
 
 export async function getLibraryDocuments(orgId: string, params?: { tab?: string; search?: string; category?: string; clientId?: string; status?: string }) {
   const authorization = await requireOrganizationRole(orgId, CLIENT_READ_ROLES, "list document library")
@@ -138,56 +130,6 @@ export async function getLibraryDashboardSummary(orgId: string) {
     totalTemplates,
     totalSupporting,
     recentActivity,
-  }
-}
-
-export async function uploadSupportingDocument(data: {
-  title: string; category?: string; description?: string; clientId?: string; packetId?: string
-  fileBuffer: Buffer; fileName: string; mimeType: string
-}): Promise<ActionResult> {
-  try {
-    let clientId = data.clientId
-    let authorization
-    if (data.packetId) {
-      authorization = await requirePacketAccess(data.packetId, "manage", "upload supporting document")
-      const packet = await prisma.packet.findUnique({ where: { id: data.packetId }, select: { clientId: true, organizationId: true } })
-      if (!packet || packet.organizationId !== authorization.organizationId || (data.clientId && packet.clientId !== data.clientId)) {
-        return { success: false, error: "Packet not found" }
-      }
-      clientId = packet.clientId
-    } else if (clientId) {
-      authorization = await requireClientAccess(clientId, "manage", "upload supporting document")
-    } else {
-      const identity = await getLiveStaffAuthorizationContext()
-      if (!identity.selectedOrganizationId) return { success: false, error: "Select an organization" }
-      authorization = await requireOrganizationRole(identity.selectedOrganizationId, ORGANIZATION_WIDE_CLIENT_ROLES, "upload unbound supporting document")
-    }
-    if (!MANAGER_ROLES.includes(authorization.role)) return { success: false, error: "Insufficient permissions" }
-    const orgId = authorization.organizationId
-
-    const safeName = data.fileName.replace(/[/\\]/g, "_").replace(/^\.+/, "")
-    const key = `supporting/${orgId}/${Date.now()}-${safeName}`
-    const record = await storeFile(key, data.fileBuffer, data.mimeType, data.fileName)
-
-    const doc = await prisma.supportingDocument.create({
-      data: {
-        organizationId: orgId, title: data.title, category: data.category || "supporting",
-        description: data.description, clientId: clientId || null, packetId: data.packetId || null,
-        fileUrl: record.url, fileKey: record.key, fileSize: record.size, mimeType: data.mimeType,
-        uploadedById: authorization.userId,
-      },
-    })
-
-    await createAuditEvent({
-      organizationId: orgId, actorId: authorization.userId,
-      action: "DOCUMENT_UPLOADED", targetType: "supporting_document", targetId: doc.id,
-      metadata: { title: data.title },
-    })
-
-    revalidatePath("/library")
-    return { success: true, data: { id: doc.id } }
-  } catch (e) {
-    return { success: false, error: (e as Error).message }
   }
 }
 

@@ -1,4 +1,4 @@
-import { getLibraryDocuments, getLibraryDashboardSummary, uploadSupportingDocument } from "@/lib/actions/library"
+import { getLibraryDocuments, getLibraryDashboardSummary } from "@/lib/actions/library"
 import { signStaffFileUrl, type StaffFileResourceType } from "@/lib/storage"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
@@ -14,6 +14,7 @@ import {
 import { formatDate } from "@/lib/utils"
 import Link from "next/link"
 import { LibraryDashboard } from "./library-dashboard"
+import { SupportingUploadForm } from "./supporting-upload-form"
 
 interface Props { orgId?: string; isSuperAdmin: boolean; tab?: string; search?: string; status?: string }
 
@@ -24,12 +25,6 @@ const LIBRARY_TABS = [
   { value: "supporting", label: "Supporting" },
 ]
 
-const SUPPORTING_CATEGORIES = [
-  { value: "assessment", label: "Assessment" },
-  { value: "report", label: "Report" },
-  { value: "correspondence", label: "Correspondence" },
-  { value: "supporting", label: "Other Supporting Document" },
-]
 
 export async function LibraryContent({ orgId, isSuperAdmin, tab, search, status }: Props) {
   if (isSuperAdmin && !orgId) {
@@ -107,7 +102,7 @@ export async function LibraryContent({ orgId, isSuperAdmin, tab, search, status 
 
       {activeTab === "supporting" && (
         <>
-          <UploadForm orgId={orgId!} />
+          <SupportingUploadForm />
           <SupportingSection docs={data.supportingDocs} />
         </>
       )}
@@ -136,46 +131,6 @@ function PageHeader({ total }: { total?: number }) {
       </div>
       <Link href="/data-migration"><Button variant="secondary" size="sm"><ClipboardCheck className="h-4 w-4" /> Data Import Readiness</Button></Link>
     </div>
-  )
-}
-
-function UploadForm({ orgId }: { orgId: string }) {
-  async function upload(formData: FormData) {
-    "use server"
-    const file = formData.get("file") as File
-    if (!file || file.size === 0) return
-    const buffer = Buffer.from(await file.arrayBuffer())
-    await uploadSupportingDocument({
-      title: (formData.get("title") as string) || file.name,
-      category: (formData.get("category") as string) || "supporting",
-      description: (formData.get("description") as string) || undefined,
-      fileBuffer: buffer,
-      fileName: file.name,
-      mimeType: file.type || "application/octet-stream",
-    })
-  }
-
-  return (
-    <Card id="upload">
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Upload className="h-5 w-5 text-surface-400" />
-          <CardTitle>Upload Supporting Document</CardTitle>
-        </div>
-        <CardDescription>Assessments, reports, and other records that aren&apos;t part of a DHS packet form</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={upload} className="grid gap-3 sm:grid-cols-2">
-          <Input name="title" placeholder="Document title" required />
-          <Select name="category" defaultValue="supporting" options={SUPPORTING_CATEGORIES} />
-          <Input name="description" placeholder="Description (optional)" className="sm:col-span-2" />
-          <input type="file" name="file" required className="sm:col-span-2 text-sm text-surface-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100" />
-          <div className="sm:col-span-2">
-            <Button type="submit"><Upload className="h-4 w-4" /> Upload Document</Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
   )
 }
 

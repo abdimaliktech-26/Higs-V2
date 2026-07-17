@@ -321,6 +321,7 @@ model Organization {
   storedObjects            StoredObject[]
   uploadAttempts           UploadAttempt[]
   templateUploadIntents    TemplateUploadIntent[]
+  supportingUploadIntents  SupportingUploadIntent[]
 
   @@map("organizations")
 }
@@ -1269,6 +1270,7 @@ model UploadAttempt {
   expiresAt                 DateTime                  @map("expires_at")
   quarantinedAt             DateTime?                 @map("quarantined_at")
   validatedAt               DateTime?                 @map("validated_at")
+  validatedMimeType         String?                   @map("validated_mime_type")
   scannedAt                 DateTime?                 @map("scanned_at")
   promotedAt                DateTime?                 @map("promoted_at")
   linkedAt                  DateTime?                 @map("linked_at")
@@ -1276,11 +1278,12 @@ model UploadAttempt {
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
 
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  staffUser      User?                 @relation(fields: [staffUserId], references: [id], onDelete: SetNull)
-  portalUser     PortalUser?           @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
-  storedObject   StoredObject?         @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
-  templateIntent TemplateUploadIntent?
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffUser        User?                   @relation(fields: [staffUserId], references: [id], onDelete: SetNull)
+  portalUser       PortalUser?             @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+  storedObject     StoredObject?           @relation(fields: [storedObjectId], references: [id], onDelete: SetNull)
+  templateIntent   TemplateUploadIntent?
+  supportingIntent SupportingUploadIntent?
 
   @@unique([organizationId, actorType, actorIdentityId, uploadKind, idempotencyKeyHash], map: "upload_attempts_idempotency_boundary_key")
   @@unique([scannerProvider, scannerReference], map: "upload_attempts_scanner_reference_key")
@@ -1314,6 +1317,36 @@ model TemplateUploadIntent {
   @@index([organizationId, createdAt])
   @@index([previousVersionId])
   @@map("template_upload_intents")
+}
+
+// PR-5B.3: non-file supporting-document metadata that must survive the
+// asynchronous quarantine/GuardDuty boundary for staff supporting and portal
+// request uploads. Staff rows carry the staff-entered document metadata that
+// already lands on SupportingDocument today; portal rows carry only the
+// request pointer plus the sanitized display filename (both already stored on
+// the owner row today). UploadAttempt itself remains PHI-free, and the
+// SupportingDocument owner is created only after verified durable promotion.
+model SupportingUploadIntent {
+  id                   String   @id @default(cuid())
+  organizationId       String   @map("organization_id")
+  uploadAttemptId      String   @unique @map("upload_attempt_id")
+  supportingDocumentId String   @unique @map("supporting_document_id")
+  clientId             String?  @map("client_id")
+  packetId             String?  @map("packet_id")
+  portalRequestId      String?  @map("portal_request_id")
+  title                String?
+  category             String?
+  description          String?
+  originalFileName     String?  @map("original_file_name")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadAttempt UploadAttempt @relation(fields: [uploadAttemptId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([portalRequestId])
+  @@map("supporting_upload_intents")
 }
 
 model AiExtraction {

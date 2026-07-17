@@ -237,8 +237,16 @@ export function beginValidation(attemptId: string, client: AttemptClient = prism
   return transition(client, attemptId, UploadStatus.QUARANTINED, UploadStatus.VALIDATING)
 }
 
-export function recordValidated(attemptId: string, validatedAt: Date, client: AttemptClient = prisma): Promise<UploadAttempt> {
-  return transition(client, attemptId, UploadStatus.VALIDATING, UploadStatus.VALIDATED, { validatedAt })
+export function recordValidated(
+  attemptId: string,
+  validatedAt: Date,
+  client: AttemptClient = prisma,
+  validatedMimeType?: string,
+): Promise<UploadAttempt> {
+  return transition(client, attemptId, UploadStatus.VALIDATING, UploadStatus.VALIDATED, {
+    validatedAt,
+    validatedMimeType: validatedMimeType ?? null,
+  })
 }
 
 export function beginScanning(attemptId: string, client: AttemptClient = prisma): Promise<UploadAttempt> {

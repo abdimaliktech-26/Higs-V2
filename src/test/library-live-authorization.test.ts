@@ -108,32 +108,38 @@ describe("document library live authorization", () => {
     expect(supportingDocumentFindMany.mock.calls[0][0].where.client).toBeUndefined()
   })
 
-  it("authorizes a client-bound upload against the owning client and records the live actor", async () => {
-    const { uploadSupportingDocument } = await import("@/lib/actions/library")
-    const result = await uploadSupportingDocument({
-      title: "Care plan", clientId: CLIENT_ID, fileBuffer: Buffer.from("pdf"),
-      fileName: "care-plan.pdf", mimeType: "application/pdf",
-    })
+  it("authorizes a client-bound supporting upload against the owning client and returns the live actor", async () => {
+    const { authorizeStaffSupportingUpload } = await import("@/lib/uploads/staff-supporting-authorization")
+    const authorized = await authorizeStaffSupportingUpload({ clientId: CLIENT_ID })
 
-    expect(result.success).toBe(true)
     expect(requireClientAccess).toHaveBeenCalledWith(CLIENT_ID, "manage", "upload supporting document")
-    expect(supportingDocumentCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
-      organizationId: ORG_ID, clientId: CLIENT_ID, uploadedById: USER_ID,
-    }) })
-    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ actorId: USER_ID, organizationId: ORG_ID }))
+    expect(authorized).toEqual({ userId: USER_ID, organizationId: ORG_ID, clientId: CLIENT_ID, packetId: undefined })
   })
 
-  it("requires organization-wide authority for an unbound upload", async () => {
-    requireOrganizationRole.mockResolvedValue({ userId: "admin-1", organizationId: ORG_ID, role: "ORG_ADMIN" })
-    const { uploadSupportingDocument } = await import("@/lib/actions/library")
-    const result = await uploadSupportingDocument({
-      title: "Policy", fileBuffer: Buffer.from("pdf"), fileName: "policy.pdf", mimeType: "application/pdf",
-    })
+  it("authorizes a packet-bound supporting upload against the owning packet and rejects an organization mismatch", async () => {
+    packetFindUnique.mockResolvedValue({ clientId: CLIENT_ID, organizationId: ORG_ID })
+    const { authorizeStaffSupportingUpload } = await import("@/lib/uploads/staff-supporting-authorization")
+    const authorized = await authorizeStaffSupportingUpload({ packetId: PACKET_ID })
 
-    expect(result.success).toBe(true)
+    expect(requirePacketAccess).toHaveBeenCalledWith(PACKET_ID, "manage", "upload supporting document")
+    expect(authorized.clientId).toBe(CLIENT_ID)
+
+    packetFindUnique.mockResolvedValue({ clientId: CLIENT_ID, organizationId: "other-org" })
+    await expect(authorizeStaffSupportingUpload({ packetId: PACKET_ID })).rejects.toThrow("Packet not found")
+  })
+
+  it("requires organization-wide authority for an unbound supporting upload and gates non-manager roles", async () => {
+    requireOrganizationRole.mockResolvedValue({ userId: "admin-1", organizationId: ORG_ID, role: "ORG_ADMIN" })
+    const { authorizeStaffSupportingUpload } = await import("@/lib/uploads/staff-supporting-authorization")
+    const authorized = await authorizeStaffSupportingUpload({})
+
     expect(requireOrganizationRole).toHaveBeenCalledWith(
       ORG_ID, ["SUPER_ADMIN", "ORG_ADMIN", "COMPLIANCE_DIRECTOR"], "upload unbound supporting document",
     )
+    expect(authorized.userId).toBe("admin-1")
+
+    requireClientAccess.mockResolvedValue({ userId: USER_ID, organizationId: ORG_ID, role: "DSP" })
+    await expect(authorizeStaffSupportingUpload({ clientId: CLIENT_ID })).rejects.toThrow("Insufficient permissions")
   })
 
   it("authorizes packet document detail before loading its PHI-bearing detail", async () => {

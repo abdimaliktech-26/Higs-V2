@@ -20,7 +20,7 @@ describe("template upload browser orchestration", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(response({ success: true, data: { status: "SCANNING", malwareStatus: "PENDING" } }) as Response)
       .mockResolvedValueOnce(response({ success: true, data: { status: "SCANNING", malwareStatus: "CLEAN" } }) as Response)
-      .mockResolvedValueOnce(response({ success: true, data: { templateId: "template", version: 2 } }) as Response)
+      .mockResolvedValueOnce(response({ success: true, data: { templateId: "template", ownerId: "template", version: 2 } }) as Response)
     const resultPromise = waitForTemplateUpload("attempt")
     await vi.runAllTimersAsync()
     await expect(resultPromise).resolves.toEqual({ templateId: "template", version: 2 })

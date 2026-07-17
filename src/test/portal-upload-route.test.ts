@@ -6,6 +6,11 @@
 // under jsdom, that parsing throws a cross-realm webidl assertion error.
 // This route has no DOM dependency, so Node is also the more accurate
 // environment for it regardless.
+//
+// PR-5B.3: the portal route is now initiate-only — it authorizes, gates,
+// and hands the multipart file to the shared upload pipeline. Deep
+// validation, quarantine, completion linkage, timeline, audit, and
+// notification behavior are covered by the supporting-upload lib suites.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { NextRequest } from "next/server"
 
@@ -13,11 +18,8 @@ const portalSessionFindUnique = vi.fn()
 const portalClientAccessFindFirst = vi.fn()
 const clientFindUnique = vi.fn()
 const portalDocumentRequestFindUnique = vi.fn()
-const supportingDocumentCreate = vi.fn()
-const portalDocumentTimelineEventCreate = vi.fn()
-const createPortalAuditEventMock = vi.fn()
-const storeFileMock = vi.fn()
-const notifySingleMock = vi.fn()
+const initiatePortalUploadMock = vi.fn()
+const assertRuntimeMock = vi.fn()
 
 const cookieStore = new Map<string, string>()
 const cookiesMock = {
@@ -26,33 +28,28 @@ const cookiesMock = {
   delete: () => {},
 }
 
-function makeTx(overrides: Record<string, any> = {}) {
-  return {
-    portalDocumentRequest: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), ...overrides.portalDocumentRequest },
-    supportingDocument: { create: (...a: unknown[]) => supportingDocumentCreate(...a), ...overrides.supportingDocument },
-    portalDocumentTimelineEvent: { create: (...a: unknown[]) => portalDocumentTimelineEventCreate(...a), ...overrides.portalDocumentTimelineEvent },
-  }
-}
-
-let currentTx = makeTx()
-const transactionMock = vi.fn((cb: any) => cb(currentTx))
-
 vi.mock("@/lib/db", () => ({
   prisma: {
     portalSession: { findUnique: (...a: unknown[]) => portalSessionFindUnique(...a) },
     portalClientAccess: { findFirst: (...a: unknown[]) => portalClientAccessFindFirst(...a) },
     client: { findUnique: (...a: unknown[]) => clientFindUnique(...a) },
     portalDocumentRequest: { findUnique: (...a: unknown[]) => portalDocumentRequestFindUnique(...a) },
-    $transaction: (cb: any) => transactionMock(cb),
   },
 }))
 vi.mock("next/headers", () => ({ cookies: async () => cookiesMock }))
-vi.mock("@/lib/audit", () => ({ createPortalAuditEvent: (...a: unknown[]) => createPortalAuditEventMock(...a) }))
-vi.mock("@/lib/portal/notifications", () => ({ notifySinglePortalUser: (...a: unknown[]) => notifySingleMock(...a) }))
-vi.mock("@/lib/storage", () => ({ storeFile: (...a: unknown[]) => storeFileMock(...a) }))
 vi.mock("@/lib/rate-limit", () => ({
   limiters: { portalUpload: { check: () => ({ allowed: true, remaining: 10, retryAfter: 0, total: 10, resetAt: 0 }) } },
 }))
+vi.mock("@/lib/uploads/supporting-upload", () => ({
+  initiatePortalUpload: (...a: unknown[]) => initiatePortalUploadMock(...a),
+}))
+vi.mock("@/lib/uploads/receipt", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/uploads/receipt")>()
+  return {
+    ...actual,
+    assertUploadRuntimeAvailable: (...a: unknown[]) => assertRuntimeMock(...a),
+  }
+})
 
 const ORG_ID = "org-1"
 const CLIENT_ID = "client-0000001"
@@ -84,12 +81,7 @@ function validSession() {
   })
 }
 
-// Minimal valid byte signatures for each accepted type.
 const PDF_BYTES = Buffer.from("%PDF-1.4\n%mock-pdf-content-for-tests\n")
-const JPEG_BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 1)])
-const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(50, 1)])
-const DOCX_BYTES = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(50, 1)])
-const TEXT_BYTES = Buffer.from("just plain text, not a real document")
 
 interface FakeFile { bytes: Buffer; name: string; type: string }
 
@@ -111,12 +103,12 @@ function buildMultipartBody(file: FakeFile): { body: Buffer; contentType: string
   return { body: Buffer.concat([head, file.bytes, tail]), contentType: `multipart/form-data; boundary=${boundary}` }
 }
 
-async function callUploadRoute(requestId: string, file: FakeFile) {
+async function callUploadRoute(requestId: string, file: FakeFile, idempotencyKey = "9f3a1b8e-4c2d-4f6a-8b1e-2d3c4e5f6a7b") {
   const { POST } = await import("@/app/api/portal-upload/[requestId]/route")
   const { body, contentType } = buildMultipartBody(file)
   const req = new NextRequest("http://localhost/api/portal-upload/" + requestId, {
     method: "POST",
-    headers: { "content-type": contentType },
+    headers: { "content-type": contentType, "idempotency-key": idempotencyKey },
     body: new Uint8Array(body),
   })
   const res = await POST(req, { params: Promise.resolve({ requestId }) })
@@ -127,22 +119,37 @@ async function callUploadRoute(requestId: string, file: FakeFile) {
 beforeEach(() => {
   vi.clearAllMocks()
   cookieStore.clear()
-  currentTx = makeTx()
-  transactionMock.mockImplementation((cb: any) => cb(currentTx))
-  storeFileMock.mockResolvedValue({ key: "portal-uploads/x", url: "/api/files/x", signedUrl: "/api/files/x?sig=1", size: 100, mimeType: "application/pdf", originalName: "file.pdf" })
-  supportingDocumentCreate.mockResolvedValue({ id: "supdoc-1" })
+  assertRuntimeMock.mockReturnValue(undefined)
+  initiatePortalUploadMock.mockResolvedValue({ attemptId: "cm42345678901234567890123", status: "SCANNING" })
 })
 
 describe("portal upload route — authorization", () => {
-  it("succeeds for a valid session, active grant, and canUploadDocuments=true", async () => {
+  it("accepts receipt for a valid session, active grant, and canUploadDocuments=true", async () => {
     validSession()
     portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
     portalClientAccessFindFirst.mockResolvedValue(activeAccess())
     clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
 
     const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-    expect(status).toBe(200)
+    expect(status).toBe(202)
     expect(body.success).toBe(true)
+    expect(body.data.status).toBe("SCANNING")
+    expect(body.data.attemptId).toBeTruthy()
+  })
+
+  it("derives every trust decision from the request row, never the body", async () => {
+    validSession()
+    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
+    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
+    clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
+
+    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
+    const initiateInput = initiatePortalUploadMock.mock.calls[0][0]
+    expect(initiateInput.organizationId).toBe(ORG_ID)
+    expect(initiateInput.clientId).toBe(CLIENT_ID)
+    expect(initiateInput.requestId).toBe(REQUEST_ID)
+    expect(initiateInput.portalUserId).toBe(PORTAL_USER_ID)
+    expect(initiateInput.idempotencyKey).toBe("9f3a1b8e-4c2d-4f6a-8b1e-2d3c4e5f6a7b")
   })
 
   it("rejects when canUploadDocuments is false", async () => {
@@ -154,11 +161,13 @@ describe("portal upload route — authorization", () => {
     const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
     expect(status).toBe(403)
     expect(body.success).toBe(false)
+    expect(initiatePortalUploadMock).not.toHaveBeenCalled()
   })
 
   it("rejects when there is no session at all", async () => {
     const { status } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
     expect(status).toBe(401)
+    expect(initiatePortalUploadMock).not.toHaveBeenCalled()
   })
 
   it("rejects when the access grant is missing (no active grant for this client)", async () => {
@@ -210,7 +219,7 @@ describe("portal upload route — authorization", () => {
   })
 })
 
-describe("portal upload route — file validation", () => {
+describe("portal upload route — receipt boundary", () => {
   beforeEach(() => {
     validSession()
     portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
@@ -218,144 +227,53 @@ describe("portal upload route — file validation", () => {
     clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
   })
 
-  it("accepts a valid PDF", async () => {
-    const { status } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-    expect(status).toBe(200)
-  })
-
-  it("accepts a valid JPEG", async () => {
-    const { status } = await callUploadRoute(REQUEST_ID, makeFile(JPEG_BYTES, "photo.jpg", "image/jpeg"))
-    expect(status).toBe(200)
-  })
-
-  it("accepts a valid PNG", async () => {
-    const { status } = await callUploadRoute(REQUEST_ID, makeFile(PNG_BYTES, "photo.png", "image/png"))
-    expect(status).toBe(200)
-  })
-
-  it("accepts a valid DOCX", async () => {
-    const { status } = await callUploadRoute(REQUEST_ID, makeFile(DOCX_BYTES, "form.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
-    expect(status).toBe(200)
-  })
-
-  it("rejects a disallowed file type", async () => {
-    const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(TEXT_BYTES, "notes.exe", "application/octet-stream"))
-    expect(status).toBe(400)
-    expect(body.error).toMatch(/unsupported/i)
-  })
-
-  it("rejects an oversized file", async () => {
-    const oversized = Buffer.concat([PDF_BYTES, Buffer.alloc(26 * 1024 * 1024)])
-    const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(oversized, "big.pdf", "application/pdf"))
-    expect(status).toBe(400)
-    expect(body.error).toMatch(/25 MB/i)
-  })
-
-  it("rejects an empty file", async () => {
-    const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(Buffer.alloc(0), "empty.pdf", "application/pdf"))
-    expect(status).toBe(400)
-    expect(body.error).toMatch(/empty/i)
-  })
-
-  it("sanitizes a path-traversal filename instead of using it as-is", async () => {
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "../../etc/passwd.pdf", "application/pdf"))
-    const createData = supportingDocumentCreate.mock.calls[0][0].data
-    expect(createData.originalFileName).not.toContain("/")
-    expect(createData.originalFileName).not.toContain("..")
-  })
-
-  it("rejects a MIME/signature mismatch (PNG extension, non-PNG bytes)", async () => {
-    const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(TEXT_BYTES, "fake.png", "image/png"))
-    expect(status).toBe(400)
-    expect(body.error).toMatch(/does not match/i)
-  })
-})
-
-describe("portal upload route — persistence", () => {
-  beforeEach(() => {
-    validSession()
-    portalClientAccessFindFirst.mockResolvedValue(activeAccess())
-    clientFindUnique.mockResolvedValue({ organizationId: ORG_ID })
-  })
-
-  it("creates a new SupportingDocument linked to the request and the uploading portal user", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-
-    const createData = supportingDocumentCreate.mock.calls[0][0].data
-    expect(createData.portalRequestId).toBe(REQUEST_ID)
-    expect(createData.uploadedByPortalUserId).toBe(PORTAL_USER_ID)
-    expect(createData.clientId).toBe(CLIENT_ID)
-    expect(createData.organizationId).toBe(ORG_ID)
-  })
-
-  it("transitions a PENDING request to SUBMITTED and writes an UPLOADED event", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "PENDING" }))
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-
-    const updateWhere = currentTx.portalDocumentRequest.updateMany.mock.calls[0][0]
-    expect(updateWhere.data.status).toBe("SUBMITTED")
-    const eventData = portalDocumentTimelineEventCreate.mock.calls[0][0].data
-    expect(eventData.eventType).toBe("UPLOADED")
-  })
-
-  it("transitions a NEEDS_REPLACEMENT request to SUBMITTED and writes a RESUBMITTED event, creating a new row rather than overwriting", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "NEEDS_REPLACEMENT" }))
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance-v2.pdf", "application/pdf"))
-
-    const eventData = portalDocumentTimelineEventCreate.mock.calls[0][0].data
-    expect(eventData.eventType).toBe("RESUBMITTED")
-    // A resubmission always calls create (never update/upsert) on SupportingDocument — no overwrite path exists.
-    expect(supportingDocumentCreate).toHaveBeenCalledTimes(1)
-  })
-
-  it("writes a portal audit event with only safe identifiers — no PHI, raw file bytes, or tokens", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-
-    const auditCall = createPortalAuditEventMock.mock.calls[0][0]
-    expect(auditCall.action).toBe("PORTAL_DOCUMENT_UPLOADED")
-    expect(auditCall.metadata).toEqual({
-      requestId: REQUEST_ID, supportingDocumentId: "supdoc-1", fileSize: 100, mimeType: "application/pdf", eventType: "UPLOADED",
+  it("returns unavailable before the pipeline runs when the operating gate is closed", async () => {
+    const { UploadRuntimeUnavailableError } = await import("@/lib/uploads/receipt")
+    assertRuntimeMock.mockImplementation(() => {
+      throw new UploadRuntimeUnavailableError()
     })
-    const serialized = JSON.stringify(auditCall)
-    expect(serialized).not.toContain("%PDF")
-    expect(serialized).not.toContain("Insurance Card")
-  })
-
-  it("notifies only the uploading portal user that their upload was received — no fan-out, no staff Notification row", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-
-    expect(notifySingleMock).toHaveBeenCalledTimes(1)
-    const [notifiedUserId, notifyInput, txArg] = notifySingleMock.mock.calls[0]
-    expect(notifiedUserId).toBe(PORTAL_USER_ID)
-    expect(notifyInput.type).toBe("upload_received")
-    expect(notifyInput.link).toBe(`/portal/upload?client=${CLIENT_ID}&request=${REQUEST_ID}`)
-    expect(notifyInput.metadata).toEqual({ requestId: REQUEST_ID, clientId: CLIENT_ID, event: "upload_received" })
-    // Passed the transaction client so the notification commits atomically with the upload.
-    expect(txArg).toBe(currentTx)
-  })
-
-  it("rejects a concurrent double-upload race via the conditional status update", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest())
-    currentTx.portalDocumentRequest.updateMany.mockResolvedValue({ count: 0 })
-
     const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
-    expect(status).toBe(409)
-    expect(body.success).toBe(false)
-    expect(supportingDocumentCreate).not.toHaveBeenCalled()
+    expect(status).toBe(503)
+    expect(body.error).toMatch(/temporarily unavailable/i)
+    expect(initiatePortalUploadMock).not.toHaveBeenCalled()
   })
 
-  it("a replacement upload creates a new attempt starting PENDING_REVIEW, never touching the prior NEEDS_REPLACEMENT attempt", async () => {
-    portalDocumentRequestFindUnique.mockResolvedValue(baseRequest({ status: "NEEDS_REPLACEMENT" }))
-    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance-v2.pdf", "application/pdf"))
+  it("sanitizes a path-traversal filename before it reaches the intent", async () => {
+    await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "../../etc/passwd.pdf", "application/pdf"))
+    const initiateInput = initiatePortalUploadMock.mock.calls[0][0]
+    expect(initiateInput.originalFileName).not.toContain("/")
+    expect(initiateInput.originalFileName).not.toContain("..")
+  })
 
-    const createData = supportingDocumentCreate.mock.calls[0][0].data
-    expect(createData.reviewStatus).toBe("PENDING_REVIEW")
-    // The route never issues any update/upsert against a prior SupportingDocument row —
-    // the only supportingDocument call made is the new create, so the prior
-    // NEEDS_REPLACEMENT attempt is left completely untouched.
-    expect(supportingDocumentCreate).toHaveBeenCalledTimes(1)
+  it("maps pipeline validation failures to bounded 400 responses", async () => {
+    const { UploadValidationError } = await import("@/lib/uploads/errors")
+    const { UploadFailureCategory } = await import("@prisma/client")
+    initiatePortalUploadMock.mockRejectedValue(
+      new UploadValidationError("TYPE_MISMATCH", "The uploaded file type is not permitted.", UploadFailureCategory.TYPE_MISMATCH),
+    )
+    const { status, body } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "photo.heic", "image/heic"))
+    expect(status).toBe(400)
+    expect(body.error).toMatch(/not permitted/i)
+  })
+
+  it("maps idempotency replays of a failed key to a bounded 409", async () => {
+    const { UploadLifecycleError } = await import("@/lib/uploads/errors")
+    initiatePortalUploadMock.mockRejectedValue(new UploadLifecycleError("CONFLICT", "This upload key has already failed."))
+    const { status } = await callUploadRoute(REQUEST_ID, makeFile(PDF_BYTES, "insurance.pdf", "application/pdf"))
+    expect(status).toBe(409)
+  })
+
+  it("rejects a missing file part without invoking the pipeline", async () => {
+    const { POST } = await import("@/app/api/portal-upload/[requestId]/route")
+    const boundary = "----vitestBoundaryEmpty"
+    const body = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="note"\r\n\r\nhello\r\n--${boundary}--\r\n`)
+    const req = new NextRequest("http://localhost/api/portal-upload/" + REQUEST_ID, {
+      method: "POST",
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      body: new Uint8Array(body),
+    })
+    const res = await POST(req, { params: Promise.resolve({ requestId: REQUEST_ID }) })
+    expect(res.status).toBe(400)
+    expect(initiatePortalUploadMock).not.toHaveBeenCalled()
   })
 })
