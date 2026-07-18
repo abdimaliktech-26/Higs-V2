@@ -427,7 +427,16 @@ Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seve
 
 The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
 
-PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrated the asynchronous template/template-version writers; PR-5B.3 migrated the staff-supporting and portal-request writers and recorded the HEIC rejection. PR-5B.4 remains approved cleanup/reconciliation operations and hosting/load verification. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
+PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrated the asynchronous template/template-version writers; PR-5B.3 migrated the staff-supporting and portal-request writers and recorded the HEIC rejection; PR-5B.4 added the bounded operator tooling below. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
+
+### PR-5B.4 operator tooling (explicit commands only, never app traffic)
+
+- `npm run upload:reconcile` — read-only reconciliation report; adds read-only storage existence probes when `STORAGE_PROVIDER=s3`, otherwise database-only. Probe errors are reported and can never produce a missing-object finding.
+- `npm run upload:cleanup -- [--dry-run] [--batch=50] [--stale-minutes=60] [--recover-only|--cleanup-only]` — fails abandoned/stuck attempts through guarded transitions (a live completion always wins the race), then deletes only the exact quarantine object version recorded on each eligible attempt. FAILED attempts wait for their recorded expiry (24 h ordinary, 7 days infected/suspect); durable objects are never deleted; every run is batch-bounded, rerunnable, and prints an auditable attempted/cleaned/skipped/conflicted/failed summary. Refuses to run unless `STORAGE_PROVIDER=s3`.
+- `npm run upload:verify-platform -- [--size-mb=25] [--concurrency=3] [--http=<initiate-url> --cookie=<cookie>]` — synthetic 25 MB spool → quarantine → durable → read-back → exact-version delete round trips, plus an optional one-shot HTTP receipt check that requires a 202. Refuses local storage entirely and never sets `UPLOAD_PLATFORM_LIMITS_VERIFIED`; the operator records that flag manually only for the runtime that produced passing evidence.
+- `GET /api/admin/upload-reconciliation` — read-only, global-super-admin-only, database-only findings view. No probe, write, or deletion is reachable from application traffic.
+
+Operator scripts run with `--conditions=react-server` so the `server-only` guard stays active for application bundles. Durable orphan findings remain report-only in PR-5B.4; no durable object is deleted by any tool. No scheduler is included — cadence is an operational runbook decision for the production-operations workstream.
 
 ### PR-5B.2A GuardDuty control plane (not active)
 

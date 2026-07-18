@@ -347,7 +347,7 @@ Remaining PR-5B boundaries:
 - PR-5B.2A: the GuardDuty event/control-plane foundation described below;
 - PR-5B.2B: migrate template and template-version writers through the approved asynchronous and compatibility boundary; all reads remain deferred to PR-5C;
 - PR-5B.3 (complete): the HEIC rejection decision plus the staff-supporting and portal-request writer migration described below; and
-- PR-5B.4: operationalize non-destructive reconciliation, approve cleanup execution and retention handling, remove upload migration leftovers, and complete upload-platform/load verification before PR-5C read cutover.
+- PR-5B.4 (complete): reconciliation operationalized with storage probes, bounded cleanup/recovery execution approved and implemented, migration leftovers removed, and synthetic upload-platform verification tooling added; only the dedicated-runtime execution of that tooling remains an external operational step before PR-5C read cutover.
 
 PR-5B.1 does not provision S3, malware scanning, cleanup jobs, backups, restore automation, final PDFs, Object Lock, or retention enforcement. It does not change signatures, billing, MFA, notifications, or product features. AWS BAA and infrastructure controls remain required, and the unverified RPO/RTO targets remain 15 minutes/four hours.
 
@@ -371,7 +371,7 @@ Remaining boundaries:
 
 - PR-5B.2B: implement the asynchronous initiate/stream/status UI protocol and migrate template writers through quarantine, deep validation, GuardDuty results, promotion, strict linkage/audit, and temporary compatibility metadata without changing any reader;
 - PR-5B.3 (complete): HEIC rejected for migrated writers; staff-supporting and portal-request writers migrated with live authorization preserved;
-- PR-5B.4: provision and verify cleanup/reconciliation operations and upload-platform/load controls; and
+- PR-5B.4 (complete): cleanup/reconciliation operations and upload-platform verification tooling implemented; runtime execution evidence remains operational; and
 - PR-5C: complete staff and portal object-read cutover and retire compatibility reads after migration evidence.
 
 PR-5B.2A adds no active scanner network call, public scanner webhook, SQS poller, automatic cleanup, compatibility copy, native S3 URL, backup, restore, finalization, Object Lock, retention, signature, billing, MFA, notification, or product-feature behavior. Higsi remains a PHI no-go.
@@ -405,6 +405,20 @@ The additive `SupportingUploadIntent` model carries staff-entered document metad
 HEIC is rejected in PR-5B.3. The legacy portal route accepted HEIC with only a shallow `ftyp` check — below the deep-validation standard the pipeline establishes — and the runtime ships no HEIC decoder (prebuilt sharp/libvips excludes HEIF). The portal accept list and validation profile both reject it with a clear supported-format message. HEIC support is a backlog item requiring an approved decoder strategy, bounded resource limits, malformed-file testing, and production-runtime verification.
 
 Readers remain deliberately unchanged. Successful writers populate verified legacy `fileKey`/`fileUrl`/`fileSize`/`mimeType` metadata and an opaque local compatibility copy so current staff and portal delivery keeps working until PR-5C. `StoredObject` is authoritative only for the four migrated writer paths. Reconciliation, cleanup execution, read migration, browser-direct uploads, native signed URLs, backup, restore, retention, billing, MFA, notifications beyond the preserved portal row, and product features remain deferred. Higsi remains synthetic-data-only and a PHI no-go.
+
+## PR-5B.4 — Reconciliation, Cleanup, and Platform Verification
+
+PR-5B.4 operationalizes the dormant PR-5B.1 reconciliation foundation without touching any reader or introducing any PR-5C behavior.
+
+Recovery (`recoverStuckUploadAttempts`) fails abandoned and crash-stuck attempts — stale INITIATED/RECEIVING/PROMOTING/PROMOTED/LINKING by inactivity, and expired QUARANTINED/VALIDATING/VALIDATED/SCANNING by their recorded expiry — exclusively through the guarded lifecycle transitions. A live completion racing recovery always wins; the loser records a bounded CONFLICT outcome. A GuardDuty result arriving after a scan timeout hits the same guarded update and conflicts instead of reviving the attempt. Recovery never touches storage.
+
+Cleanup (`executeQuarantineCleanup`) deletes only the exact quarantine object version recorded on an eligible attempt: LINKED_CLEANUP_PENDING immediately (the durable owner already exists), FAILED only after its recorded retention expiry — 24 hours ordinary, seven days infected/suspect, stamped at failure time. Attempts with a recorded key but no recorded version are skipped for review rather than guessed at. Durable objects are never deleted; durable orphan findings stay report-only. Provider failures record nothing so the attempt stays PENDING for rerun; completion and conflict are recorded through guarded transitions; every run is batch-bounded, idempotent, and returns an auditable attempted/recovered/cleaned/skipped/conflicted/failed summary.
+
+Storage-backed probes wire the reconciliation report to the S3 adapter read-only. A probe error or unprobeable location (foreign bucket, non-S3 provider) is reported as a probe failure and treated as \"exists\", so transient provider trouble can never generate a missing-object finding or motivate destructive follow-up.
+
+Operator surface: `npm run upload:reconcile` (read-only report), `npm run upload:cleanup` (recovery + cleanup with `--dry-run`, batch, and staleness bounds), and `npm run upload:verify-platform` (synthetic 25 MB spool→quarantine→durable→read-back→exact-delete round trips plus an optional HTTP receipt probe). The cleanup and platform tools fail closed unless `STORAGE_PROVIDER=s3`; the platform tool never sets `UPLOAD_PLATFORM_LIMITS_VERIFIED` — the operator records that evidence manually for the runtime that actually passed. A read-only, global-super-admin-only `GET /api/admin/upload-reconciliation` route exposes the database-only findings; no destructive operation is reachable from application traffic. Scripts execute under `--conditions=react-server` (the official `server-only` package was added as a devDependency) so the client-bundle guard remains fully active.
+
+Migration leftovers removed: the superseded buffer-based template validator (`document-template-upload.ts`) and the legacy portal buffer validator (only `sanitizeFileName` remains). No schema change, no migration, and no reader change are part of PR-5B.4. Remaining before PR-5C: executing the platform verification on the provisioned dedicated upload runtime and recording its evidence — an operational step outside this repository.
 
 ### Unresolved dependency-security advisories at PR-5A closeout
 
