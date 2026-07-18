@@ -1,8 +1,10 @@
+import { Readable } from "node:stream"
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
-import { getFileStream, verifyPortalFileUrl, type PortalDocType, type PortalFileMode } from "@/lib/storage"
+import { verifyPortalFileUrl, type PortalDocType, type PortalFileMode } from "@/lib/storage"
 import { limiters } from "@/lib/rate-limit"
 import { requirePortalAuth, requirePortalPermission } from "@/lib/portal/auth"
+import { DurableReadUnavailableError, openAuthoritativeFileSource } from "@/lib/uploads/durable-read"
 
 const VALID_DOC_TYPES: PortalDocType[] = ["packet_document", "supporting_document"]
 const VALID_MODES: PortalFileMode[] = ["view", "download"]
@@ -39,6 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
   }
 
   let fileKey: string | null = null
+  let storedObjectId: string | null = null
+  let organizationId: string | null = null
   let clientId: string | null = null
   let originalName = "document.pdf"
 
@@ -46,7 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
     const doc = await prisma.packetDocument.findUnique({
       where: { id: docId },
       include: {
-        packet: { select: { clientId: true } },
+        packet: { select: { clientId: true, organizationId: true } },
         versions: { orderBy: { version: "desc" }, take: 1 },
         documentTemplate: { select: { name: true } },
       },
@@ -62,7 +66,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
     }
     const latestVersion = doc.versions[0]
     if (!latestVersion) return new NextResponse("Not found", { status: 404 })
+    // pdf_version rows are placeholder-only and excluded from PR-5C
+    // dual-source reads; this branch keeps its existing legacy behavior.
     fileKey = latestVersion.fileKey
+    organizationId = doc.packet.organizationId
     clientId = doc.packet.clientId
     originalName = `${doc.documentTemplate.name}.pdf`
   } else {
@@ -72,6 +79,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
       return new NextResponse("Download not permitted for this document", { status: 403 })
     }
     fileKey = doc.fileKey
+    storedObjectId = doc.storedObjectId
+    organizationId = doc.organizationId
     clientId = doc.clientId
     originalName = doc.title
   }
@@ -82,11 +91,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
     return new NextResponse("Not found", { status: 404 })
   }
 
-  const result = await getFileStream(fileKey)
+  // PR-5C.1: supporting documents linked to a StoredObject stream the exact
+  // durable object version; unlinked legacy rows keep the local read.
+  let result
+  try {
+    result = await openAuthoritativeFileSource({
+      organizationId: organizationId as string,
+      storedObjectId,
+      legacyFileKey: storedObjectId ? null : fileKey,
+    })
+  } catch (error) {
+    if (error instanceof DurableReadUnavailableError) {
+      return new NextResponse("File delivery is temporarily unavailable", { status: 503 })
+    }
+    throw error
+  }
   if (!result) return new NextResponse("Not found", { status: 404 })
-  const blob = await result.stream.readFile() as any
 
-  return new NextResponse(Buffer.from(blob), {
+  return new NextResponse(Readable.toWeb(result.stream) as ReadableStream, {
     headers: {
       "Content-Type": result.mimeType,
       "Content-Length": String(result.size),

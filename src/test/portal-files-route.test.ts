@@ -12,6 +12,7 @@
 // unmocked so signed URLs in these tests are indistinguishable from
 // production ones — only getFileStream (actual storage I/O) is mocked.
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { Readable } from "node:stream"
 import { NextRequest } from "next/server"
 
 const portalSessionFindUnique = vi.fn()
@@ -20,6 +21,7 @@ const clientFindUnique = vi.fn()
 const packetDocumentFindUnique = vi.fn()
 const supportingDocumentFindUnique = vi.fn()
 const getFileStreamMock = vi.fn()
+const openSourceMock = vi.fn()
 
 const cookieStore = new Map<string, string>()
 const cookiesMock = {
@@ -45,6 +47,10 @@ vi.mock("@/lib/storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/storage")>()
   return { ...actual, getFileStream: (...a: unknown[]) => getFileStreamMock(...a) }
 })
+vi.mock("@/lib/uploads/durable-read", () => ({
+  DurableReadUnavailableError: class DurableReadUnavailableError extends Error {},
+  openAuthoritativeFileSource: (...a: unknown[]) => openSourceMock(...a),
+}))
 
 const ORG_ID = "org-1"
 const CLIENT_ID = "client-0000001"
@@ -105,6 +111,12 @@ beforeEach(() => {
     mimeType: "application/pdf",
     size: 22,
   })
+  openSourceMock.mockImplementation(async () => ({
+    stream: Readable.from(Buffer.from("%PDF-1.4 mock content")),
+    mimeType: "application/pdf",
+    size: 22,
+    source: "legacy" as const,
+  }))
 })
 
 describe("portal-files route — Step 4c.4c: applicability enforcement", () => {
@@ -115,7 +127,7 @@ describe("portal-files route — Step 4c.4c: applicability enforcement", () => {
 
     const res = await callRoute("packet_document", PACKET_DOC_ID, "view")
     expect(res.status).toBe(200)
-    expect(getFileStreamMock).toHaveBeenCalledWith("packet-docs/v1.pdf")
+    expect(openSourceMock).toHaveBeenCalledWith(expect.objectContaining({ legacyFileKey: "packet-docs/v1.pdf" }))
   })
 
   it("2. an active, portal-visible packet document can be downloaded under valid authorization", async () => {
@@ -173,7 +185,7 @@ describe("portal-files route — Step 4c.4c: applicability enforcement", () => {
     // persisted applicabilityStatus determines the outcome.
     const res = await callRoute("packet_document", PACKET_DOC_ID, "view")
     expect(res.status).toBe(404)
-    expect(getFileStreamMock).not.toHaveBeenCalled()
+    expect(openSourceMock).not.toHaveBeenCalled()
   })
 
   it("7. a non-portal-visible document retains the existing rejection behavior", async () => {
@@ -192,7 +204,7 @@ describe("portal-files route — Step 4c.4c: applicability enforcement", () => {
 
     const res = await callRoute("supporting_document", SUPPORTING_DOC_ID, "view")
     expect(res.status).toBe(200)
-    expect(getFileStreamMock).toHaveBeenCalledWith("supporting/v1.pdf")
+    expect(openSourceMock).toHaveBeenCalledWith(expect.objectContaining({ legacyFileKey: "supporting/v1.pdf" }))
   })
 
   it("9. existing role/client/token/access-level checks remain unchanged", async () => {
@@ -228,6 +240,6 @@ describe("portal-files route — Step 4c.4c: applicability enforcement", () => {
     await callRoute("packet_document", PACKET_DOC_ID, "view")
     await callRoute("packet_document", PACKET_DOC_ID, "download")
 
-    expect(getFileStreamMock).not.toHaveBeenCalled()
+    expect(openSourceMock).not.toHaveBeenCalled()
   })
 })

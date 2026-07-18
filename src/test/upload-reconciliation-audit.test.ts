@@ -109,8 +109,8 @@ describe("read-only upload reconciliation", () => {
         ]),
       },
       pdfVersion: { findMany: vi.fn().mockResolvedValue([{ id: "pdf-placeholder" }]) },
-      documentTemplate: { findMany: vi.fn() },
-      supportingDocument: { findMany: vi.fn() },
+      documentTemplate: { findMany: vi.fn().mockResolvedValue([]) },
+      supportingDocument: { findMany: vi.fn().mockResolvedValue([]) },
     }
 
     const findings = await generateUploadReconciliationReport(client as never, {
@@ -132,5 +132,40 @@ describe("read-only upload reconciliation", () => {
     expect(report).not.toContain("secret-bucket")
     expect(client.uploadAttempt.findMany).toHaveBeenCalledOnce()
   })
-})
 
+  it("flags owner rows that do not yet resolve to servable durable storage (PR-5C.3 gate metric)", async () => {
+    const emptyAttempts = { findMany: vi.fn().mockResolvedValue([]) }
+    const client = {
+      uploadAttempt: emptyAttempts,
+      storedObject: { findMany: vi.fn().mockResolvedValue([]) },
+      pdfVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      documentTemplate: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "template-legacy", organizationId: "org", fileKey: "templates/x.pdf", storedObject: null },
+          {
+            id: "template-migrated",
+            organizationId: "org",
+            fileKey: "templates/y.pdf",
+            storedObject: { provider: "S3", lifecycleStatus: "AVAILABLE", malwareStatus: "NOT_SCANNED", objectVersionId: "v1" },
+          },
+        ]),
+      },
+      supportingDocument: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "supporting-bad-object",
+            organizationId: "org",
+            fileKey: "supporting/z.pdf",
+            storedObject: { provider: "S3", lifecycleStatus: "AVAILABLE", malwareStatus: "PENDING", objectVersionId: "v2" },
+          },
+          { id: "supporting-no-file", organizationId: "org", fileKey: "", storedObject: null },
+        ]),
+      },
+    }
+    const findings = await generateUploadReconciliationReport(client as never, { now: new Date() })
+    const unresolved = findings.filter((finding) => finding.category === "OWNER_NOT_DURABLY_RESOLVABLE")
+    expect(unresolved.map((finding) => finding.resourceId).sort()).toEqual(["supporting-bad-object", "template-legacy"])
+    // Migrated rows with servable objects (including honest NOT_SCANNED
+    // backfills) and rows without any legacy file are not findings.
+  })
+})

@@ -1,9 +1,11 @@
+import { Readable } from "node:stream"
 import { NextRequest, NextResponse } from "next/server"
-import { getFileStream, STAFF_FILE_RESOURCE_TYPES, verifyStaffFileUrl, type StaffFileResourceType } from "@/lib/storage"
+import { STAFF_FILE_RESOURCE_TYPES, verifyStaffFileUrl, type StaffFileResourceType } from "@/lib/storage"
 import { limiters } from "@/lib/rate-limit"
 import { createAuditEvent } from "@/lib/audit"
 import { StaffAuthorizationError } from "@/lib/live-authorization"
 import { requireStaffFileAccess, StaffFileNotFoundError } from "@/lib/staff-file-access"
+import { DurableReadUnavailableError, openAuthoritativeFileSource } from "@/lib/uploads/durable-read"
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params
@@ -37,14 +39,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     })
   }
 
-  const result = await getFileStream(authorization.fileKey)
-  if (!result) return new NextResponse("Not found", { status: 404 })
-  let blob: Buffer
+  // PR-5C.1: rows linked to a StoredObject stream the exact durable object
+  // version; unlinked legacy rows keep the local compatibility read.
+  let result
   try {
-    blob = Buffer.from(await result.stream.readFile())
-  } finally {
-    await result.stream.close()
+    result = await openAuthoritativeFileSource({
+      organizationId: authorization.organizationId,
+      storedObjectId: authorization.storedObjectId,
+      legacyFileKey: authorization.storedObjectId ? null : authorization.fileKey,
+    })
+  } catch (error) {
+    if (error instanceof DurableReadUnavailableError) {
+      return new NextResponse("File delivery is temporarily unavailable", { status: 503 })
+    }
+    throw error
   }
+  if (!result) return new NextResponse("Not found", { status: 404 })
+
   await createAuditEvent({
     organizationId: authorization.organizationId,
     actorId: authorization.actorId,
@@ -53,7 +64,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     targetId: authorization.resourceId,
     metadata: { resourceType: authorization.resourceType },
   })
-  return new NextResponse(Buffer.from(blob), {
+  return new NextResponse(Readable.toWeb(result.stream) as ReadableStream, {
     headers: {
       "Content-Type": result.mimeType,
       "Content-Length": String(result.size),

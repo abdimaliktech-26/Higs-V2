@@ -1,22 +1,21 @@
+import { Readable } from "node:stream"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const verifyStaffFileUrl = vi.fn()
 const requireStaffFileAccess = vi.fn()
-const getFileStream = vi.fn()
-const readFile = vi.fn()
-const close = vi.fn()
+const openSource = vi.fn()
 const rateLimitCheck = vi.fn()
 const createAuditEvent = vi.fn()
 
-const { MockStaffAuthorizationError, MockStaffFileNotFoundError } = vi.hoisted(() => ({
+const { MockStaffAuthorizationError, MockStaffFileNotFoundError, MockDurableReadUnavailableError } = vi.hoisted(() => ({
   MockStaffAuthorizationError: class extends Error {},
   MockStaffFileNotFoundError: class extends Error {},
+  MockDurableReadUnavailableError: class extends Error {},
 }))
 
 vi.mock("@/lib/storage", () => ({
   STAFF_FILE_RESOURCE_TYPES: ["document_template", "packet_document", "pdf_version", "supporting_document"],
   verifyStaffFileUrl: (...args: unknown[]) => verifyStaffFileUrl(...args),
-  getFileStream: (...args: unknown[]) => getFileStream(...args),
 }))
 vi.mock("@/lib/staff-file-access", () => ({
   StaffFileNotFoundError: MockStaffFileNotFoundError,
@@ -25,10 +24,28 @@ vi.mock("@/lib/staff-file-access", () => ({
 vi.mock("@/lib/live-authorization", () => ({ StaffAuthorizationError: MockStaffAuthorizationError }))
 vi.mock("@/lib/rate-limit", () => ({ limiters: { fileAccess: { check: (...args: unknown[]) => rateLimitCheck(...args) } } }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }))
+vi.mock("@/lib/uploads/durable-read", () => ({
+  DurableReadUnavailableError: MockDurableReadUnavailableError,
+  openAuthoritativeFileSource: (...args: unknown[]) => openSource(...args),
+}))
 
-const resourceAuthorization = {
-  actorId: "staff-1", organizationId: "org-1", fileKey: "documents/file.pdf",
-  resourceType: "packet_document", resourceId: "document-1",
+const STORED_OBJECT_ID = "cm72345678901234567890123"
+
+function resourceAuthorization(overrides: Record<string, unknown> = {}) {
+  return {
+    actorId: "staff-1", organizationId: "org-1", fileKey: "documents/file.pdf",
+    storedObjectId: null, resourceType: "packet_document", resourceId: "document-1",
+    ...overrides,
+  }
+}
+
+function legacySource() {
+  return {
+    stream: Readable.from(Buffer.from("pdf-data")),
+    mimeType: "application/pdf",
+    size: 8,
+    source: "legacy" as const,
+  }
 }
 
 function request(path: string, query = "expires=999&sig=valid") {
@@ -43,10 +60,8 @@ async function callRoute(path: string, query?: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   verifyStaffFileUrl.mockReturnValue(true)
-  requireStaffFileAccess.mockResolvedValue(resourceAuthorization)
-  readFile.mockResolvedValue(Buffer.from("pdf-data"))
-  close.mockResolvedValue(undefined)
-  getFileStream.mockResolvedValue({ stream: { readFile, close }, mimeType: "application/pdf", size: 8 })
+  requireStaffFileAccess.mockResolvedValue(resourceAuthorization())
+  openSource.mockImplementation(async () => legacySource())
   rateLimitCheck.mockReturnValue({ allowed: true })
   createAuditEvent.mockResolvedValue(undefined)
 })
@@ -75,7 +90,7 @@ describe("staff file route", () => {
     requireStaffFileAccess.mockRejectedValue(new MockStaffAuthorizationError())
     const response = await callRoute("packet_document/document-1")
     expect(response.status).toBe(403)
-    expect(getFileStream).not.toHaveBeenCalled()
+    expect(openSource).not.toHaveBeenCalled()
   })
 
   it("returns 404 when the signed database resource no longer exists", async () => {
@@ -92,16 +107,39 @@ describe("staff file route", () => {
     expect(response.headers.get("Retry-After")).toBe("12")
   })
 
-  it("reads only the file key resolved from the authorized resource", async () => {
+  it("resolves legacy rows through the legacy key only", async () => {
     const response = await callRoute("packet_document/document-1")
     expect(response.status).toBe(200)
-    expect(getFileStream).toHaveBeenCalledWith("documents/file.pdf")
+    expect(openSource).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      storedObjectId: null,
+      legacyFileKey: "documents/file.pdf",
+    })
     expect(await response.text()).toBe("pdf-data")
-    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("never offers the legacy key for a row linked to a StoredObject", async () => {
+    requireStaffFileAccess.mockResolvedValue(resourceAuthorization({ storedObjectId: STORED_OBJECT_ID }))
+    openSource.mockImplementation(async () => ({ ...legacySource(), source: "durable" as const }))
+    const response = await callRoute("packet_document/document-1")
+    expect(response.status).toBe(200)
+    expect(openSource).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      storedObjectId: STORED_OBJECT_ID,
+      legacyFileKey: null,
+    })
+  })
+
+  it("returns a bounded 503 when the durable source is unavailable, with no audit", async () => {
+    requireStaffFileAccess.mockResolvedValue(resourceAuthorization({ storedObjectId: STORED_OBJECT_ID }))
+    openSource.mockRejectedValue(new MockDurableReadUnavailableError())
+    const response = await callRoute("packet_document/document-1")
+    expect(response.status).toBe(503)
+    expect(createAuditEvent).not.toHaveBeenCalled()
   })
 
   it("returns 404 when the authorized database row points to no stored file", async () => {
-    getFileStream.mockResolvedValue(null)
+    openSource.mockResolvedValue(null)
     const response = await callRoute("packet_document/document-1")
     expect(response.status).toBe(404)
     expect(createAuditEvent).not.toHaveBeenCalled()

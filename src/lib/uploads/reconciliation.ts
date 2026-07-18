@@ -1,5 +1,6 @@
 import {
   StoredObjectLifecycleStatus,
+  StoredObjectMalwareStatus,
   UploadCleanupStatus,
   UploadOwnerType,
   UploadStatus,
@@ -15,6 +16,7 @@ export type UploadReconciliationFindingCategory =
   | "PENDING_STORED_OBJECT_WITHOUT_OWNER"
   | "AVAILABLE_STORED_OBJECT_WITHOUT_OWNER"
   | "OWNER_REFERENCES_UNAVAILABLE_STORAGE"
+  | "OWNER_NOT_DURABLY_RESOLVABLE"
   | "PROVIDER_OBJECT_MISSING"
   | "CLEANUP_PENDING"
   | "LINKED_ATTEMPT_MISSING_EXPECTED_OWNER"
@@ -22,7 +24,7 @@ export type UploadReconciliationFindingCategory =
 
 export interface UploadReconciliationFinding {
   category: UploadReconciliationFindingCategory
-  resourceType: "UPLOAD_ATTEMPT" | "STORED_OBJECT" | "PDF_VERSION"
+  resourceType: "UPLOAD_ATTEMPT" | "STORED_OBJECT" | "PDF_VERSION" | "DOCUMENT_TEMPLATE" | "SUPPORTING_DOCUMENT"
   resourceId: string
   organizationId?: string
 }
@@ -179,6 +181,29 @@ export async function generateUploadReconciliationReport(
     findings.push({ category: "LEGACY_PLACEHOLDER", resourceType: "PDF_VERSION", resourceId: pdfVersion.id })
   }
 
+  // PR-5C gate measurement: owner rows with a legacy file that do not yet
+  // resolve to a servable durable object. This is the population PR-5C.2
+  // backfill must drain to zero before PR-5C.3 compatibility retirement can
+  // be considered. pdf_version placeholders are tracked separately above.
+  const [templateOwners, supportingOwners] = await Promise.all([
+    client.documentTemplate.findMany({
+      select: { id: true, organizationId: true, fileKey: true, storedObject: { select: durableResolutionFields } },
+    }),
+    client.supportingDocument.findMany({
+      select: { id: true, organizationId: true, fileKey: true, storedObject: { select: durableResolutionFields } },
+    }),
+  ])
+  for (const owner of templateOwners) {
+    if (owner.fileKey && !isDurablyResolvable(owner.storedObject)) {
+      findings.push({ category: "OWNER_NOT_DURABLY_RESOLVABLE", resourceType: "DOCUMENT_TEMPLATE", resourceId: owner.id, organizationId: owner.organizationId })
+    }
+  }
+  for (const owner of supportingOwners) {
+    if (owner.fileKey && !isDurablyResolvable(owner.storedObject)) {
+      findings.push({ category: "OWNER_NOT_DURABLY_RESOLVABLE", resourceType: "SUPPORTING_DOCUMENT", resourceId: owner.id, organizationId: owner.organizationId })
+    }
+  }
+
   return findings.sort((left, right) =>
     `${left.category}:${left.resourceType}:${left.resourceId}`.localeCompare(`${right.category}:${right.resourceType}:${right.resourceId}`),
   )
@@ -186,4 +211,29 @@ export async function generateUploadReconciliationReport(
 
 function isLinked(status: UploadStatus): boolean {
   return status === UploadStatus.LINKED_CLEANUP_PENDING || status === UploadStatus.COMPLETED
+}
+
+const durableResolutionFields = {
+  provider: true,
+  lifecycleStatus: true,
+  malwareStatus: true,
+  objectVersionId: true,
+} as const
+
+interface DurableResolutionShape {
+  provider: StorageProvider
+  lifecycleStatus: StoredObjectLifecycleStatus
+  malwareStatus: StoredObjectMalwareStatus
+  objectVersionId: string | null
+}
+
+/** Mirrors the PR-5C.1 reader qualification: exact-version S3, AVAILABLE, CLEAN or NOT_SCANNED. */
+function isDurablyResolvable(object: DurableResolutionShape | null): boolean {
+  return Boolean(
+    object &&
+      object.provider === "S3" &&
+      object.lifecycleStatus === StoredObjectLifecycleStatus.AVAILABLE &&
+      (object.malwareStatus === StoredObjectMalwareStatus.CLEAN || object.malwareStatus === StoredObjectMalwareStatus.NOT_SCANNED) &&
+      object.objectVersionId,
+  )
 }

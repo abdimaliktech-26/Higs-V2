@@ -427,7 +427,7 @@ Planning defaults are 24 hours for ordinary failed/abandoned quarantine and seve
 
 The additive `UploadAttempt` migration stores opaque lifecycle and idempotency evidence separately from durable `StoredObject`. Durable metadata is created only after promotion verification and remains `PENDING`; a later owner-link transaction with mandatory strict audit is required before `AVAILABLE`. Legacy `fileKey`, `fileUrl`, size, and MIME metadata remain in place through PR-5C. Future compatibility copies must use opaque keys and are not created in PR-5B.1.
 
-PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrated the asynchronous template/template-version writers; PR-5B.3 migrated the staff-supporting and portal-request writers and recorded the HEIC rejection; PR-5B.4 added the bounded operator tooling below. PR-5C completes every read cutover. Do not enable production PHI uploads based on these application foundations.
+PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrated the asynchronous template/template-version writers; PR-5B.3 migrated the staff-supporting and portal-request writers and recorded the HEIC rejection; PR-5B.4 added the bounded operator tooling below. PR-5C.1/5C.2 added dual-source readers and legacy backfill (below); PR-5C.3 compatibility retirement remains deferred behind its evidence gate. Do not enable production PHI uploads based on these application foundations.
 
 ### PR-5B.4 operator tooling (explicit commands only, never app traffic)
 
@@ -436,7 +436,13 @@ PR-5B.2A is the GuardDuty event/control-plane foundation below; PR-5B.2B migrate
 - `npm run upload:verify-platform -- [--size-mb=25] [--concurrency=3] [--http=<initiate-url> --cookie=<cookie>]` — synthetic 25 MB spool → quarantine → durable → read-back → exact-version delete round trips, plus an optional one-shot HTTP receipt check that requires a 202. Refuses local storage entirely and never sets `UPLOAD_PLATFORM_LIMITS_VERIFIED`; the operator records that flag manually only for the runtime that produced passing evidence.
 - `GET /api/admin/upload-reconciliation` — read-only, global-super-admin-only, database-only findings view. No probe, write, or deletion is reachable from application traffic.
 
-Operator scripts run with `--conditions=react-server` so the `server-only` guard stays active for application bundles. Durable orphan findings remain report-only in PR-5B.4; no durable object is deleted by any tool. No scheduler is included — cadence is an operational runbook decision for the production-operations workstream.
+Operator scripts run with `--conditions=react-server` so the `server-only` guard stays active for application bundles. Durable orphan findings remain report-only; no durable object is deleted by any tool. No scheduler is included — cadence is an operational runbook decision for the production-operations workstream.
+
+### PR-5C.1/5C.2 dual-source reads and legacy backfill
+
+Staff and portal file delivery now resolve rows linked to a `StoredObject` from the exact recorded durable S3 object version — AVAILABLE lifecycle, malware status CLEAN or NOT_SCANNED (never PENDING/INFECTED/ERROR), matching organization and configured durable bucket — streamed through the application with content type and length from the verified StoredObject metadata. Rows without a `storedObjectId` keep the exact legacy local read, and `pdf_version` placeholders keep their existing behavior. A linked row never falls back to the local compatibility copy: disqualifying metadata is a bounded non-serve and S3 trouble is a bounded 503. Authorization, signing, rate limits, visibility rules, and audit behavior are unchanged; the quarantine bucket is never a read source.
+
+`npm run upload:backfill -- [--dry-run] [--batch=25]` migrates unlinked legacy template/supporting rows: it streams the existing local file through the bounded spool, writes and verifies the exact durable object version (checksum, size, sniffed MIME, SSE-KMS key), and then creates the AVAILABLE StoredObject (honest `NOT_SCANNED`) and links the owner in one guarded transaction. The local file is never modified or deleted; unsupported legacy content (for example HEIC) and missing files are reported, not guessed at. The reconciliation report's `OWNER_NOT_DURABLY_RESOLVABLE` finding measures the remaining unmigrated population — the PR-5C.3 evidence gate. Compatibility copies are still written and legacy readers remain in place until PR-5C.3 is separately approved on that evidence.
 
 ### PR-5B.2A GuardDuty control plane (not active)
 

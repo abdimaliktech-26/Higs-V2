@@ -53,6 +53,17 @@ function detectFormat(magic: Buffer): UploadFileFormat | null {
   return null
 }
 
+/**
+ * PR-5C.2 backfill helper: bounded magic-byte sniff of an on-disk file.
+ * Returns the detected pipeline format and its canonical MIME type, or null
+ * when the bytes match no accepted format (for example legacy HEIC).
+ */
+export async function sniffUploadFile(path: string): Promise<{ format: UploadFileFormat; mimeType: string } | null> {
+  const format = detectFormat(await readMagic(path))
+  if (!format) return null
+  return { format, mimeType: FORMAT_MIME[format] }
+}
+
 function normalizeExtension(extension: string): string {
   const normalized = extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`
   return extname(`file${normalized}`)

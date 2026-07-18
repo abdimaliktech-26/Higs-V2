@@ -15,6 +15,8 @@ export interface StaffFileAuthorization {
   actorId: string
   organizationId: string
   fileKey: string
+  /** Null for legacy rows and for pdf_version, which stays on placeholder behavior until final PDF generation. */
+  storedObjectId: string | null
   resourceType: StaffFileResourceType
   resourceId: string
 }
@@ -29,7 +31,7 @@ export class StaffFileNotFoundError extends Error {
 async function authorizeDocumentTemplate(resourceId: string): Promise<StaffFileAuthorization> {
   const template = await prisma.documentTemplate.findUnique({
     where: { id: resourceId },
-    select: { id: true, organizationId: true, fileKey: true },
+    select: { id: true, organizationId: true, fileKey: true, storedObjectId: true },
   })
   if (!template) throw new StaffFileNotFoundError()
   const authorization = await requireActiveOrganizationMembership(template.organizationId, "download document template file")
@@ -37,6 +39,7 @@ async function authorizeDocumentTemplate(resourceId: string): Promise<StaffFileA
     actorId: authorization.userId,
     organizationId: template.organizationId,
     fileKey: template.fileKey,
+    storedObjectId: template.storedObjectId,
     resourceType: "document_template",
     resourceId: template.id,
   }
@@ -47,7 +50,7 @@ async function authorizePacketDocument(resourceId: string): Promise<StaffFileAut
     where: { id: resourceId },
     select: {
       id: true,
-      documentTemplate: { select: { fileKey: true } },
+      documentTemplate: { select: { fileKey: true, storedObjectId: true } },
       packet: { select: { organizationId: true } },
     },
   })
@@ -58,6 +61,7 @@ async function authorizePacketDocument(resourceId: string): Promise<StaffFileAut
     actorId: authorization.userId,
     organizationId: authorization.organizationId,
     fileKey: document.documentTemplate.fileKey,
+    storedObjectId: document.documentTemplate.storedObjectId,
     resourceType: "packet_document",
     resourceId: document.id,
   }
@@ -74,6 +78,9 @@ async function authorizePdfVersion(resourceId: string): Promise<StaffFileAuthori
     actorId: authorization.userId,
     organizationId: authorization.organizationId,
     fileKey: version.fileKey,
+    // pdf_version rows are placeholder-only (no stored bytes) and are
+    // excluded from PR-5C dual-source reads until final PDF generation.
+    storedObjectId: null,
     resourceType: "pdf_version",
     resourceId: version.id,
   }
@@ -88,6 +95,7 @@ async function authorizeSupportingDocument(resourceId: string): Promise<StaffFil
       clientId: true,
       packetId: true,
       fileKey: true,
+      storedObjectId: true,
       client: { select: { organizationId: true } },
       packet: { select: { organizationId: true, clientId: true } },
     },
@@ -112,6 +120,7 @@ async function authorizeSupportingDocument(resourceId: string): Promise<StaffFil
     actorId: authorization.userId,
     organizationId: document.organizationId,
     fileKey: document.fileKey,
+    storedObjectId: document.storedObjectId,
     resourceType: "supporting_document",
     resourceId: document.id,
   }
