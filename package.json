@@ -23,7 +23,8 @@
     "upload:reconcile": "npx tsx --conditions=react-server scripts/upload-reconcile.ts",
     "upload:cleanup": "npx tsx --conditions=react-server scripts/upload-cleanup.ts",
     "upload:verify-platform": "npx tsx --conditions=react-server scripts/upload-platform-verify.ts",
-    "upload:backfill": "npx tsx --conditions=react-server scripts/upload-backfill.ts"
+    "upload:backfill": "npx tsx --conditions=react-server scripts/upload-backfill.ts",
+    "ingest:245d": "npx tsx --conditions=react-server scripts/ingest-245d.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

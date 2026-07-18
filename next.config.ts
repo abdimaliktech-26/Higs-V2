@@ -16,6 +16,9 @@ const csp = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  // A stray package.json/node_modules in the home directory otherwise makes
+  // Turbopack infer the wrong workspace root and mis-resolve modules.
+  turbopack: { root: __dirname },
 
   async headers() {
     return [
