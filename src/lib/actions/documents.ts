@@ -5,7 +5,8 @@ import { validate, saveFieldsSchema, addFieldSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
 import { createAuditEvent } from "@/lib/audit"
 import { UserRole } from "@prisma/client"
-import { signStaffFileUrl } from "@/lib/storage"
+import { getFileStream, signStaffFileUrl, storeFile } from "@/lib/storage"
+import { fillPdf } from "@/lib/pdf/fill-pdf"
 import { requireDocumentAccess } from "@/lib/live-authorization"
 import {
   reconcilePacketDocumentApplicability,
@@ -485,7 +486,12 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
   try {
     const doc = await prisma.packetDocument.findUnique({
       where: { id: documentId },
-      include: { packet: true, documentTemplate: true },
+      include: {
+        packet: true,
+        documentTemplate: true,
+        fields: { orderBy: { sortOrder: "asc" } },
+        signatureRequests: { where: { status: "signed" }, select: { pdfFieldId: true, signerName: true, signedAt: true } },
+      },
     })
     if (!doc) return { success: false, error: "Not found" }
     const authorization = await requireDocumentAccess(documentId, "write", "create document version")
@@ -493,14 +499,50 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
       return { success: false, error: "This document is locked for editing" }
     }
 
+    // Render the completed document onto a copy of the pristine template.
+    // Condition-hidden fields are excluded exactly as the editor hides them;
+    // the blank template object itself is never modified.
+    const runtime = await buildPacketConditionContext(doc.packetId)
+    const conditionState = buildEditorDocumentConditionState(
+      runtime,
+      { id: doc.id, applicabilityStatus: doc.applicabilityStatus, packetTemplateDocumentId: doc.packetTemplateDocumentId },
+      doc.fields.map((f) => ({ id: f.id, templateFieldKey: f.templateFieldKey, isRequired: f.isRequired }))
+    )
+    const visibleFields = doc.fields.filter((field) => conditionState.fieldsById[field.id]?.isVisible !== false)
+    const template = await getFileStream(doc.documentTemplate.fileKey)
+    if (!template) return { success: false, error: "The blank template file is unavailable" }
+    let templateBytes: Buffer
+    try {
+      templateBytes = Buffer.from(await template.stream.readFile())
+    } finally {
+      await template.stream.close()
+    }
+    const signaturesByFieldId = new Map(
+      doc.signatureRequests
+        .filter((request) => request.pdfFieldId && request.signedAt)
+        .map((request) => [request.pdfFieldId as string, { signerName: request.signerName, signedAt: request.signedAt as Date }])
+    )
+    const filledBytes = await fillPdf({
+      templatePdf: new Uint8Array(templateBytes),
+      fields: visibleFields,
+      fieldIds: visibleFields.map((field) => field.id),
+      signaturesByFieldId,
+    })
+
     const nextVersion = doc.currentVersion + 1
-    const now = new Date().toISOString().split("T")[0]
+    const record = await storeFile(
+      `documents/${documentId}/v${nextVersion}.pdf`,
+      Buffer.from(filledBytes),
+      "application/pdf",
+      `${doc.documentTemplate.name} v${nextVersion}.pdf`,
+    )
 
     await prisma.pdfVersion.create({
       data: {
         packetDocumentId: documentId, version: nextVersion,
-        fileUrl: `https://storage.higsi.com/documents/${documentId}/v${nextVersion}.pdf`,
-        fileKey: `documents/${documentId}/v${nextVersion}.pdf`,
+        fileUrl: record.url,
+        fileKey: record.key,
+        fileSize: record.size,
         comment: comment || `Version ${nextVersion}`,
         createdById: authorization.userId,
       },

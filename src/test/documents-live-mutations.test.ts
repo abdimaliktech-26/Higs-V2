@@ -29,12 +29,29 @@ vi.mock("@/lib/db", () => ({
 }))
 vi.mock("@/lib/live-authorization", () => ({ requireDocumentAccess: (...args: unknown[]) => requireDocumentAccess(...args) }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }))
-vi.mock("@/lib/storage", () => ({ signStaffFileUrl: vi.fn() }))
+vi.mock("@/lib/storage", () => ({
+  signStaffFileUrl: vi.fn(),
+  getFileStream: vi.fn(async () => ({
+    stream: {
+      // Minimal single-page PDF so real fillPdf can run inside the action.
+      readFile: async () => {
+        const { buildSyntheticPdf } = await import("../../scripts/upload-platform-verify")
+        return buildSyntheticPdf(32 * 1024)
+      },
+      close: async () => undefined,
+    },
+    mimeType: "application/pdf",
+    size: 32 * 1024,
+  })),
+  storeFile: vi.fn(async (key: string, buffer: Buffer) => ({
+    key, url: `/api/files/${key}?direct=1`, size: buffer.length, mimeType: "application/pdf", originalName: "v.pdf",
+  })),
+}))
 vi.mock("@/lib/conditions/runtime", () => ({
   reconcilePacketDocumentApplicability: vi.fn(),
-  buildPacketConditionContext: vi.fn(),
+  buildPacketConditionContext: vi.fn(async () => ({})),
   buildPacketConditionContextTx: vi.fn(),
-  buildEditorDocumentConditionState: vi.fn(),
+  buildEditorDocumentConditionState: vi.fn(() => ({ fieldsById: {} })),
   evaluatePdfFieldVisibility: vi.fn(),
   evaluatePdfFieldRequiredness: vi.fn(),
 }))
@@ -48,7 +65,10 @@ function documentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: DOC_ID, packetId: "packet-1", currentVersion: 0, applicabilityStatus: "ACTIVE",
     packet: { id: "packet-1", organizationId: ORG_ID, status: "in_progress" },
-    documentTemplate: { name: "ISP" },
+    documentTemplate: { name: "ISP", fileKey: "templates/isp.pdf" },
+    packetTemplateDocumentId: "mapping-1",
+    fields: [],
+    signatureRequests: [],
     ...overrides,
   }
 }

@@ -1,4 +1,5 @@
 import { getPackets } from "@/lib/actions/templates"
+import { PacketStatusFilter } from "./packet-status-filter"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { StatusChip } from "@/components/ui/status-chip"
 import { EmptyState, ErrorState } from "@/components/ui/states"
@@ -37,21 +38,7 @@ export async function PacketListContent({ orgId, search, status, page }: Props) 
             <SearchInput name="search" placeholder="Search by client name or packet type..." defaultValue={search} />
           </form>
         </div>
-        <form className="flex gap-2">
-          <input type="hidden" name="search" value={search ?? ""} />
-          <select name="status" defaultValue={status ?? "all"} onChange={e => e.target.form?.submit()}
-            className="h-10 rounded-lg border border-surface-300 bg-white px-3 text-sm text-surface-700">
-            <option value="all">All Statuses</option>
-            <option value="draft">Draft</option>
-            <option value="in_progress">In Progress</option>
-            <option value="needs_validation">Needs Validation</option>
-            <option value="validation_failed">Validation Failed</option>
-            <option value="awaiting_signature">Awaiting Signature</option>
-            <option value="awaiting_approval">Awaiting Approval</option>
-            <option value="approved">Approved</option>
-            <option value="archived">Archived</option>
-          </select>
-        </form>
+        <PacketStatusFilter status={status} search={search} />
       </div>
 
       <Card>
