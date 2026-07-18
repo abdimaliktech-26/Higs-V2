@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { validate, createPacketTemplateSchema } from "@/lib/validation"
+import { resolveClientAutoFill } from "@/lib/content/forms-245d"
 import { prisma } from "@/lib/db"
 import { createAuditEvent } from "@/lib/audit"
 import { signStaffFileUrl } from "@/lib/storage"
@@ -336,7 +337,15 @@ export async function getPacketById(packetId: string) {
 export async function createPacket(data: {
   clientId: string; packetTemplateId: string; dueDate?: string; assignedToId?: string
 }) {
-  const client = await prisma.client.findUnique({ where: { id: data.clientId }, select: { id: true, organizationId: true, dateOfBirth: true } })
+  const client = await prisma.client.findUnique({
+    where: { id: data.clientId },
+    select: {
+      id: true, organizationId: true, dateOfBirth: true,
+      firstName: true, lastName: true, email: true, phone: true,
+      address: true, city: true, state: true, zipCode: true,
+      mcadId: true, gender: true, preferredLanguage: true,
+    },
+  })
   if (!client) return { success: false as const, error: "Client not found" }
   let authorization
   try {
@@ -411,6 +420,8 @@ export async function createPacket(data: {
       },
     })
 
+    const autoFillValues = resolveClientAutoFill(client)
+
     for (const entry of included) {
       const packetDocument = await tx.packetDocument.create({
         data: {
@@ -436,7 +447,9 @@ export async function createPacket(data: {
             documentTemplateFieldId: f.id,
             name: f.name,
             fieldType: f.fieldType,
-            value: null,
+            // Known standardized keys start pre-filled from the client record
+            // (never overwriting staff input — these rows are being created).
+            value: autoFillValues[f.fieldKey] ?? null,
             pageNumber: f.pageNumber,
             posX: f.posX,
             posY: f.posY,

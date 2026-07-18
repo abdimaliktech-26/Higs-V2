@@ -1,0 +1,635 @@
+{
+  "templateName": "Intake \u2014 245D Individual Abuse Prevention Plan Form",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Person's name",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 75,
+      "posY": 196,
+      "width": 485,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "program",
+      "name": "Program",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 75,
+      "posY": 229,
+      "width": 485,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "sexual_susceptible_yes",
+      "name": "A. Sexual abuse \u2014 susceptible: Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 292,
+      "posY": 405,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_susceptible_no",
+      "name": "A. Sexual abuse \u2014 susceptible: No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 472,
+      "posY": 405,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_understanding",
+      "name": "A. Sexual abuse \u2014 Lack of understanding of sexuality",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 74,
+      "posY": 433,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_cooperate",
+      "name": "A. Sexual abuse \u2014 Likely to seek/cooperate in abuse",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 74,
+      "posY": 448,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_assertive",
+      "name": "A. Sexual abuse \u2014 Inability to be assertive",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 74,
+      "posY": 463,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_other",
+      "name": "A. Sexual abuse \u2014 Other",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 74,
+      "posY": 478,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sexual_measures",
+      "name": "A. Sexual abuse \u2014 specific measures",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 72,
+      "posY": 524,
+      "width": 495,
+      "height": 50,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "sexual_susceptible_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "sexual_referrals",
+      "name": "A. Sexual abuse \u2014 referrals",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 72,
+      "posY": 609,
+      "width": 495,
+      "height": 36,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_susceptible_yes",
+      "name": "B. Physical Abuse \u2014 susceptible: Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 292,
+      "posY": 668,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_susceptible_no",
+      "name": "B. Physical Abuse \u2014 susceptible: No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 472,
+      "posY": 668,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_susceptible_yes",
+      "name": "C. Self Abuse \u2014 susceptible: Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 292,
+      "posY": 353,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_susceptible_no",
+      "name": "C. Self Abuse \u2014 susceptible: No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 472,
+      "posY": 353,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_dress",
+      "name": "C. Self Abuse \u2014 Dresses inappropriately",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 382,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_eat",
+      "name": "C. Self Abuse \u2014 Refuses to eat",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 397,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_selfcare",
+      "name": "C. Self Abuse \u2014 Inability to care for self-help needs",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 412,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_preservation",
+      "name": "C. Self Abuse \u2014 Lack of self-preservation skills",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 427,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_selfinjury",
+      "name": "C. Self Abuse \u2014 Engages in self-injurious behaviors",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 442,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_meds",
+      "name": "C. Self Abuse \u2014 Neglects/refuses medications",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 457,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_other",
+      "name": "C. Self Abuse \u2014 Other",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 472,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "self_measures",
+      "name": "C. Self Abuse \u2014 specific measures",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 72,
+      "posY": 518,
+      "width": 495,
+      "height": 50,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "self_susceptible_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "self_referrals",
+      "name": "C. Self Abuse \u2014 referrals",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 72,
+      "posY": 603,
+      "width": 495,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "financial_susceptible_yes",
+      "name": "D. Financial Exploitation \u2014 susceptible: Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 256,
+      "posY": 649,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "financial_susceptible_no",
+      "name": "D. Financial Exploitation \u2014 susceptible: No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 436,
+      "posY": 649,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "financial_finances",
+      "name": "D. Financial Exploitation \u2014 Inability to handle financial matters",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 677,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "financial_other",
+      "name": "D. Financial Exploitation \u2014 Other",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 692,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_interactions",
+      "name": "B. Physical Abuse \u2014 Inappropriate interactions with others",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 103,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_aggressive_persons",
+      "name": "B. Physical Abuse \u2014 Inability to deal with aggressive persons",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 118,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_abusive",
+      "name": "B. Physical Abuse \u2014 Verbally/physically abusive to others",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 133,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_victim",
+      "name": "B. Physical Abuse \u2014 Victim history exists",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 148,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_other",
+      "name": "B. Physical Abuse \u2014 Other",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 74,
+      "posY": 163,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "physical_measures",
+      "name": "B. Physical Abuse \u2014 specific measures",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 72,
+      "posY": 209,
+      "width": 495,
+      "height": 44,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "physical_susceptible_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "physical_referrals",
+      "name": "B. Physical Abuse \u2014 referrals",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 72,
+      "posY": 294,
+      "width": 495,
+      "height": 28,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "financial_measures",
+      "name": "D. Financial Exploitation \u2014 specific measures",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 72,
+      "posY": 95,
+      "width": 495,
+      "height": 44,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "financial_susceptible_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "financial_referrals",
+      "name": "D. Financial Exploitation \u2014 referrals",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 72,
+      "posY": 178,
+      "width": 495,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "violent_history_yes",
+      "name": "E. History of violent crime/aggression \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 112,
+      "posY": 210,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "violent_history_no",
+      "name": "E. History of violent crime/aggression \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 184,
+      "posY": 210,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "violent_measures",
+      "name": "E. Measures to minimize risk to visitors/others",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 72,
+      "posY": 270,
+      "width": 495,
+      "height": 36,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "violent_history_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "violent_referrals",
+      "name": "E. Referrals",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 72,
+      "posY": 341,
+      "width": 495,
+      "height": 32,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_completing_name",
+      "name": "Person completing IAPP \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 4,
+      "posX": 58,
+      "posY": 511,
+      "width": 190,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_completing",
+      "name": "Person completing IAPP \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 4,
+      "posX": 253,
+      "posY": 511,
+      "width": 142,
+      "height": 16,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "sig_completing_date",
+      "name": "Person completing IAPP \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 505,
+      "posY": 511,
+      "width": 68,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_person_name",
+      "name": "Person \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 4,
+      "posX": 58,
+      "posY": 538,
+      "width": 190,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_person",
+      "name": "Person \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 4,
+      "posX": 253,
+      "posY": 538,
+      "width": 142,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_person_date",
+      "name": "Person \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 505,
+      "posY": 538,
+      "width": 68,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_rep_name",
+      "name": "Legal Representative \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 4,
+      "posX": 58,
+      "posY": 565,
+      "width": 190,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_rep",
+      "name": "Legal Representative \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 4,
+      "posX": 253,
+      "posY": 565,
+      "width": 142,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_rep_date",
+      "name": "Legal Representative \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 505,
+      "posY": 565,
+      "width": 68,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager_name",
+      "name": "Case Manager \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 4,
+      "posX": 58,
+      "posY": 592,
+      "width": 190,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager",
+      "name": "Case Manager \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 4,
+      "posX": 253,
+      "posY": 592,
+      "width": 142,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager_date",
+      "name": "Case Manager \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 505,
+      "posY": 592,
+      "width": 68,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_program_rep_name",
+      "name": "Program Representative \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 4,
+      "posX": 58,
+      "posY": 620,
+      "width": 190,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_program_rep",
+      "name": "Program Representative \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 4,
+      "posX": 253,
+      "posY": 620,
+      "width": 142,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_program_rep_date",
+      "name": "Program Representative \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 505,
+      "posY": 620,
+      "width": 68,
+      "height": 16,
+      "isRequired": false
+    }
+  ]
+}

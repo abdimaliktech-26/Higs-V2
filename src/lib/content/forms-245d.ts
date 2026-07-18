@@ -43,3 +43,59 @@ export function templateNameFromSourceFile(fileName: string, stage: StageDefinit
   base = base.replace(/--/g, " ").replace(/\s+/g, " ").trim()
   return `${stage.namePrefix} — ${base}`
 }
+
+// ── Auto-fill bindings (Slice B M2) ──
+// Standardized fieldKeys shared across the 245D field maps bind to values the
+// client data model already holds. Applied once at packet creation, only to
+// empty fields; staff can edit or clear any auto-filled value afterwards.
+
+export interface AutoFillClient {
+  firstName: string
+  lastName: string
+  dateOfBirth: Date | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  zipCode: string | null
+  mcadId: string | null
+  gender: string | null
+  preferredLanguage: string | null
+}
+
+function fullAddress(client: AutoFillClient): string | null {
+  const street = client.address?.trim()
+  if (!street) return null
+  const locality = [client.city, client.state].filter(Boolean).join(", ")
+  return [street, locality, client.zipCode].filter(Boolean).join(", ")
+}
+
+const isoDate = (value: Date | null): string | null => (value ? value.toISOString().slice(0, 10) : null)
+
+function fullName(client: AutoFillClient): string | null {
+  return [client.firstName, client.lastName].filter(Boolean).join(" ").trim() || null
+}
+
+export const CLIENT_AUTO_FILL_BINDINGS: Readonly<Record<string, (client: AutoFillClient) => string | null>> = {
+  client_name: fullName,
+  tenant_name: fullName,
+  date_of_birth: (client) => isoDate(client.dateOfBirth),
+  address: fullAddress,
+  tenant_address: fullAddress,
+  home_phone: (client) => client.phone,
+  email_address: (client) => client.email,
+  gender: (client) => client.gender,
+  languages_spoken: (client) => client.preferredLanguage,
+  pmi_number: (client) => client.mcadId,
+}
+
+/** Values for every bound fieldKey that resolves to a non-empty value. */
+export function resolveClientAutoFill(client: AutoFillClient): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const [fieldKey, resolve] of Object.entries(CLIENT_AUTO_FILL_BINDINGS)) {
+    const value = resolve(client)
+    if (value) values[fieldKey] = value
+  }
+  return values
+}

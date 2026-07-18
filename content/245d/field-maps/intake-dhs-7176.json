@@ -1,0 +1,153 @@
+{
+  "templateName": "Intake \u2014 DHS 7176 Residency agreement template",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "tenant_name",
+      "name": "Tenant name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 300,
+      "posY": 276,
+      "width": 115,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "guardian_name",
+      "name": "Guardian name (if applicable)",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 80,
+      "posY": 293,
+      "width": 215,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "provider_name",
+      "name": "Foster care or SLS provider name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 200,
+      "posY": 327,
+      "width": 290,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "tenant_address",
+      "name": "Tenant address",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 155,
+      "posY": 344,
+      "width": 300,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "own_guardian",
+      "name": "Are you your own guardian? (yes/no)",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 200,
+      "posY": 377,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "type_foster_care",
+      "name": "Type \u2014 foster care in a licensed program",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 72,
+      "posY": 443,
+      "width": 24,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "type_sls",
+      "name": "Type \u2014 supported living services (SLS)",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 72,
+      "posY": 494,
+      "width": 24,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_signature",
+      "name": "Person's signature",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 72,
+      "posY": 472,
+      "width": 330,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_signature_date",
+      "name": "Date \u2014 Person's signature",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 410,
+      "posY": 488,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "legal_rep_signature",
+      "name": "Legal representative's signature",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 72,
+      "posY": 523,
+      "width": 330,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "legal_rep_signature_date",
+      "name": "Date \u2014 Legal representative's signature",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 410,
+      "posY": 539,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "program_rep_signature",
+      "name": "Program representative's signature",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 72,
+      "posY": 574,
+      "width": 330,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "program_rep_signature_date",
+      "name": "Date \u2014 Program representative's signature",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 410,
+      "posY": 590,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    }
+  ]
+}

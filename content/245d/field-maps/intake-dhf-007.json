@@ -1,0 +1,146 @@
+{
+  "templateName": "Intake \u2014 DHF-007 Authorization for Medication and Treatment Administration",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 120,
+      "width": 210.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "date_of_birth",
+      "name": "Date of birth",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 356.7,
+      "posY": 120,
+      "width": 213.3,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "auth_routine_meds",
+      "name": "Routine prescribed medications",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 237,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_psychotropic",
+      "name": "Prescribed psychotropic medication",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 308,
+      "posY": 237,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_routine_treatments",
+      "name": "Routine prescribed treatments",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 250,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_prn_psychotropic",
+      "name": "Prescribed PRN psychotropic medication",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 308,
+      "posY": 250,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_standing_orders",
+      "name": "Standing Order Medications",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 263,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_other",
+      "name": "Other authorization",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 308,
+      "posY": 263,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "auth_other_specify",
+      "name": "Other, please specify",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 428.1,
+      "posY": 275,
+      "width": 141.9,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "auth_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "limitations",
+      "name": "Limitations to the above checked boxes",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 45,
+      "posY": 320,
+      "width": 525,
+      "height": 58,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 616,
+      "width": 230,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date signed",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 326,
+      "posY": 631,
+      "width": 140,
+      "height": 12,
+      "isRequired": false
+    }
+  ]
+}

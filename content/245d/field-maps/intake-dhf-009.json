@@ -1,0 +1,223 @@
+{
+  "templateName": "Intake \u2014 DHF-009 Authorization to Act in an Emergency",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 120,
+      "width": 180.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "date_of_birth",
+      "name": "Date of birth",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 326.7,
+      "posY": 120,
+      "width": 243.3,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "svc_first_aid",
+      "name": "Emergency first aid",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 250,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_paramedic",
+      "name": "Paramedic care/911",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 250,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_urgent_care",
+      "name": "Outpatient or urgent care",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 250,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_surgery",
+      "name": "Emergency surgery",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 263,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_dental",
+      "name": "Emergency dental care",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 263,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_lab",
+      "name": "Lab work/procedures",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 263,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_exams",
+      "name": "Examinations",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 277,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_immunizations",
+      "name": "Immunizations",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 277,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_other",
+      "name": "Other emergency service",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 277,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "svc_other_specify",
+      "name": "Other emergency service \u2014 specify",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 454.3,
+      "posY": 279,
+      "width": 115.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "svc_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "limitations",
+      "name": "Limitations to the authorizations checked",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 45,
+      "posY": 320,
+      "width": 525,
+      "height": 34,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "photo_release_yes",
+      "name": "Photo release \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 44,
+      "posY": 366,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "photo_release_no",
+      "name": "Photo release \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 116,
+      "posY": 366,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "revoke_ack_yes",
+      "name": "Revocation understood \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 334,
+      "posY": 416,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "revoke_ack_no",
+      "name": "Revocation understood \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 404,
+      "posY": 416,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 438,
+      "width": 220,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date signed",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 326,
+      "posY": 453,
+      "width": 130,
+      "height": 12,
+      "isRequired": false
+    }
+  ]
+}

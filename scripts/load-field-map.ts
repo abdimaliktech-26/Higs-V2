@@ -29,6 +29,8 @@ interface FieldMapField {
   width: number
   height: number
   isRequired: boolean
+  /** Authors a FIELD_REQUIREDNESS condition: required when the referenced sibling field matches. */
+  requiredWhen?: { fieldKey: string; operator: "CHECKED" | "UNCHECKED" | "NOT_EMPTY" | "EQUALS"; comparisonValue?: string }
 }
 
 interface FieldMap {
@@ -61,6 +63,11 @@ async function main(): Promise<void> {
       throw new Error(`Unknown fieldType "${field.fieldType}" for ${field.fieldKey}`)
     }
   }
+  for (const field of map.fields) {
+    if (field.requiredWhen && !seenKeys.has(field.requiredWhen.fieldKey)) {
+      throw new Error(`requiredWhen for ${field.fieldKey} references unknown fieldKey ${field.requiredWhen.fieldKey}`)
+    }
+  }
 
   const organization = await prisma.organization.findUnique({ where: { slug: options.orgSlug }, select: { id: true } })
   if (!organization) throw new Error(`Organization with slug "${options.orgSlug}" not found`)
@@ -72,6 +79,7 @@ async function main(): Promise<void> {
 
   let created = 0
   let updated = 0
+  let conditions = 0
   for (const [index, field] of map.fields.entries()) {
     const data = {
       name: field.name,
@@ -92,9 +100,33 @@ async function main(): Promise<void> {
     })
     if (result.createdAt.getTime() === result.updatedAt.getTime()) created++
     else updated++
+
+    // Conditions are reconciled deterministically: the map is the source of
+    // truth, so any existing field-owned groups are replaced on every run.
+    await prisma.templateConditionGroup.deleteMany({ where: { documentTemplateFieldId: result.id } })
+    if (field.requiredWhen) {
+      await prisma.templateConditionGroup.create({
+        data: {
+          organizationId: organization.id,
+          purpose: "FIELD_REQUIREDNESS",
+          logicOperator: "AND",
+          documentTemplateFieldId: result.id,
+          conditions: {
+            create: [{
+              sourceType: "TEMPLATE_FIELD",
+              sourceFieldKey: field.requiredWhen.fieldKey,
+              operator: field.requiredWhen.operator,
+              comparisonValue: field.requiredWhen.comparisonValue ?? undefined,
+              sortOrder: 0,
+            }],
+          },
+        },
+      })
+      conditions++
+    }
   }
   process.stdout.write(
-    JSON.stringify({ template: map.templateName, mapFields: map.fields.length, created, updated, dryRun: options.dryRun }, null, 2) + "\n",
+    JSON.stringify({ template: map.templateName, mapFields: map.fields.length, created, updated, conditions, dryRun: options.dryRun }, null, 2) + "\n",
   )
 }
 

@@ -1,0 +1,197 @@
+{
+  "templateName": "Intake \u2014 DPF-008 Policy Orientation Receipt",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 66.8,
+      "posY": 119,
+      "width": 253.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "admission_date",
+      "name": "Date of admission",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 125.9,
+      "posY": 144,
+      "width": 194.1,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "orientation_24h_signature",
+      "name": "Signature \u2014 person served (24/72-hour items)",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 40,
+      "posY": 358,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "orientation_24h_signature_date",
+      "name": "Date \u2014 person served (24/72-hour items)",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 348,
+      "posY": 373,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "orientation_24h_cm_signature",
+      "name": "Signature \u2014 case manager (24/72-hour items)",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 40,
+      "posY": 409,
+      "width": 240,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "orientation_24h_cm_signature_date",
+      "name": "Date \u2014 case manager (24/72-hour items)",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 348,
+      "posY": 424,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "delay_reason",
+      "name": "Documented reason for orientation delay",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 275,
+      "posY": 474,
+      "width": 295,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_copies_yes",
+      "name": "Received policy copies incl. Rights of Persons Served \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 469,
+      "posY": 141,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_copies_no",
+      "name": "Received policy copies incl. Rights of Persons Served \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 516,
+      "posY": 141,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_explained_yes",
+      "name": "Policies and rights explained understandably \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 469,
+      "posY": 179,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_explained_no",
+      "name": "Policies and rights explained understandably \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 516,
+      "posY": 179,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_appp_yes",
+      "name": "Oriented to Program Abuse Prevention Plan \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 470,
+      "posY": 217,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ack_appp_no",
+      "name": "Oriented to Program Abuse Prevention Plan \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 516,
+      "posY": 217,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "final_signature",
+      "name": "Signature \u2014 person served (acknowledgements)",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 40,
+      "posY": 239,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "final_signature_date",
+      "name": "Date \u2014 person served (acknowledgements)",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 348,
+      "posY": 254,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "final_cm_signature",
+      "name": "Signature \u2014 case manager (acknowledgements)",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 40,
+      "posY": 289,
+      "width": 240,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "final_cm_signature_date",
+      "name": "Date \u2014 case manager (acknowledgements)",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 348,
+      "posY": 304,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    }
+  ]
+}
