@@ -43,6 +43,12 @@ const EXPECTATIONS: Record<string, { fields: number; signatures: number; conditi
   "45day-dpf-019": { fields: 39, signatures: 0, conditions: 1, requiredKeys: ["client_name", "report_date", "completed_by"] },
   "45day-dpf-020": { fields: 27, signatures: 6, conditions: 0, requiredKeys: ["client_name", "meeting_date", "outcome_determinations"] },
   "45day-dpf-034": { fields: 45, signatures: 7, conditions: 4, requiredKeys: ["client_name", "form_date", "sig_person_served"] },
+  "semiannual-dpf-012": { fields: 75, signatures: 0, conditions: 6, requiredKeys: ["client_name", "program_site", "review_date", "dc_name"] },
+  "semiannual-dpf-013": { fields: 61, signatures: 0, conditions: 5, requiredKeys: ["program", "review_date", "dm_name"] },
+  "semiannual-dpf-017": { fields: 13, signatures: 0, conditions: 0, requiredKeys: ["client_name", "outcome_number", "outcome_statement"] },
+  "semiannual-dpf-019": { fields: 39, signatures: 0, conditions: 1, requiredKeys: ["client_name", "report_date", "completed_by"] },
+  "semiannual-dpf-020": { fields: 27, signatures: 6, conditions: 0, requiredKeys: ["client_name", "meeting_date", "outcome_determinations"] },
+  "semiannual-dpf-034": { fields: 45, signatures: 7, conditions: 4, requiredKeys: ["client_name", "form_date", "sig_person_served"] },
   "intake-245d-iapp": { fields: 55, signatures: 5, conditions: 5, requiredKeys: ["client_name", "program", "sig_completing"] },
   "intake-dhf-007": { fields: 12, signatures: 1, conditions: 1, requiredKeys: ["client_name", "date_of_birth", "person_served_signature"] },
   "intake-dhf-008": { fields: 17, signatures: 3, conditions: 1, requiredKeys: ["client_name", "person_served_signature"] },
@@ -60,7 +66,7 @@ const EXPECTATIONS: Record<string, { fields: number; signatures: number; conditi
 }
 
 describe("MN 245D intake field maps", () => {
-  it("covers all 14 intake forms with the expected shape", async () => {
+  it("covers all mapped forms with the expected shape", async () => {
     const maps = await loadMaps()
     expect([...maps.keys()].sort()).toEqual(Object.keys(EXPECTATIONS).sort())
     for (const [slug, map] of maps) {
