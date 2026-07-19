@@ -1,0 +1,202 @@
+{
+  "templateName": "Annual \u2014 DHF-008 Authorization and Agreement for Injectable Medications",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 66.8,
+      "posY": 121,
+      "width": 193.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "date_of_birth",
+      "name": "Date of birth",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 335.7,
+      "posY": 121,
+      "width": 234.3,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "inj_epipen",
+      "name": "Epi-pen",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 85,
+      "posY": 289,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "inj_predrawn_insulin",
+      "name": "Pre-drawn Insulin Syringes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 85,
+      "posY": 302,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "inj_insulin_pens",
+      "name": "Insulin Pens",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 85,
+      "posY": 314,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "inj_glucagon",
+      "name": "Glucagon",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 85,
+      "posY": 327,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "inj_other",
+      "name": "Other injectable",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 85,
+      "posY": 340,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "inj_other_specify",
+      "name": "Other injectable \u2014 specify",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 133,
+      "posY": 340,
+      "width": 437,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "inj_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "inj_other_specify_2",
+      "name": "Other injectable \u2014 continuation",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 66,
+      "posY": 352,
+      "width": 505,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "when_given",
+      "name": "When the medication may be given",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 194.2,
+      "posY": 389,
+      "width": 375.9,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "how_given",
+      "name": "How the medication may be given",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 189.6,
+      "posY": 414,
+      "width": 380.4,
+      "height": 34,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 40,
+      "posY": 551,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date \u2014 person served/legal representative",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 337,
+      "posY": 566,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "prescriber_signature",
+      "name": "Signature \u2014 prescriber",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 40,
+      "posY": 602,
+      "width": 240,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "prescriber_signature_date",
+      "name": "Date \u2014 prescriber",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 337,
+      "posY": 617,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "coordinator_signature",
+      "name": "Signature \u2014 Designated Coordinator/Manager",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 40,
+      "posY": 652,
+      "width": 240,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "coordinator_signature_date",
+      "name": "Date \u2014 Designated Coordinator/Manager",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 337,
+      "posY": 667,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "intake-dhf-008"
+}

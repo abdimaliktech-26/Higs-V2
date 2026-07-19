@@ -1,0 +1,198 @@
+{
+  "templateName": "Annual \u2014 DPF-002 Rights Restrictions",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 68.8,
+      "posY": 119,
+      "width": 251.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "form_date",
+      "name": "Date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 361.8,
+      "posY": 119,
+      "width": 208.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "rights_restricted",
+      "name": "1. Right(s) to be restricted and implementation with positive supports",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 59,
+      "posY": 254,
+      "width": 510,
+      "height": 36,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "justification",
+      "name": "2. Justification based on vulnerability assessment",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 59,
+      "posY": 317,
+      "width": 510,
+      "height": 36,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "ending_measures",
+      "name": "3. Objective measures set as conditions for ending the restriction",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 59,
+      "posY": 368,
+      "width": 510,
+      "height": 36,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "review_schedule",
+      "name": "4. Schedule for reviewing the need for the restriction",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 59,
+      "posY": 444,
+      "width": 510,
+      "height": 36,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "approval_ack_yes",
+      "name": "Implemented only upon signed approval \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 479,
+      "posY": 476,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "approval_ack_no",
+      "name": "Implemented only upon signed approval \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 528,
+      "posY": 476,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 497,
+      "width": 230,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "approval_date",
+      "name": "Date of approval for the restriction",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 375,
+      "posY": 512,
+      "width": 150,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "withdraw_ack_yes",
+      "name": "May withdraw approval \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 480,
+      "posY": 565,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "withdraw_ack_no",
+      "name": "May withdraw approval \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 529,
+      "posY": 565,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "restore_ack_yes",
+      "name": "Rights restored on withdrawal \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 479,
+      "posY": 590,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "restore_ack_no",
+      "name": "Rights restored on withdrawal \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 528,
+      "posY": 590,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "withdrawal_received_date",
+      "name": "Withdrawal of approval received on",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 450,
+      "posY": 634,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "withdrawal_verbal",
+      "name": "Withdrawal received via verbal communication",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 202,
+      "posY": 647,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "withdrawal_written",
+      "name": "Withdrawal received via written communication",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 327,
+      "posY": 647,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "intake-dpf-002"
+}

@@ -1,0 +1,522 @@
+{
+  "templateName": "Annual \u2014 DPF-034 Single Dated Signature Page",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 119,
+      "width": 330.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "form_date",
+      "name": "Date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 158,
+      "width": 330.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "mtg_intake",
+      "name": "Intake meeting",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 211,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_30day",
+      "name": "30-day meeting (ICFs/DD)",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 211,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_45day",
+      "name": "45-day service / 60-day calendar meeting",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 211,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_60day_basic",
+      "name": "60-day meeting (245D Basic)",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 236,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_quarterly",
+      "name": "Quarterly progress report review",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 236,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_semiannual",
+      "name": "Semi-annual progress report review",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 236,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_annual",
+      "name": "Annual meeting",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_special",
+      "name": "Special support team meeting",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_other",
+      "name": "Other meeting type",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "mtg_other_specify",
+      "name": "Other meeting type \u2014 specify",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 454.3,
+      "posY": 264,
+      "width": 115.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "mtg_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "doc_sma",
+      "name": "Self-Management Assessment (SMA)",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 340,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_iapp",
+      "name": "Individual Abuse Prevention Plan (IAPP)",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 340,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_spa",
+      "name": "Support Plan Addendum",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 340,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_outcomes",
+      "name": "Service Outcomes and Behavior Outcome",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 365,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_progress",
+      "name": "Progress Report with Recommendations",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 365,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_minutes",
+      "name": "Meeting Minutes with Attendance Notes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 365,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_other_1",
+      "name": "Other document 1",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 48,
+      "posY": 391,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_other_2",
+      "name": "Other document 2",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 227,
+      "posY": 391,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_other_3",
+      "name": "Other document 3",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 407,
+      "posY": 391,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "doc_other_1_specify",
+      "name": "Other document 1 \u2014 name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 95.3,
+      "posY": 393,
+      "width": 118.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "doc_other_1",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "doc_other_2_specify",
+      "name": "Other document 2 \u2014 name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 274.3,
+      "posY": 393,
+      "width": 118.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "doc_other_2",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "doc_other_3_specify",
+      "name": "Other document 3 \u2014 name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 454.3,
+      "posY": 393,
+      "width": 118.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "doc_other_3",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "sig_person_served_name",
+      "name": "person served \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 142,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_person_served",
+      "name": "person served \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 142,
+      "width": 120,
+      "height": 16,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "sig_person_served_date",
+      "name": "person served \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 142,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_representative_name",
+      "name": "legal representative \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 193,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_representative",
+      "name": "legal representative \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 193,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_representative_date",
+      "name": "legal representative \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 193,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager_name",
+      "name": "case manager \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 244,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager",
+      "name": "case manager \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 244,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager_date",
+      "name": "case manager \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 244,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_1_name",
+      "name": "provider 1 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 295,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_1",
+      "name": "provider 1 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 295,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_1_date",
+      "name": "provider 1 \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 295,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_2_name",
+      "name": "provider 2 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 346,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_2",
+      "name": "provider 2 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 346,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_2_date",
+      "name": "provider 2 \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 346,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_1_name",
+      "name": "other member 1 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 397,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_1",
+      "name": "other member 1 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 397,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_1_date",
+      "name": "other member 1 \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 397,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_2_name",
+      "name": "other member 2 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 130,
+      "posY": 448,
+      "width": 115,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_2",
+      "name": "other member 2 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 448,
+      "width": 120,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_2_date",
+      "name": "other member 2 \u2014 date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 483,
+      "posY": 448,
+      "width": 85,
+      "height": 14,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "45day-dpf-034"
+}

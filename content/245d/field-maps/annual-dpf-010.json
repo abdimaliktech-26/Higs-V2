@@ -1,0 +1,55 @@
+{
+  "templateName": "Annual \u2014 DPF-010 Standard Release of Information",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 66.8,
+      "posY": 108,
+      "width": 228.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "date_of_birth",
+      "name": "Date of birth",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 373.7,
+      "posY": 108,
+      "width": 196.3,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 40,
+      "posY": 556,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date signed",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 326,
+      "posY": 571,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    }
+  ],
+  "adjustedFromLayout": "intake-dpf-010"
+}

@@ -25,6 +25,8 @@ interface FieldMap {
   coordinateUnits: string
   pageSize: { width: number; height: number }
   fields: MapField[]
+  clonedFromLayout?: string
+  adjustedFromLayout?: string
 }
 
 async function loadMaps(): Promise<Map<string, FieldMap>> {
@@ -39,6 +41,26 @@ async function loadMaps(): Promise<Map<string, FieldMap>> {
 // condition count, and representative required keys. Changing a map without
 // updating this table is a reviewable event.
 const EXPECTATIONS: Record<string, { fields: number; signatures: number; conditions: number; requiredKeys: string[] }> = {
+  "annual-245d-iapp": { fields: 55, signatures: 5, conditions: 5, requiredKeys: ["client_name", "program", "sig_completing"] },
+  "annual-dhf-007": { fields: 12, signatures: 1, conditions: 1, requiredKeys: ["client_name", "date_of_birth", "person_served_signature"] },
+  "annual-dhf-008": { fields: 17, signatures: 3, conditions: 1, requiredKeys: ["client_name", "person_served_signature"] },
+  "annual-dhf-009": { fields: 19, signatures: 1, conditions: 1, requiredKeys: ["client_name", "person_served_signature"] },
+  "annual-dhs-7176": { fields: 13, signatures: 3, conditions: 0, requiredKeys: ["tenant_name", "provider_name", "person_signature"] },
+  "annual-dpf-001": { fields: 8, signatures: 1, conditions: 0, requiredKeys: ["person_served_signature"] },
+  "annual-dpf-002": { fields: 17, signatures: 1, conditions: 0, requiredKeys: ["client_name", "rights_restricted", "person_served_signature"] },
+  "annual-dpf-004": { fields: 78, signatures: 2, conditions: 0, requiredKeys: ["client_name", "date_of_birth", "admission_date"] },
+  "annual-dpf-007": { fields: 42, signatures: 2, conditions: 6, requiredKeys: ["client_name", "person_served_signature"] },
+  "annual-dpf-008": { fields: 17, signatures: 4, conditions: 0, requiredKeys: ["client_name", "admission_date", "final_signature"] },
+  "annual-dpf-010": { fields: 4, signatures: 1, conditions: 0, requiredKeys: ["client_name", "person_served_signature"] },
+  "annual-dpf-012": { fields: 75, signatures: 0, conditions: 6, requiredKeys: ["client_name", "program_site", "review_date", "dc_name"] },
+  "annual-dpf-013": { fields: 61, signatures: 0, conditions: 5, requiredKeys: ["program", "review_date", "dm_name"] },
+  "annual-dpf-016a": { fields: 126, signatures: 6, conditions: 23, requiredKeys: ["client_name", "scope_of_services", "sig_person_served"] },
+  "annual-dpf-017": { fields: 13, signatures: 0, conditions: 0, requiredKeys: ["client_name", "outcome_number", "outcome_statement"] },
+  "annual-dpf-019": { fields: 39, signatures: 0, conditions: 1, requiredKeys: ["client_name", "report_date", "completed_by"] },
+  "annual-dpf-020": { fields: 27, signatures: 6, conditions: 0, requiredKeys: ["client_name", "meeting_date", "outcome_determinations"] },
+  "annual-dpf-023": { fields: 130, signatures: 6, conditions: 0, requiredKeys: ["client_name", "assessment_date", "sig_person_served"] },
+  "annual-dpf-034": { fields: 45, signatures: 7, conditions: 4, requiredKeys: ["client_name", "form_date", "sig_person_served"] },
+  "annual-dpf-039": { fields: 41, signatures: 0, conditions: 0, requiredKeys: ["client_name", "form_date"] },
   "45day-dpf-017": { fields: 13, signatures: 0, conditions: 0, requiredKeys: ["client_name", "outcome_number", "outcome_statement"] },
   "45day-dpf-019": { fields: 39, signatures: 0, conditions: 1, requiredKeys: ["client_name", "report_date", "completed_by"] },
   "45day-dpf-020": { fields: 27, signatures: 6, conditions: 0, requiredKeys: ["client_name", "meeting_date", "outcome_determinations"] },
@@ -106,6 +128,26 @@ describe("MN 245D intake field maps", () => {
         expect(trigger, `${slug}:${field.fieldKey} trigger`).toBeDefined()
         expect(trigger?.fieldType, `${slug}:${field.fieldKey} trigger type`).toBe("checkbox")
         expect(["CHECKED", "UNCHECKED"], `${slug}:${field.fieldKey} operator`).toContain(field.requiredWhen!.operator)
+      }
+    }
+  })
+
+  it("records provenance for every reused or adjusted layout, pointing at an existing map", async () => {
+    const maps = await loadMaps()
+    const PROVENANCE_REQUIRED = [...maps.keys()].filter((slug) => slug.startsWith("annual-") || slug.startsWith("semiannual-"))
+    for (const slug of PROVENANCE_REQUIRED) {
+      const map = maps.get(slug)!
+      const source = map.clonedFromLayout ?? map.adjustedFromLayout
+      if (["semiannual-dpf-012", "semiannual-dpf-013"].includes(slug)) {
+        expect(source, `${slug} is an original authored layout`).toBeUndefined()
+        continue
+      }
+      expect(source, `${slug} must record provenance`).toBeDefined()
+      expect(maps.has(source!), `${slug} provenance ${source} must exist`).toBe(true)
+      if (map.clonedFromLayout) {
+        // A clone must be geometry-identical to its source.
+        const sourceFields = maps.get(source!)!.fields
+        expect(map.fields, `${slug} clone drifted from ${source}`).toEqual(sourceFields)
       }
     }
   })

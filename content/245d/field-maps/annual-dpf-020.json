@@ -1,0 +1,308 @@
+{
+  "templateName": "Annual \u2014 DPF-020 Service Plan Review Meeting and Attendance Notes",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 120,
+      "width": 120.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "meeting_date",
+      "name": "Meeting date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 352.1,
+      "posY": 120,
+      "width": 217.9,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "meeting_time",
+      "name": "Time",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 145,
+      "width": 120.2,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_type",
+      "name": "Type of meeting",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 430.5,
+      "posY": 145,
+      "width": 139.5,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_location",
+      "name": "Location of meeting",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 138.0,
+      "posY": 171,
+      "width": 432.0,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_1_name",
+      "name": "Attendee 1 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 245,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_1_signature",
+      "name": "Attendee 1 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 245,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_1_agency",
+      "name": "Attendee 1 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 245,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_2_name",
+      "name": "Attendee 2 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 263,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_2_signature",
+      "name": "Attendee 2 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 263,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_2_agency",
+      "name": "Attendee 2 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 263,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_3_name",
+      "name": "Attendee 3 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 282,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_3_signature",
+      "name": "Attendee 3 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 282,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_3_agency",
+      "name": "Attendee 3 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 282,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_4_name",
+      "name": "Attendee 4 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 301,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_4_signature",
+      "name": "Attendee 4 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 301,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_4_agency",
+      "name": "Attendee 4 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 301,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_5_name",
+      "name": "Attendee 5 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 319,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_5_signature",
+      "name": "Attendee 5 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 319,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_5_agency",
+      "name": "Attendee 5 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 319,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_6_name",
+      "name": "Attendee 6 \u2014 printed name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 338,
+      "width": 170,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_6_signature",
+      "name": "Attendee 6 \u2014 signature",
+      "fieldType": "signature",
+      "pageNumber": 1,
+      "posX": 220,
+      "posY": 338,
+      "width": 195,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "attendee_6_agency",
+      "name": "Attendee 6 \u2014 agency/relationship",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 425,
+      "posY": 338,
+      "width": 145,
+      "height": 13,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_determinations",
+      "name": "Determinations regarding service and support outcomes",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 462,
+      "width": 527,
+      "height": 70,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "plan_changes",
+      "name": "Changes needed to service plan documents",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 578,
+      "width": 527,
+      "height": 70,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_notes",
+      "name": "Other meeting discussion notes",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 45,
+      "posY": 690,
+      "width": 525,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_notes_continued",
+      "name": "Meeting discussion notes (continued)",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 45,
+      "posY": 90,
+      "width": 525,
+      "height": 410,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "45day-dpf-020"
+}

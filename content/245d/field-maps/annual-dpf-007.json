@@ -1,0 +1,497 @@
+{
+  "templateName": "Annual \u2014 DPF-007 Funds and Property Authorization",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 69.8,
+      "posY": 104,
+      "width": 490.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "cash_yes",
+      "name": "Cash resources \u2014 yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 368,
+      "posY": 187,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "cash_no",
+      "name": "Cash resources \u2014 no",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 409,
+      "posY": 187,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "cash_none",
+      "name": "Cash resources \u2014 none",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 443,
+      "posY": 187,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "cash_procedures",
+      "name": "Cash resources \u2014 support procedures",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 210,
+      "width": 527,
+      "height": 44,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "cash_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "checking_yes",
+      "name": "Checking account \u2014 yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 44,
+      "posY": 292,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "checking_no",
+      "name": "Checking account \u2014 no",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 82,
+      "posY": 292,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "checking_none",
+      "name": "Checking account \u2014 none",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 119,
+      "posY": 292,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "checking_procedures",
+      "name": "Checking account \u2014 support procedures",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 357,
+      "width": 527,
+      "height": 14,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "checking_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "savings_yes",
+      "name": "Savings account \u2014 yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 44,
+      "posY": 396,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "savings_no",
+      "name": "Savings account \u2014 no",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 82,
+      "posY": 396,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "savings_none",
+      "name": "Savings account \u2014 none",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 119,
+      "posY": 396,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "savings_procedures",
+      "name": "Savings account \u2014 support procedures",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 448,
+      "width": 527,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "savings_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "credit_yes",
+      "name": "Credit cards \u2014 yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 44,
+      "posY": 499,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "credit_no",
+      "name": "Credit cards \u2014 no",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 82,
+      "posY": 499,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "credit_none",
+      "name": "Credit cards \u2014 none",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 119,
+      "posY": 499,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "credit_procedures",
+      "name": "Credit cards \u2014 support procedures",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 564,
+      "width": 527,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "credit_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "gift_yes",
+      "name": "Gift cards \u2014 yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 434,
+      "posY": 603,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "gift_no",
+      "name": "Gift cards \u2014 no",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 472,
+      "posY": 603,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "gift_none",
+      "name": "Gift cards \u2014 none",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 507,
+      "posY": 603,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "gift_procedures",
+      "name": "Gift cards \u2014 support procedures",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 667,
+      "width": 527,
+      "height": 16,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "gift_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "stmt_person_na",
+      "name": "Statement frequency (person) \u2014 na",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 196,
+      "posY": 181,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_person_semi",
+      "name": "Statement frequency (person) \u2014 semi",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 245,
+      "posY": 181,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_person_annual",
+      "name": "Statement frequency (person) \u2014 annual",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 335,
+      "posY": 181,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_person_other",
+      "name": "Statement frequency (person) \u2014 other",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 403,
+      "posY": 181,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_person_other_specify",
+      "name": "Statement frequency (person) \u2014 other",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 490,
+      "posY": 180,
+      "width": 82,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_case_manager_na",
+      "name": "Statement frequency (case_manager) \u2014 na",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 196,
+      "posY": 194,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_case_manager_semi",
+      "name": "Statement frequency (case_manager) \u2014 semi",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 245,
+      "posY": 194,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_case_manager_annual",
+      "name": "Statement frequency (case_manager) \u2014 annual",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 335,
+      "posY": 194,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_case_manager_other",
+      "name": "Statement frequency (case_manager) \u2014 other",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 403,
+      "posY": 194,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_case_manager_other_specify",
+      "name": "Statement frequency (case_manager) \u2014 other",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 490,
+      "posY": 193,
+      "width": 82,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_info_person",
+      "name": "Information to be sent \u2014 person/legal representative",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 190,
+      "posY": 232,
+      "width": 380,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "stmt_info_case_manager",
+      "name": "Information to be sent \u2014 case manager",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 190,
+      "posY": 245,
+      "width": 380,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rep_payee_yes",
+      "name": "Representative payee \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 246,
+      "posY": 284,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rep_payee_no",
+      "name": "Representative payee \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 284,
+      "posY": 284,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rep_payee_name",
+      "name": "Representative payee \u2014 name",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 69.8,
+      "posY": 334,
+      "width": 490.2,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "rep_payee_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "rep_payee_address",
+      "name": "Representative payee \u2014 address",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 83.4,
+      "posY": 347,
+      "width": 476.6,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rep_payee_phone",
+      "name": "Representative payee \u2014 phone",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 106.2,
+      "posY": 359,
+      "width": 453.9,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 2,
+      "posX": 43,
+      "posY": 677,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date signed",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 351,
+      "posY": 692,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "case_manager_signature",
+      "name": "Signature \u2014 case manager",
+      "fieldType": "signature",
+      "pageNumber": 3,
+      "posX": 43,
+      "posY": 61,
+      "width": 240,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "case_manager_signature_date",
+      "name": "Date \u2014 case manager",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 351,
+      "posY": 76,
+      "width": 110,
+      "height": 12,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "intake-dpf-007"
+}

@@ -1,0 +1,702 @@
+{
+  "templateName": "Annual \u2014 DPF-013 Designated Manager Review",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 792,
+    "height": 612
+  },
+  "fields": [
+    {
+      "fieldKey": "program",
+      "name": "Program",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 89.4,
+      "posY": 108,
+      "width": 185.6,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "review_date",
+      "name": "Date of review",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 364.2,
+      "posY": 108,
+      "width": 405.8,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "dm_name",
+      "name": "Designated Manager completing the review",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 275.9,
+      "posY": 134,
+      "width": 494.1,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "statute_updates",
+      "name": "Updates to MN Statutes 245A/245C/245D reviewed \u2014 updates include",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 199,
+      "posY": 428,
+      "width": 369,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "licensing_questions",
+      "name": "Licensing questions asked and answered \u2014 details",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 199,
+      "posY": 466,
+      "width": 369,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "antifraud_current_yes",
+      "name": "Anti-fraud policy current and implemented \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 200,
+      "posY": 505,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "antifraud_current_no",
+      "name": "Anti-fraud policy current and implemented \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 235,
+      "posY": 505,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "antifraud_trained_yes",
+      "name": "All staff trained on anti-fraud policy \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 200,
+      "posY": 101,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "antifraud_trained_no",
+      "name": "All staff trained on anti-fraud policy \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 235,
+      "posY": 101,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "allegations_yes",
+      "name": "Allegations of improper conduct \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 200,
+      "posY": 139,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "allegations_no",
+      "name": "Allegations of improper conduct \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 235,
+      "posY": 139,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dhs_report_yes",
+      "name": "Report made to DHS re violations/overpayment \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 372,
+      "posY": 177,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dhs_report_no",
+      "name": "Report made to DHS re violations/overpayment \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 407,
+      "posY": 177,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dhs_report_when",
+      "name": "If yes \u2014 when",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 262.1,
+      "posY": 202,
+      "width": 307.9,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "dhs_report_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "dc_reviews_date",
+      "name": "DC reviews \u2014 date of review",
+      "fieldType": "date",
+      "pageNumber": 2,
+      "posX": 403.2,
+      "posY": 228,
+      "width": 166.8,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dc_concerns",
+      "name": "DC reviews \u2014 concerns noted",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 271.2,
+      "posY": 253,
+      "width": 298.8,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dc_fulfilling_yes",
+      "name": "DC fulfilling responsibilities per 245D.09 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 200,
+      "posY": 304,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dc_fulfilling_no",
+      "name": "DC fulfilling responsibilities per 245D.09 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 235,
+      "posY": 304,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dc_unfulfilled_detail",
+      "name": "If no \u2014 what is not being fulfilled",
+      "fieldType": "text",
+      "pageNumber": 2,
+      "posX": 370,
+      "posY": 329,
+      "width": 198,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "dc_fulfilling_no",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "ier_reviewed",
+      "name": "Incident/Emergency Reports reviewed (name and date)",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 199,
+      "posY": 382,
+      "width": 369,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_patterns_yes",
+      "name": "Patterns and corrective action on each report \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 184,
+      "posY": 418,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_patterns_no",
+      "name": "Patterns and corrective action on each report \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 220,
+      "posY": 418,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_corrective_yes",
+      "name": "Corrective action taken per report \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 246,
+      "posY": 456,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_corrective_no",
+      "name": "Corrective action taken per report \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 281,
+      "posY": 456,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_internal_yes",
+      "name": "Internal review completed where required \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 200,
+      "posY": 507,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_internal_no",
+      "name": "Internal review completed where required \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 235,
+      "posY": 507,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_internal_corrective_yes",
+      "name": "Internal-review corrective action implemented \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 263,
+      "posY": 101,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ier_internal_corrective_no",
+      "name": "Internal-review corrective action implemented \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 298,
+      "posY": 101,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "satisfaction_date",
+      "name": "Last satisfaction evaluation date",
+      "fieldType": "date",
+      "pageNumber": 3,
+      "posX": 385.0,
+      "posY": 139,
+      "width": 185.0,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "complaints_yes",
+      "name": "Complaints or lack of satisfaction this period \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 231,
+      "posY": 177,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "complaints_no",
+      "name": "Complaints or lack of satisfaction this period \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 266,
+      "posY": 177,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "complaints_detail",
+      "name": "If yes \u2014 date, person, and nature of complaint",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 199,
+      "posY": 228,
+      "width": 369,
+      "height": 18,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "complaints_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "rights_concerns_yes",
+      "name": "Concerns ensuring/protecting rights \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 236,
+      "posY": 253,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_concerns_no",
+      "name": "Concerns ensuring/protecting rights \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 271,
+      "posY": 253,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_concern_detail",
+      "name": "If yes \u2014 concern present",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 370,
+      "posY": 283,
+      "width": 198,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "rights_concerns_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "staff_competent_yes",
+      "name": "Staff competent to provide services \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 460,
+      "posY": 292,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_competent_no",
+      "name": "Staff competent to provide services \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 495,
+      "posY": 292,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "competency_actions",
+      "name": "What is being done to ensure competency",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 199,
+      "posY": 330,
+      "width": 369,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "orientation_competency_yes",
+      "name": "Orientation/training include competency demonstration \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 200,
+      "posY": 380,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "orientation_competency_no",
+      "name": "Orientation/training include competency demonstration \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 235,
+      "posY": 380,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "training_provided_yes",
+      "name": "Training provided per 245D.09 subd. 3\u20135 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 459,
+      "posY": 418,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "training_provided_no",
+      "name": "Training provided per 245D.09 subd. 3\u20135 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 494,
+      "posY": 418,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "commissioner_action",
+      "name": "Corrective action ordered by the commissioner",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 199,
+      "posY": 456,
+      "width": 369,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "license_concerns_yes",
+      "name": "Concerns with license terms/variances \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 200,
+      "posY": 495,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "license_concerns_no",
+      "name": "Concerns with license terms/variances \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 235,
+      "posY": 495,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "license_concern_detail",
+      "name": "If yes \u2014 the concern(s)",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 330,
+      "posY": 525,
+      "width": 238,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "license_concerns_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "qa_review_yes",
+      "name": "Program improvement process reviewed \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 286,
+      "posY": 127,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "qa_review_no",
+      "name": "Program improvement process reviewed \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 321,
+      "posY": 127,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "qa_strengths_yes",
+      "name": "Strengths and improvement opportunities identified \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 475,
+      "posY": 152,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "qa_strengths_no",
+      "name": "Strengths and improvement opportunities identified \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 510,
+      "posY": 152,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "qa_actions",
+      "name": "Action to remedy problems or concerns",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 199,
+      "posY": 202,
+      "width": 369,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "qa_review_date",
+      "name": "QA review date",
+      "fieldType": "date",
+      "pageNumber": 4,
+      "posX": 394.1,
+      "posY": 215,
+      "width": 175.9,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "program_improvements",
+      "name": "Ongoing program improvements to develop and implement",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 49,
+      "posY": 272,
+      "width": 720,
+      "height": 80,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_licensing",
+      "name": "Corrective action plan \u2014 licensing",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 578,
+      "posY": 405,
+      "width": 200,
+      "height": 70,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_funds",
+      "name": "Corrective action plan \u2014 funds",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 578,
+      "posY": 482,
+      "width": 200,
+      "height": 50,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_dc",
+      "name": "Corrective action plan \u2014 dc",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 578,
+      "posY": 215,
+      "width": 200,
+      "height": 120,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_ier",
+      "name": "Corrective action plan \u2014 ier",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 578,
+      "posY": 357,
+      "width": 200,
+      "height": 160,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_satisfaction",
+      "name": "Corrective action plan \u2014 satisfaction",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 578,
+      "posY": 115,
+      "width": 200,
+      "height": 175,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_staff",
+      "name": "Corrective action plan \u2014 staff",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 578,
+      "posY": 294,
+      "width": 200,
+      "height": 135,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_license",
+      "name": "Corrective action plan \u2014 license",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 578,
+      "posY": 433,
+      "width": 200,
+      "height": 95,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ca_qa",
+      "name": "Corrective action plan \u2014 qa",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 578,
+      "posY": 103,
+      "width": 200,
+      "height": 115,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "semiannual-dpf-013"
+}

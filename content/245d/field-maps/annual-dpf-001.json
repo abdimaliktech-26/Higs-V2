@@ -1,0 +1,99 @@
+{
+  "templateName": "Annual \u2014 DPF-001 Rights of Persons Served",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "restriction_explained_yes",
+      "name": "Restriction explanation received \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 465,
+      "posY": 634,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "restriction_explained_no",
+      "name": "Restriction explanation received \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 527,
+      "posY": 634,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "written_notice_yes",
+      "name": "Written notice of rights received \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 465,
+      "posY": 659,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "written_notice_no",
+      "name": "Written notice of rights received \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 528,
+      "posY": 659,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_explained_yes",
+      "name": "Rights explained understandably \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 466,
+      "posY": 685,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_explained_no",
+      "name": "Rights explained understandably \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 529,
+      "posY": 685,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "person_served_signature",
+      "name": "Signature \u2014 person served/legal representative",
+      "fieldType": "signature",
+      "pageNumber": 5,
+      "posX": 37,
+      "posY": 76,
+      "width": 240,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "person_served_signature_date",
+      "name": "Date signed",
+      "fieldType": "date",
+      "pageNumber": 5,
+      "posX": 353,
+      "posY": 88,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    }
+  ],
+  "adjustedFromLayout": "intake-dpf-001"
+}

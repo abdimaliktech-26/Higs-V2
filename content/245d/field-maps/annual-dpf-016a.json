@@ -1,0 +1,1489 @@
+{
+  "templateName": "Annual \u2014 DPF-016A Support Plan Addendum for Intensive Support Services",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name of person served",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 151,
+      "posY": 120,
+      "width": 300,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "development_date",
+      "name": "Date of development",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 142,
+      "posY": 147,
+      "width": 150,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "annual_period_from",
+      "name": "Annual period from",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 168,
+      "posY": 175,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "annual_period_to",
+      "name": "Annual period to",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 321,
+      "posY": 175,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "completer_name_title",
+      "name": "Name and title of person completing",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 337,
+      "posY": 203,
+      "width": 230,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "legal_representative",
+      "name": "Legal representative",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 136,
+      "posY": 230,
+      "width": 300,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "case_manager",
+      "name": "Case manager",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 109,
+      "posY": 258,
+      "width": 300,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "scope_of_services",
+      "name": "Scope of services",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 77,
+      "posY": 448,
+      "width": 490,
+      "height": 40,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "outcome_1",
+      "name": "Service outcome #1",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 139,
+      "posY": 530,
+      "width": 428,
+      "height": 22,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2",
+      "name": "Service outcome #2",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 139,
+      "posY": 557,
+      "width": 428,
+      "height": 22,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3",
+      "name": "Service outcome #3",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 139,
+      "posY": 585,
+      "width": 428,
+      "height": 22,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "tech_discussed_yes",
+      "name": "Technology discussion occurred \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 480,
+      "posY": 630,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "tech_discussed_no",
+      "name": "Technology discussion occurred \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 513,
+      "posY": 630,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "tech_summary",
+      "name": "Technology decisions summary",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 77,
+      "posY": 682,
+      "width": 490,
+      "height": 40,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "general_health_supports",
+      "name": "General and health-related supports (SMA-based)",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 116,
+      "width": 490,
+      "height": 44,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "service_preferences",
+      "name": "Preferences incl. positive supports and schedule control",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 170,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "integrated_setting_yes",
+      "name": "Most integrated setting \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 222,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "integrated_setting_no",
+      "name": "Most integrated setting \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 110,
+      "posY": 222,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "integrated_setting_action",
+      "name": "If no \u2014 action to address",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 261,
+      "width": 490,
+      "height": 22,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "integrated_setting_no",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "skills_opportunities",
+      "name": "Opportunities: skills/abilities/strengths/interests",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 317,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "community_opportunities",
+      "name": "Opportunities: community access/participation/inclusion",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 367,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "relationship_opportunities",
+      "name": "Opportunities: personal relationships",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 429,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "employment_opportunities",
+      "name": "Opportunities: competitive employment",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 492,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "care_coordination",
+      "name": "Coordination across 245D providers",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 555,
+      "width": 490,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "coordination_contacts",
+      "name": "Service coordination contacts",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 77,
+      "posY": 608,
+      "width": 490,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "setting_residential",
+      "name": "Currently receives \u2014 residential services",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 661,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "setting_day",
+      "name": "Currently receives \u2014 day services",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 679,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "setting_neither",
+      "name": "Currently receives \u2014 neither",
+      "fieldType": "checkbox",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 698,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "transition_residential_summary",
+      "name": "Transition from provider-controlled residential \u2014 summary",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 41,
+      "posY": 127,
+      "width": 527,
+      "height": 28,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "transition_employment_summary",
+      "name": "Transition from day services to employment \u2014 summary",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 41,
+      "posY": 181,
+      "width": 527,
+      "height": 14,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "transition_research",
+      "name": "Further research/education before transition decision",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 73,
+      "posY": 210,
+      "width": 495,
+      "height": 16,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_presence_yes",
+      "name": "Staff presence required \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 77,
+      "posY": 245,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_presence_no",
+      "name": "Staff presence required \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 110,
+      "posY": 245,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_absence_details",
+      "name": "If no \u2014 when staff need not be present",
+      "fieldType": "textarea",
+      "pageNumber": 3,
+      "posX": 77,
+      "posY": 297,
+      "width": 490,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "staff_presence_no",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "rights_restriction_yes",
+      "name": "Rights restriction required \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 77,
+      "posY": 362,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_restriction_no",
+      "name": "Rights restriction required \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 110,
+      "posY": 362,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "rights_restricted_list",
+      "name": "If yes \u2014 rights to be restricted",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 283,
+      "posY": 388,
+      "width": 285,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "rights_restriction_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "dangerous_items_yes",
+      "name": "Uses dangerous items/equipment \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 77,
+      "posY": 461,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dangerous_items_no",
+      "name": "Uses dangerous items/equipment \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 110,
+      "posY": 461,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "dangerous_items_concerns",
+      "name": "If yes \u2014 concerns or limitations",
+      "fieldType": "text",
+      "pageNumber": 3,
+      "posX": 246,
+      "posY": 488,
+      "width": 322,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "dangerous_items_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "restraint_contraindicated_yes",
+      "name": "Manual restraint contraindicated \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 77,
+      "posY": 569,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "restraint_contraindicated_no",
+      "name": "Manual restraint contraindicated \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 3,
+      "posX": 111,
+      "posY": 569,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "health_responsibilities",
+      "name": "Health service responsibilities assigned",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 77,
+      "posY": 119,
+      "width": 490,
+      "height": 22,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "health_notification_exceptions",
+      "name": "Notification exceptions",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 77,
+      "posY": 184,
+      "width": 490,
+      "height": 22,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "med_setup",
+      "name": "Medication set up",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 41,
+      "posY": 338,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "med_setup_procedures",
+      "name": "Medication set up \u2014 procedures",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 136,
+      "posY": 338,
+      "width": 431,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "med_setup",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "med_assistance",
+      "name": "Medication assistance",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 41,
+      "posY": 375,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "med_assistance_procedures",
+      "name": "Medication assistance \u2014 procedures",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 154,
+      "posY": 375,
+      "width": 413,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "med_assistance",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "med_admin",
+      "name": "Medication administration",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 41,
+      "posY": 411,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "med_admin_procedures",
+      "name": "Medication administration \u2014 procedures",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 174,
+      "posY": 411,
+      "width": 393,
+      "height": 28,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "med_admin",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "psychotropic_admin_yes",
+      "name": "Administers psychotropic medication \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 373,
+      "posY": 499,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psychotropic_admin_no",
+      "name": "Administers psychotropic medication \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 407,
+      "posY": 499,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_target_symptoms",
+      "name": "1. Target symptoms",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 77,
+      "posY": 565,
+      "width": 490,
+      "height": 22,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "psychotropic_admin_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "psych_monitoring_yes",
+      "name": "Prescriber requires monitoring documentation \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 288,
+      "posY": 611,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_monitoring_no",
+      "name": "Prescriber requires monitoring documentation \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 4,
+      "posX": 322,
+      "posY": 611,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_documentation_methods",
+      "name": "3. Documentation methods",
+      "fieldType": "textarea",
+      "pageNumber": 4,
+      "posX": 77,
+      "posY": 668,
+      "width": 490,
+      "height": 22,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "psych_monitoring_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_1_yes",
+      "name": "Permitted action 1 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 133,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_1_no",
+      "name": "Permitted action 1 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 133,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_1_explain",
+      "name": "Permitted action 1 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 131,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_1_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_2_yes",
+      "name": "Permitted action 2 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 179,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_2_no",
+      "name": "Permitted action 2 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 179,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_2_explain",
+      "name": "Permitted action 2 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 177,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_2_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_3_yes",
+      "name": "Permitted action 3 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 224,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_3_no",
+      "name": "Permitted action 3 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 224,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_3_explain",
+      "name": "Permitted action 3 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 222,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_3_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_4_yes",
+      "name": "Permitted action 4 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 277,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_4_no",
+      "name": "Permitted action 4 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 277,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_4_explain",
+      "name": "Permitted action 4 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 275,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_4_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_5_yes",
+      "name": "Permitted action 5 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 332,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_5_no",
+      "name": "Permitted action 5 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 332,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_5_explain",
+      "name": "Permitted action 5 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 330,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_5_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_6_yes",
+      "name": "Permitted action 6 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 390,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_6_no",
+      "name": "Permitted action 6 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 390,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_6_explain",
+      "name": "Permitted action 6 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 388,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_6_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_7_yes",
+      "name": "Permitted action 7 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 436,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_7_no",
+      "name": "Permitted action 7 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 436,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_7_explain",
+      "name": "Permitted action 7 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 434,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_7_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_8_yes",
+      "name": "Permitted action 8 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 481,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_8_no",
+      "name": "Permitted action 8 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 481,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_8_explain",
+      "name": "Permitted action 8 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 479,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_8_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_9_yes",
+      "name": "Permitted action 9 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 526,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_9_no",
+      "name": "Permitted action 9 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 526,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_9_explain",
+      "name": "Permitted action 9 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 524,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_9_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_10_yes",
+      "name": "Permitted action 10 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 574,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_10_no",
+      "name": "Permitted action 10 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 574,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_10_explain",
+      "name": "Permitted action 10 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 572,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_10_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "action_11_yes",
+      "name": "Permitted action 11 \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 77,
+      "posY": 633,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_11_no",
+      "name": "Permitted action 11 \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 110,
+      "posY": 633,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "action_11_explain",
+      "name": "Permitted action 11 \u2014 how it will be used",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 301,
+      "posY": 631,
+      "width": 267,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "action_11_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "staff_additional_yes",
+      "name": "Additional staff requirements \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 41,
+      "posY": 713,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_additional_no",
+      "name": "Additional staff requirements \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 5,
+      "posX": 74,
+      "posY": 713,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "staff_additional_specify",
+      "name": "Additional staff requirements \u2014 specify",
+      "fieldType": "text",
+      "pageNumber": 5,
+      "posX": 219,
+      "posY": 711,
+      "width": 349,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "staff_additional_yes",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "cpr_required_yes",
+      "name": "CPR-trained staff required \u2014 Yes",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 364,
+      "posY": 126,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "cpr_required_no",
+      "name": "CPR-trained staff required \u2014 No",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 397,
+      "posY": 126,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_1_4",
+      "name": "Staff ratio \u2014 1_4",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 41,
+      "posY": 189,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_1_6",
+      "name": "Staff ratio \u2014 1_6",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 87,
+      "posY": 189,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_1_8",
+      "name": "Staff ratio \u2014 1_8",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 134,
+      "posY": 189,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_other",
+      "name": "Staff ratio \u2014 other",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 180,
+      "posY": 189,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_na",
+      "name": "Staff ratio \u2014 na",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 451,
+      "posY": 189,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "ratio_other_specify",
+      "name": "Staff ratio \u2014 other",
+      "fieldType": "text",
+      "pageNumber": 6,
+      "posX": 296,
+      "posY": 187,
+      "width": 150,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "ratio_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "freq_progress_quarterly",
+      "name": "Frequency of Progress Reports \u2014 quarterly",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 77,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "freq_progress_semi",
+      "name": "Frequency of Progress Reports \u2014 semi",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 162,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "freq_progress_annual",
+      "name": "Frequency of Progress Reports \u2014 annual",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 277,
+      "posY": 262,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "freq_review_quarterly",
+      "name": "Frequency of service plan reviews \u2014 quarterly",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 80,
+      "posY": 306,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "freq_review_semi",
+      "name": "Frequency of service plan reviews \u2014 semi",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 165,
+      "posY": 306,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "freq_review_annual",
+      "name": "Frequency of service plan reviews \u2014 annual",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 280,
+      "posY": 306,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "receipt_at_meeting",
+      "name": "Receive report at support team meeting",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 80,
+      "posY": 350,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "receipt_in_advance",
+      "name": "Receive report five working days in advance",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 243,
+      "posY": 350,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_report_quarterly",
+      "name": "Psych data reports \u2014 quarterly",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 80,
+      "posY": 407,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_report_other",
+      "name": "Psych data reports \u2014 other",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 165,
+      "posY": 407,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "psych_report_other_specify",
+      "name": "Psych data reports \u2014 other frequency",
+      "fieldType": "text",
+      "pageNumber": 6,
+      "posX": 252,
+      "posY": 405,
+      "width": 170,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "psych_report_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "psych_report_na",
+      "name": "Psych data reports \u2014 NA",
+      "fieldType": "checkbox",
+      "pageNumber": 6,
+      "posX": 428,
+      "posY": 407,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_date",
+      "name": "Date of meeting",
+      "fieldType": "date",
+      "pageNumber": 7,
+      "posX": 124,
+      "posY": 106,
+      "width": 150,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "meeting_minutes",
+      "name": "Meeting minutes",
+      "fieldType": "textarea",
+      "pageNumber": 7,
+      "posX": 41,
+      "posY": 150,
+      "width": 527,
+      "height": 560,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_person_served",
+      "name": "Signature \u2014 person served",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 163,
+      "width": 220,
+      "height": 20,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "sig_person_served_date",
+      "name": "Date \u2014 person served",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 167,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_representative",
+      "name": "Signature \u2014 legal representative",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 236,
+      "width": 220,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_legal_representative_date",
+      "name": "Date \u2014 legal representative",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 240,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager",
+      "name": "Signature \u2014 case manager",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 310,
+      "width": 220,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_case_manager_date",
+      "name": "Date \u2014 case manager",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 314,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_contact_1",
+      "name": "Signature \u2014 provider contact 1",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 383,
+      "width": 220,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_contact_1_date",
+      "name": "Date \u2014 provider contact 1",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 387,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_contact_2",
+      "name": "Signature \u2014 provider contact 2",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 456,
+      "width": 220,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_provider_contact_2_date",
+      "name": "Date \u2014 provider contact 2",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 460,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member",
+      "name": "Signature \u2014 other member",
+      "fieldType": "signature",
+      "pageNumber": 8,
+      "posX": 150,
+      "posY": 530,
+      "width": 220,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "sig_other_member_date",
+      "name": "Date \u2014 other member",
+      "fieldType": "date",
+      "pageNumber": 8,
+      "posX": 420,
+      "posY": 534,
+      "width": 120,
+      "height": 12,
+      "isRequired": false
+    }
+  ],
+  "clonedFromLayout": "intake-dpf-016a"
+}
