@@ -12,10 +12,14 @@ const auditMock = vi.fn()
 const runtimeMock = vi.fn()
 const editorStateMock = vi.fn()
 
+const storedObjectCreateMock = vi.fn()
+const auditCreateMock = vi.fn()
+const transactionMock = vi.fn()
+
 vi.mock("@/lib/db", () => ({
   prisma: {
-    packetDocument: { findUnique: (...a: unknown[]) => findDocMock(...a), update: (...a: unknown[]) => docUpdateMock(...a) },
-    pdfVersion: { create: (...a: unknown[]) => versionCreateMock(...a) },
+    packetDocument: { findUnique: (...a: unknown[]) => findDocMock(...a) },
+    $transaction: (cb: unknown) => transactionMock(cb),
   },
 }))
 vi.mock("@/lib/live-authorization", () => ({
@@ -28,6 +32,14 @@ vi.mock("@/lib/storage", () => ({
   signStaffFileUrl: vi.fn(() => "/signed"),
 }))
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => auditMock(...a) }))
+vi.mock("@/lib/storage/index", () => ({
+  createStorageAdapter: vi.fn(() => ({ provider: "s3" })),
+  storageKeys: {
+    packetDocumentVersion: (i: Record<string, string>) =>
+      `organizations/${i.organizationId}/documents/${i.packetDocumentId}/versions/${i.pdfVersionId}.pdf`,
+  },
+  readStorageConfiguration: vi.fn(() => ({ provider: "local" })),
+}))
 vi.mock("@/lib/conditions/runtime", () => ({
   buildPacketConditionContext: (...a: unknown[]) => runtimeMock(...a),
   buildPacketConditionContextTx: vi.fn(),
@@ -84,6 +96,14 @@ beforeEach(() => {
   }))
   versionCreateMock.mockResolvedValue({ id: "version-1" })
   docUpdateMock.mockResolvedValue({})
+  storedObjectCreateMock.mockResolvedValue({ id: "stored-1" })
+  auditCreateMock.mockResolvedValue({ id: "audit-1" })
+  transactionMock.mockImplementation((cb: (tx: unknown) => unknown) => cb({
+    storedObject: { create: (...a: unknown[]) => storedObjectCreateMock(...a) },
+    pdfVersion: { create: (...a: unknown[]) => versionCreateMock(...a) },
+    packetDocument: { update: (...a: unknown[]) => docUpdateMock(...a) },
+    auditEvent: { create: (...a: unknown[]) => auditCreateMock(...a) },
+  }))
   findDocMock.mockResolvedValue({
     id: "doc-1",
     packetId: "packet-1",
@@ -114,7 +134,10 @@ describe("createPdfVersion real generation", () => {
     expect(versionData.fileUrl).not.toContain("storage.higsi.com")
     expect(versionData.fileSize).toBe(storedBuffer.length)
     expect(docUpdateMock).toHaveBeenCalledWith({ where: { id: "doc-1" }, data: { currentVersion: 1 } })
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ action: "PDF_VERSION_CREATED" }))
+    expect(auditCreateMock).toHaveBeenCalledWith({ data: expect.objectContaining({ action: "PDF_VERSION_CREATED" }) })
+    // No S3 configured: no durable StoredObject, storedObjectId stays null.
+    expect(storedObjectCreateMock).not.toHaveBeenCalled()
+    expect(versionCreateMock.mock.calls[0][0].data.storedObjectId).toBeNull()
   })
 
   it("excludes condition-hidden fields from the rendered output", async () => {

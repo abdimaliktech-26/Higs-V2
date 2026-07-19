@@ -108,7 +108,10 @@ describe("read-only upload reconciliation", () => {
           },
         ]),
       },
-      pdfVersion: { findMany: vi.fn().mockResolvedValue([{ id: "pdf-placeholder" }]) },
+      pdfVersion: { findMany: vi.fn().mockResolvedValue([
+        { id: "pdf-placeholder", fileSize: null },
+        { id: "pdf-generated-local", fileSize: 84210 },
+      ]) },
       documentTemplate: { findMany: vi.fn().mockResolvedValue([]) },
       supportingDocument: { findMany: vi.fn().mockResolvedValue([]) },
     }

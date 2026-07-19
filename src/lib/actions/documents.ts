@@ -5,8 +5,12 @@ import { validate, saveFieldsSchema, addFieldSchema } from "@/lib/validation"
 import { prisma } from "@/lib/db"
 import { createAuditEvent } from "@/lib/audit"
 import { UserRole } from "@prisma/client"
+import { randomUUID } from "node:crypto"
 import { getFileStream, signStaffFileUrl, storeFile } from "@/lib/storage"
+import { createStorageAdapter, storageKeys } from "@/lib/storage/index"
 import { fillPdf } from "@/lib/pdf/fill-pdf"
+import { GeneratedPdfStorageError, isDurableGenerationRequired, storeGeneratedPdfDurably } from "@/lib/pdf/store-generated-pdf"
+import { Prisma } from "@prisma/client"
 import { requireDocumentAccess } from "@/lib/live-authorization"
 import {
   reconcilePacketDocumentApplicability,
@@ -530,37 +534,104 @@ export async function createPdfVersion(documentId: string, comment?: string): Pr
     })
 
     const nextVersion = doc.currentVersion + 1
-    const record = await storeFile(
-      `documents/${documentId}/v${nextVersion}.pdf`,
-      Buffer.from(filledBytes),
-      "application/pdf",
-      `${doc.documentTemplate.name} v${nextVersion}.pdf`,
-    )
+    const generatedBytes = Buffer.from(filledBytes)
+    const pdfVersionId = randomUUID()
 
-    await prisma.pdfVersion.create({
-      data: {
-        packetDocumentId: documentId, version: nextVersion,
-        fileUrl: record.url,
-        fileKey: record.key,
-        fileSize: record.size,
-        comment: comment || `Version ${nextVersion}`,
-        createdById: authorization.userId,
-      },
-    })
+    // S3-configured environments MUST store the generated artifact durably;
+    // a failed or unverified durable write creates no records and never
+    // silently downgrades to local-only generation. Development without S3
+    // keeps the existing local-compatibility behavior.
+    let durable: Awaited<ReturnType<typeof storeGeneratedPdfDurably>> | null = null
+    if (isDurableGenerationRequired()) {
+      const durableKey = storageKeys.packetDocumentVersion({
+        organizationId: doc.packet.organizationId,
+        clientId: doc.packet.clientId,
+        packetId: doc.packetId,
+        packetDocumentId: documentId,
+        pdfVersionId,
+      })
+      durable = await storeGeneratedPdfDurably(createStorageAdapter(), durableKey, generatedBytes)
+    }
 
-    await prisma.packetDocument.update({ where: { id: documentId }, data: { currentVersion: nextVersion } })
+    // Temporary PR-5C.3 compatibility copy. Once the durable write has
+    // succeeded, a compatibility-copy failure must not invalidate the
+    // authoritative record — linked rows are served from the StoredObject,
+    // never the local copy. Without S3, the local copy IS the record and its
+    // failure aborts generation exactly as before.
+    const compatibilityKey = `documents/${documentId}/v${nextVersion}.pdf`
+    let compatibility: { key: string; url: string; size: number } | null = null
+    try {
+      compatibility = await storeFile(compatibilityKey, generatedBytes, "application/pdf", `${doc.documentTemplate.name} v${nextVersion}.pdf`)
+    } catch {
+      if (!durable) return { success: false, error: "Failed to store the generated document" }
+    }
 
-    await createAuditEvent({
-      organizationId: doc.packet.organizationId,
-      actorId: authorization.userId,
-      action: "PDF_VERSION_CREATED",
-      targetType: "packet_document",
-      targetId: documentId,
-      metadata: { version: nextVersion, documentName: doc.documentTemplate.name },
-    })
+    try {
+      await prisma.$transaction(async (tx) => {
+        let storedObjectId: string | null = null
+        if (durable) {
+          const storedObject = await tx.storedObject.create({
+            data: {
+              organizationId: doc.packet.organizationId,
+              provider: "S3",
+              bucket: durable.bucket,
+              objectKey: durable.objectKey,
+              objectVersionId: durable.objectVersionId,
+              etag: durable.etag ?? null,
+              checksumSha256: durable.checksumSha256,
+              sizeBytes: BigInt(durable.sizeBytes),
+              mimeType: "application/pdf",
+              originalFileName: null,
+              encryptionKeyRef: durable.encryptionKeyRef,
+              lifecycleStatus: "AVAILABLE",
+              // Honest classification: generated internally, never scanned as
+              // an external upload; must never be represented as CLEAN.
+              malwareStatus: "NOT_SCANNED",
+              immutable: false,
+              legalHold: false,
+            },
+          })
+          storedObjectId = storedObject.id
+        }
+        await tx.pdfVersion.create({
+          data: {
+            id: pdfVersionId,
+            packetDocumentId: documentId,
+            version: nextVersion,
+            fileUrl: compatibility?.url ?? "",
+            fileKey: compatibility?.key ?? compatibilityKey,
+            fileSize: durable?.sizeBytes ?? compatibility?.size ?? generatedBytes.length,
+            comment: comment || `Version ${nextVersion}`,
+            createdById: authorization.userId,
+            storedObjectId,
+          },
+        })
+        await tx.packetDocument.update({ where: { id: documentId }, data: { currentVersion: nextVersion } })
+        // Strict audit: a failed audit write rolls back every authoritative row.
+        await tx.auditEvent.create({
+          data: {
+            organizationId: doc.packet.organizationId,
+            actorId: authorization.userId,
+            action: "PDF_VERSION_CREATED",
+            targetType: "packet_document",
+            targetId: documentId,
+            metadata: { version: nextVersion, documentName: doc.documentTemplate.name },
+          },
+        })
+      })
+    } catch (error) {
+      // A rolled-back transaction leaves at most an unowned durable artifact,
+      // which reconciliation reports; no PdfVersion or owned StoredObject exists.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return { success: false, error: "A version was just created for this document. Refresh and try again." }
+      }
+      throw error
+    }
+
     revalidatePath(`/documents/${documentId}/edit`)
     return { success: true, data: { version: nextVersion } }
   } catch (e) {
+    if (e instanceof GeneratedPdfStorageError) return { success: false, error: e.message }
     return { success: false, error: (e as Error).message }
   }
 }

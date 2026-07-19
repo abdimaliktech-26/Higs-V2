@@ -25,6 +25,12 @@ vi.mock("@/lib/db", () => ({
     },
     pdfVersion: { create: (...args: unknown[]) => pdfVersionCreate(...args) },
     documentComment: { create: (...args: unknown[]) => documentCommentCreate(...args) },
+    $transaction: (cb: (tx: unknown) => unknown) => cb({
+      storedObject: { create: vi.fn() },
+      pdfVersion: { create: (...args: unknown[]) => pdfVersionCreate(...args) },
+      packetDocument: { update: (...args: unknown[]) => packetDocumentUpdate(...args) },
+      auditEvent: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) },
+    }),
   },
 }))
 vi.mock("@/lib/live-authorization", () => ({ requireDocumentAccess: (...args: unknown[]) => requireDocumentAccess(...args) }))
@@ -46,6 +52,11 @@ vi.mock("@/lib/storage", () => ({
   storeFile: vi.fn(async (key: string, buffer: Buffer) => ({
     key, url: `/api/files/${key}?direct=1`, size: buffer.length, mimeType: "application/pdf", originalName: "v.pdf",
   })),
+}))
+vi.mock("@/lib/storage/index", () => ({
+  createStorageAdapter: vi.fn(),
+  storageKeys: { packetDocumentVersion: vi.fn(() => "organizations/o/documents/d/versions/v.pdf") },
+  readStorageConfiguration: vi.fn(() => ({ provider: "local" })),
 }))
 vi.mock("@/lib/conditions/runtime", () => ({
   reconcilePacketDocumentApplicability: vi.fn(),

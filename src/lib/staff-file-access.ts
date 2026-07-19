@@ -70,7 +70,7 @@ async function authorizePacketDocument(resourceId: string): Promise<StaffFileAut
 async function authorizePdfVersion(resourceId: string): Promise<StaffFileAuthorization> {
   const version = await prisma.pdfVersion.findUnique({
     where: { id: resourceId },
-    select: { id: true, fileKey: true, packetDocumentId: true },
+    select: { id: true, fileKey: true, packetDocumentId: true, storedObjectId: true },
   })
   if (!version) throw new StaffFileNotFoundError()
   const authorization = await requireDocumentAccess(version.packetDocumentId, "read", "download packet document version")
@@ -78,9 +78,9 @@ async function authorizePdfVersion(resourceId: string): Promise<StaffFileAuthori
     actorId: authorization.userId,
     organizationId: authorization.organizationId,
     fileKey: version.fileKey,
-    // pdf_version rows are placeholder-only (no stored bytes) and are
-    // excluded from PR-5C dual-source reads until final PDF generation.
-    storedObjectId: null,
+    // Durably generated versions stream their exact StoredObject; legacy and
+    // placeholder rows (null) keep the local-compatibility read.
+    storedObjectId: version.storedObjectId,
     resourceType: "pdf_version",
     resourceId: version.id,
   }

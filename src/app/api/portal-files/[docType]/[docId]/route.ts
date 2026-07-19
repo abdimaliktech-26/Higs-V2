@@ -66,9 +66,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ docT
     }
     const latestVersion = doc.versions[0]
     if (!latestVersion) return new NextResponse("Not found", { status: 404 })
-    // pdf_version rows are placeholder-only and excluded from PR-5C
-    // dual-source reads; this branch keeps its existing legacy behavior.
+    // Durably generated versions stream their exact StoredObject; legacy and
+    // placeholder rows keep the local-compatibility read.
     fileKey = latestVersion.fileKey
+    storedObjectId = latestVersion.storedObjectId
     organizationId = doc.packet.organizationId
     clientId = doc.packet.clientId
     originalName = `${doc.documentTemplate.name}.pdf`
