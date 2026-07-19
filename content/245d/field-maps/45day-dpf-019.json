@@ -1,0 +1,443 @@
+{
+  "templateName": "45-Day \u2014 DPF-019 Progress Report and Recommendations",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 67.8,
+      "posY": 120,
+      "width": 232.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "report_date",
+      "name": "Date of progress report",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 424.2,
+      "posY": 120,
+      "width": 145.8,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "completed_by",
+      "name": "Report completed by (name and title)",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 213.3,
+      "posY": 145,
+      "width": 86.7,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "report_type",
+      "name": "Type of progress report",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 487.9,
+      "posY": 145,
+      "width": 82.1,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "distribution_date",
+      "name": "Distribution date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 131.4,
+      "posY": 171,
+      "width": 168.6,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "review_meeting_date",
+      "name": "Service plan review meeting date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 551.6,
+      "posY": 171,
+      "width": 18.4,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "to_person_served",
+      "name": "To \u2014 person served",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 61,
+      "posY": 238,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "to_legal_rep",
+      "name": "To \u2014 legal representative",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 159,
+      "posY": 238,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "to_case_manager",
+      "name": "To \u2014 case manager",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 286,
+      "posY": 238,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "to_other",
+      "name": "To \u2014 other",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 390,
+      "posY": 238,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "to_other_specify",
+      "name": "To \u2014 other recipient",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 437.3,
+      "posY": 240,
+      "width": 132.7,
+      "height": 12,
+      "isRequired": false,
+      "requiredWhen": {
+        "fieldKey": "to_other",
+        "operator": "CHECKED"
+      }
+    },
+    {
+      "fieldKey": "outcome_1_number",
+      "name": "Outcome 1 \u2014 number",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 85.9,
+      "posY": 283,
+      "width": 60,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_statement",
+      "name": "Outcome 1 \u2014 statement with criteria",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 321,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_progress",
+      "name": "Outcome 1 \u2014 summary of progress",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 346,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_continue",
+      "name": "Outcome 1 \u2014 continue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 267,
+      "posY": 359,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_change",
+      "name": "Outcome 1 \u2014 change",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 336,
+      "posY": 359,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_discontinue",
+      "name": "Outcome 1 \u2014 discontinue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 399,
+      "posY": 359,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_1_rationale",
+      "name": "Outcome 1 \u2014 rationale",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 397,
+      "width": 525,
+      "height": 26,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_number",
+      "name": "Outcome 2 \u2014 number",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 85.9,
+      "posY": 441,
+      "width": 60,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_statement",
+      "name": "Outcome 2 \u2014 statement with criteria",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 479,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_progress",
+      "name": "Outcome 2 \u2014 summary of progress",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 504,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_continue",
+      "name": "Outcome 2 \u2014 continue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 269,
+      "posY": 518,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_change",
+      "name": "Outcome 2 \u2014 change",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 338,
+      "posY": 518,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_discontinue",
+      "name": "Outcome 2 \u2014 discontinue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 401,
+      "posY": 518,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_2_rationale",
+      "name": "Outcome 2 \u2014 rationale",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 555,
+      "width": 525,
+      "height": 25,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_number",
+      "name": "Outcome 3 \u2014 number",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 85.9,
+      "posY": 594,
+      "width": 60,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_statement",
+      "name": "Outcome 3 \u2014 statement with criteria",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 632,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_progress",
+      "name": "Outcome 3 \u2014 summary of progress",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 657,
+      "width": 525,
+      "height": 18,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_continue",
+      "name": "Outcome 3 \u2014 continue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 283,
+      "posY": 671,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_change",
+      "name": "Outcome 3 \u2014 change",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 352,
+      "posY": 671,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_discontinue",
+      "name": "Outcome 3 \u2014 discontinue",
+      "fieldType": "checkbox",
+      "pageNumber": 1,
+      "posX": 415,
+      "posY": 671,
+      "width": 11,
+      "height": 11,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_3_rationale",
+      "name": "Outcome 3 \u2014 rationale",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 43,
+      "posY": 708,
+      "width": 525,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_health",
+      "name": "Health",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 201,
+      "width": 528,
+      "height": 19,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_important",
+      "name": "Important to and for the person",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 226,
+      "width": 528,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_relationships",
+      "name": "Social relationships and natural supports",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 252,
+      "width": 528,
+      "height": 19,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_community",
+      "name": "Recent inclusion and participation in community",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 277,
+      "width": 528,
+      "height": 19,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_skills",
+      "name": "Opportunities for skills, decisions, advocacy, communication",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 315,
+      "width": 528,
+      "height": 19,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_rights",
+      "name": "Civil and legal rights",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 340,
+      "width": 528,
+      "height": 20,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "status_other",
+      "name": "Other information requested by the team",
+      "fieldType": "textarea",
+      "pageNumber": 2,
+      "posX": 41,
+      "posY": 366,
+      "width": 528,
+      "height": 41,
+      "isRequired": false
+    }
+  ]
+}

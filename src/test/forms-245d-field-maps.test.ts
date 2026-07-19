@@ -39,6 +39,10 @@ async function loadMaps(): Promise<Map<string, FieldMap>> {
 // condition count, and representative required keys. Changing a map without
 // updating this table is a reviewable event.
 const EXPECTATIONS: Record<string, { fields: number; signatures: number; conditions: number; requiredKeys: string[] }> = {
+  "45day-dpf-017": { fields: 13, signatures: 0, conditions: 0, requiredKeys: ["client_name", "outcome_number", "outcome_statement"] },
+  "45day-dpf-019": { fields: 39, signatures: 0, conditions: 1, requiredKeys: ["client_name", "report_date", "completed_by"] },
+  "45day-dpf-020": { fields: 27, signatures: 6, conditions: 0, requiredKeys: ["client_name", "meeting_date", "outcome_determinations"] },
+  "45day-dpf-034": { fields: 45, signatures: 7, conditions: 4, requiredKeys: ["client_name", "form_date", "sig_person_served"] },
   "intake-245d-iapp": { fields: 55, signatures: 5, conditions: 5, requiredKeys: ["client_name", "program", "sig_completing"] },
   "intake-dhf-007": { fields: 12, signatures: 1, conditions: 1, requiredKeys: ["client_name", "date_of_birth", "person_served_signature"] },
   "intake-dhf-008": { fields: 17, signatures: 3, conditions: 1, requiredKeys: ["client_name", "person_served_signature"] },

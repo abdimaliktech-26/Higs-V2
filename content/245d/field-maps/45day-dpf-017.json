@@ -1,0 +1,153 @@
+{
+  "templateName": "45-Day \u2014 DPF-017 Service Outcome and Support",
+  "coordinateUnits": "pdf-points-top-down",
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "fields": [
+    {
+      "fieldKey": "client_name",
+      "name": "Name",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 66.8,
+      "posY": 124,
+      "width": 218.2,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "outcome_number",
+      "name": "Outcome number",
+      "fieldType": "text",
+      "pageNumber": 1,
+      "posX": 341.5,
+      "posY": 124,
+      "width": 228.5,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "development_date",
+      "name": "Date of development",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 135.0,
+      "posY": 136,
+      "width": 150.0,
+      "height": 12,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "projected_start_date",
+      "name": "Projected start date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 226.0,
+      "posY": 149,
+      "width": 344.0,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "review_date",
+      "name": "Progress review date",
+      "fieldType": "date",
+      "pageNumber": 1,
+      "posX": 444.4,
+      "posY": 162,
+      "width": 125.6,
+      "height": 12,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "outcome_statement",
+      "name": "Outcome statement with measurable criteria",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 207,
+      "width": 528,
+      "height": 25,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "support_methods",
+      "name": "Methods or actions to support the person",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 246,
+      "width": 528,
+      "height": 24,
+      "isRequired": true
+    },
+    {
+      "fieldKey": "environment_changes",
+      "name": "Changes to physical and social environments",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 284,
+      "width": 528,
+      "height": 25,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "equipment_materials",
+      "name": "Equipment and/or materials required",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 323,
+      "width": 528,
+      "height": 24,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "communication_techniques",
+      "name": "Techniques consistent with communication mode",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 361,
+      "width": 528,
+      "height": 25,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "learning_techniques",
+      "name": "Techniques consistent with learning style",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 400,
+      "width": 528,
+      "height": 24,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "data_collection",
+      "name": "Data collection method",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 438,
+      "width": 528,
+      "height": 24,
+      "isRequired": false
+    },
+    {
+      "fieldKey": "responsible_staff",
+      "name": "Staff or positions responsible",
+      "fieldType": "textarea",
+      "pageNumber": 1,
+      "posX": 42,
+      "posY": 476,
+      "width": 528,
+      "height": 60,
+      "isRequired": false
+    }
+  ]
+}
